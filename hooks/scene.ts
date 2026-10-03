@@ -9,7 +9,8 @@ const OPEN_Y = WALL + TOP_H + WALL // 員工區起點（24）
 const UNIT_W = 11
 const UNIT_H = 12
 const CLUSTER_W = UNIT_W * 2 + 1 // 23：兩張桌＋直隔板
-const CLUSTER_H = UNIT_H * 2 + 2 // 26：兩排桌＋橫隔板（偶數，名牌才對得齊終端列）
+const ROW_SPLIT = 4 // 上下兩排桌子之間的走道（偶數）
+const CLUSTER_H = UNIT_H * 2 + 2 + ROW_SPLIT // 30：兩排桌＋橫隔板＋走道（偶數，名牌才對得齊終端列）
 const AISLE = 6
 const CLUSTER_GAP = 4
 const BOTTOM = 10 // 底部走廊＋牆
@@ -97,7 +98,7 @@ export function layout(width: number, rows: number) {
   const seats: Seat[] = []
   for (const k of clusters) {
     seats.push({ x: k.x, y: k.y }, { x: k.x + UNIT_W + 1, y: k.y })
-    seats.push({ x: k.x, y: k.y + UNIT_H + 2 }, { x: k.x + UNIT_W + 1, y: k.y + UNIT_H + 2 })
+    seats.push({ x: k.x, y: k.y + UNIT_H + 2 + ROW_SPLIT }, { x: k.x + UNIT_W + 1, y: k.y + UNIT_H + 2 + ROW_SPLIT })
   }
   const officeW = Math.max(22, Math.floor((width - 2 * WALL) * 0.45))
   const officeX = width - WALL - officeW

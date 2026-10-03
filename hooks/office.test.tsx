@@ -27,10 +27,17 @@ function cellText(cells: string, width: number, rows: number): string[] {
   return lines
 }
 
+test('floor plan: the two desk rows of a cluster have an aisle between them', () => {
+  const L = layout(60, 40)
+  const ys = [...new Set(L.seats.map(s => s.y))].sort((a, b) => a - b)
+  expect(ys[1] - ys[0]).toBe(12 + 2 + 4) // 桌高 12 ＋ 橫隔板 2 ＋ 走道 4
+})
+
 test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 columns, more rows when taller', () => {
   expect(layout(48, 32).seats).toHaveLength(4)
   expect(layout(60, 32).seats).toHaveLength(8)
-  expect(layout(60, 47).seats).toHaveLength(16)
+  expect(layout(60, 47).seats).toHaveLength(8) // 座位群變高（上下排之間有走道），47 列只排得下一排座位群
+  expect(layout(60, 52).seats).toHaveLength(16)
   expect(sceneRows(undefined)).toBe(32)
   expect(sceneRows(20)).toBe(32)
   expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
