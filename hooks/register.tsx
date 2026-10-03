@@ -456,12 +456,14 @@ export const register: Register = on => {
 
     const { Box, Raster, Button, Text } = $.ui.resolve(e)
     width = sceneWidth(e.props.bodyColumns)
-    rows = sceneRows(e.viewport?.rows === undefined ? undefined : e.viewport.rows - 2) // 留一列給按鈕
+    rows = sceneRows(e.props.scroll?.bodyRows) // 撐滿面板，扣掉預留空白與按鈕列
     lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined)
 
     return (
       <Box flexDirection="column">
         <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
+        {/* 預留一列：之後放小對話框或更多按鈕 */}
+        <Text key="reserved"> </Text>
         <Box flexDirection="row">
           <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />
           <Text> </Text>

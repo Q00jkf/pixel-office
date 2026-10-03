@@ -76,9 +76,10 @@ export function sceneWidth(bodyColumns: number): number {
   return Math.max(MIN_W, Math.min(bodyColumns, MAX_W))
 }
 
-/** 終端列數 → 場景列數（至少 32 列，才放得下上排房間＋一排座位群＋走廊） */
-export function sceneRows(terminalRows: number | undefined): number {
-  return Math.max(32, (terminalRows ?? 42) - 10)
+/** 面板內容區列數 → 場景列數：扣掉預留空白 1 列＋按鈕 1 列；至少 32 列才放得下上排房間＋一排座位群＋走廊 */
+export const RESERVED_ROWS = 2
+export function sceneRows(bodyRows: number | undefined): number {
+  return Math.max(32, (bodyRows ?? 34) - RESERVED_ROWS)
 }
 
 export type Seat = { x: number; y: number }

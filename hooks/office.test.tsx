@@ -33,6 +33,7 @@ test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 co
   expect(layout(60, 47).seats).toHaveLength(16)
   expect(sceneRows(undefined)).toBe(32)
   expect(sceneRows(20)).toBe(32)
+  expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
   expect(sceneWidth(20)).toBe(48)
   // 名牌要對齊終端列：每個座位的 y 都是偶數
   for (const s of layout(112, 60).seats) expect(s.y % 2).toBe(0)
@@ -381,4 +382,16 @@ test('models can read the roster through office_roster', async ($, on) => {
   expect(typeof out.result).toBe('string')
   expect(out.result).toContain('| IT |')
   expect(out.result).toContain('MODS')
+})
+
+test('the scene fills the pane height and leaves one reserved row above the buttons', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount({ ...PANE_PROPS, props: { ...PANE_PROPS.props, scroll: { offset: 0, bodyRows: 50 } } })
+  const raster = await ui.find({ type: 'Raster', key: 'scene' })
+  expect((raster!.props as any).rows).toBe(48)
+  const tree: any = await ui.drawn()
+  // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box'])
+  await ui.unmount()
 })
