@@ -9,8 +9,9 @@ const OPEN_Y = WALL + TOP_H + WALL // 員工區起點（24）
 const UNIT_W = 11
 const UNIT_H = 12
 const CLUSTER_W = UNIT_W * 2 + 1 // 23：兩張桌＋直隔板
-const ROW_SPLIT = 4 // 上下兩排桌子之間的走道（偶數）
-const CLUSTER_H = UNIT_H * 2 + 2 + ROW_SPLIT // 30：兩排桌＋橫隔板＋走道（偶數，名牌才對得齊終端列）
+const ROW_SPLIT = 8 // 上下兩排桌子之間的走道（4 個終端列；偶數）
+const CLUSTER_H = UNIT_H * 2 + 2 + ROW_SPLIT // 34：兩排桌＋橫隔板＋走道（偶數，名牌才對得齊終端列）
+const AREA_TOP = 2 + 8 // 員工座位區離上方內牆的距離（原 2，往下移 4 個終端列）
 const AISLE = 6
 const CLUSTER_GAP = 4
 const BOTTOM = 10 // 底部走廊＋牆
@@ -77,10 +78,11 @@ export function sceneWidth(bodyColumns: number): number {
   return Math.max(MIN_W, Math.min(bodyColumns, MAX_W))
 }
 
-/** 面板內容區列數 → 場景列數：扣掉預留空白 1 列＋按鈕 1 列；至少 32 列才放得下上排房間＋一排座位群＋走廊 */
+/** 面板內容區列數 → 場景列數：扣掉預留空白 1 列＋按鈕 1 列；至少 40 列才放得下上排房間＋一排座位群＋走廊 */
 export const RESERVED_ROWS = 2
+export const MIN_ROWS = 40 // 2*40=80 像素 ≥ 上排房間 24＋座位區上緣 10＋座位群 34＋走廊 10
 export function sceneRows(bodyRows: number | undefined): number {
-  return Math.max(32, (bodyRows ?? 34) - RESERVED_ROWS)
+  return Math.max(MIN_ROWS, (bodyRows ?? MIN_ROWS + RESERVED_ROWS) - RESERVED_ROWS)
 }
 
 export type Seat = { x: number; y: number }
@@ -90,10 +92,10 @@ export function layout(width: number, rows: number) {
   const cols = Math.max(1, Math.floor((width - 2 * WALL - 2 + AISLE) / (CLUSTER_W + AISLE)))
   const total = cols * CLUSTER_W + (cols - 1) * AISLE
   const x0 = Math.floor((width - total) / 2)
-  const clusterRows = Math.max(1, Math.floor((h - OPEN_Y - 2 - BOTTOM + CLUSTER_GAP) / (CLUSTER_H + CLUSTER_GAP)))
+  const clusterRows = Math.max(1, Math.floor((h - OPEN_Y - AREA_TOP - BOTTOM + CLUSTER_GAP) / (CLUSTER_H + CLUSTER_GAP)))
   const clusters: Seat[] = []
   for (let r = 0; r < clusterRows; r++) {
-    for (let c = 0; c < cols; c++) clusters.push({ x: x0 + c * (CLUSTER_W + AISLE), y: OPEN_Y + 2 + r * (CLUSTER_H + CLUSTER_GAP) })
+    for (let c = 0; c < cols; c++) clusters.push({ x: x0 + c * (CLUSTER_W + AISLE), y: OPEN_Y + AREA_TOP + r * (CLUSTER_H + CLUSTER_GAP) })
   }
   const seats: Seat[] = []
   for (const k of clusters) {

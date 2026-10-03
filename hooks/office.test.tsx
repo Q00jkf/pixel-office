@@ -30,16 +30,17 @@ function cellText(cells: string, width: number, rows: number): string[] {
 test('floor plan: the two desk rows of a cluster have an aisle between them', () => {
   const L = layout(60, 40)
   const ys = [...new Set(L.seats.map(s => s.y))].sort((a, b) => a - b)
-  expect(ys[1] - ys[0]).toBe(12 + 2 + 4) // 桌高 12 ＋ 橫隔板 2 ＋ 走道 4
+  expect(ys[1] - ys[0]).toBe(12 + 2 + 8) // 桌高 12 ＋ 橫隔板 2 ＋ 走道 8
+  expect(ys[0]).toBe(24 + 10) // 座位區離上方內牆 10 像素
 })
 
 test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 columns, more rows when taller', () => {
   expect(layout(48, 32).seats).toHaveLength(4)
   expect(layout(60, 32).seats).toHaveLength(8)
-  expect(layout(60, 47).seats).toHaveLength(8) // 座位群變高（上下排之間有走道），47 列只排得下一排座位群
-  expect(layout(60, 52).seats).toHaveLength(16)
-  expect(sceneRows(undefined)).toBe(32)
-  expect(sceneRows(20)).toBe(32)
+  expect(layout(60, 47).seats).toHaveLength(8) // 47 列只排得下一排座位群
+  expect(layout(60, 58).seats).toHaveLength(16)
+  expect(sceneRows(undefined)).toBe(40)
+  expect(sceneRows(20)).toBe(40)
   expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
   expect(sceneWidth(20)).toBe(48)
   // 名牌要對齊終端列：每個座位的 y 都是偶數
@@ -401,4 +402,10 @@ test('the scene fills the pane height and leaves one reserved row above the butt
   // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
   expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box'])
   await ui.unmount()
+})
+
+test('at the minimum height the first cluster still clears the corridor (cat and copier)', () => {
+  const L = layout(48, 40)
+  const lowest = Math.max(...L.seats.map(s => s.y + 12))
+  expect(lowest).toBeLessThanOrEqual(L.h - 10) // 底部走廊 10 像素
 })
