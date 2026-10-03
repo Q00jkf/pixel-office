@@ -628,7 +628,9 @@ export const register: Register = on => {
             )}
           </Box>
         ) : (
-          <Text key="reserved"> </Text>
+          <Text key="reserved" dimColor>
+            個人按鈕：建 ~/.claude/pixel-office/buttons.json（範例 buttons.example.json，見 README）
+          </Text>
         )}
         <Box flexDirection="row">
           <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />

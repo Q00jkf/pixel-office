@@ -23,6 +23,7 @@
 | `/office title <職稱>` | 職稱（最多 16 字，可中文；不畫在圖上，名單裡看得到） |
 | `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態 |
 | `/office agent <名稱>` | 登記 ListAgents 名稱，別人傳訊息給你時才畫得出紙飛機 |
+| `/office buttons` | 重讀個人按鈕設定（`~/.claude/pixel-office/buttons.json`，見下方「個人按鈕」） |
 | `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
 | 面板按鈕「升為主管／設為員工」(`r`)、「餵貓」(`c`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
@@ -30,7 +31,14 @@
 
 ## 個人按鈕（不進 repo）
 
-在自己電腦建 `~/.claude/pixel-office/buttons.json`，按鈕會出現在辦公室與下方按鈕列之間那一列（最多 6 顆）：
+在自己電腦建 `~/.claude/pixel-office/buttons.json`，按鈕會出現在辦公室與下方按鈕列之間那一列（最多 6 顆）。
+最快的做法是複製 plugin 附的範例檔再改：
+
+```
+cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-office/buttons.json
+```
+
+內容長這樣：
 
 ```json
 [

@@ -405,7 +405,8 @@ test('the scene fills the pane height and leaves one reserved row above the butt
   expect((raster!.props as any).rows).toBe(48)
   const tree: any = await ui.drawn()
   // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
-  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box']) // 沒有個人按鈕：空一列
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box']) // 沒有個人按鈕：顯示提示
+  expect((await ui.find({ type: 'Text', text: /buttons\.json/ }))?.text).toContain('個人按鈕')
   await ui.unmount()
 })
 
@@ -579,3 +580,4 @@ test('the reserved row shows personal buttons; a slash prompt runs as a command,
   expect(submitted.some(e => e.text === 'hi there')).toBe(true)
   await ui.unmount()
 })
+
