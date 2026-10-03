@@ -442,3 +442,47 @@ test('the model can declare auto mode through office_profile', async ($, on) => 
   expect(out.result).toContain('模式＝auto')
   expect(JSON.parse(writes[writes.length - 1]).auto).toBe(true)
 })
+
+// ---------- 0.3.7：自動登記與名牌 ----------
+
+import { plateFromAgent, selfFromListAgents } from './register'
+
+test('plates are derived from the ListAgents name', () => {
+  expect(plateFromAgent('llm-wiki-aegiverse-55')).toBe('55')
+  expect(plateFromAgent('user-30')).toBe('30')
+  expect(plateFromAgent('MODS 規則與設定')).toBe('MODS')
+  expect(plateFromAgent('規則')).toBeUndefined()
+})
+
+test('the session name is read from ListAgents output', () => {
+  const out = 'This session is llm-wiki-aegiverse-ff [957775] — the name other sessions use to message it.\n\nPeer sessions (3):'
+  expect(selfFromListAgents(out)).toBe('llm-wiki-aegiverse-ff')
+  expect(selfFromListAgents('MODS 規則與設定 [16e6c8]')).toBeUndefined()
+  expect(selfFromListAgents('This session is MODS 規則與設定 [16e6c8] — x')).toBe('MODS 規則與設定')
+})
+
+test('registering an agent also sets a short plate when the plate is still the default', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'llm-wiki-aegiverse-55' } as any)
+  expect(out.result).toContain('名牌自動設為 55')
+  expect(JSON.parse(writes[writes.length - 1]).name).toBe('55')
+  // 自己設過名牌之後，再登記 agent 不會蓋掉
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', name: 'mine' } as any)
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'llm-wiki-aegiverse-ff' } as any)
+  expect(JSON.parse(writes[writes.length - 1]).name).toBe('mine')
+})
+
+test('running ListAgents registers the session automatically', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('tool.call', (_$, e) =>
+    String(e.tool) === 'ListAgents'
+      ? ({ result: 'ok', text: 'This session is llm-wiki-aegiverse-ff [957775] — the name other sessions use.' } as any)
+      : undefined,
+  )
+  await $.tool.call({ tool: 'ListAgents' } as any)
+  const last = JSON.parse(writes[writes.length - 1])
+  expect(last.agent).toBe('llm-wiki-aegiverse-ff')
+  expect(last.name).toBe('ff')
+})

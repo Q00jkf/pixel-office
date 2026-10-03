@@ -26,6 +26,7 @@ let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
 let permissionMode = ''
+let defaultName = 'me' // 預設名牌（初始值同 me.name，session.start 改成資料夾推出的值）；名牌仍是它時才自動改
 let notices: Notice[] = []
 // 每位同事上一次看到的送信／收信時間與狀態；第一次看到只記錄、不觸發（避免開面板時重播舊事件）
 const seenSent = new Map<string, number | undefined>()
@@ -74,6 +75,19 @@ async function sharedDir($: EngineInterface): Promise<string> {
     dir = `${home.replace(/\\/g, '/')}/.claude/pixel-office/sessions`
   }
   return dir
+}
+
+/** 從 ListAgents 名稱推名牌：取最後一段（llm-wiki-aegiverse-55 → 55），只留英數字；推不出來回 undefined */
+export function plateFromAgent(agent: string): string | undefined {
+  const ascii = agent.replace(/[^\x21-\x7e]/g, ' ').trim()
+  const last = ascii.split(/[\s-]+/).filter(Boolean).pop() ?? ''
+  return validName(last) ? last : undefined
+}
+
+/** 從 ListAgents 的輸出抓自己的名稱（「This session is X [ref]」） */
+export function selfFromListAgents(text: string): string | undefined {
+  const m = text.match(/This session is (.+?) \[[0-9a-f]+\]/)
+  return m ? m[1].trim() : undefined
 }
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
@@ -253,6 +267,13 @@ async function applyProfile(
     if (a.length === 0 || a.length > 64) return `agent 名稱「${input.agent}」不行：要 1～64 字（用 ListAgents 顯示的 This session is 後面那個名稱）。`
     agent = a
     notes.push(`agent＝${agent}`)
+    if (input.name === undefined && name === defaultName) {
+      const derived = plateFromAgent(a)
+      if (derived) {
+        name = derived
+        notes.push(`名牌自動設為 ${derived}`)
+      }
+    }
   }
   if (input.role !== undefined) {
     const parsed = parseRole(input.role)
@@ -306,7 +327,8 @@ export const register: Register = on => {
       inputSchema: { type: 'object', properties: {} },
     })
     const id = await $.session.id()
-    me = { ...me, id, name: plateName(await $.session.cwd(), id) }
+    defaultName = plateName(await $.session.cwd(), id)
+    me = { ...me, id, name: defaultName }
     // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
     let saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string; agent?: string; title?: string; auto?: boolean } | undefined
     const own = await readOwnStatus($, id)
@@ -337,10 +359,20 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session。(1) 若你還沒登記，第一次用到 ListAgents 時，把「This session is X」的 X 用 mcp__pixel-office__office_profile(agent=X) 登記一次，別人傳訊息給你時辦公室才找得到你。(2) 被指派或卸下主管等角色時，呼叫同一個工具更新 role（主管／員工）；職稱 title（例如 IT、查證）與名牌 name（短代號）也可順便設。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。只影響畫面，不影響權限。',
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
+  })
+
+  // 用到 ListAgents 時，從輸出抓「This session is X」自動登記（不用模型配合）
+  on('tool.call', { tool: 'ListAgents' }, async ($, e, next) => {
+    const ran = await next(e)
+    try {
+      const self = ran.deny === undefined ? selfFromListAgents(ran.text ?? '') : undefined
+      if (self && self !== me.agent) await applyProfile($, { agent: self })
+    } catch {}
+    return ran
   })
 
   // office_profile 不要延後載入：開場就讓模型看到完整說明（user-30 2026-10-03 指出 deferred 時說明不會觸發）
