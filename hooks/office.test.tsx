@@ -340,3 +340,45 @@ test('another session starting to wait pops a toast here', async ($, on) => {
   await $.command.run({ command: 'office', args: '' } as any) // b 進入等待 → toast
   expect(toasts.some(t => t.includes('u30') && t.includes('核准'))).toBe(true)
 })
+
+// ---------- 0.3.0：職稱與名單 ----------
+
+import { roster } from './register'
+
+test('the roster lists manager first, with title, role, ListAgents name and what each is doing', () => {
+  const crew: Coworker[] = [
+    { ...P('a', 'IT', 'waiting', true), title: 'IT', agent: 'MODS 規則與設定', tool: 'Bash' },
+    { ...P('b', '30', 'thinking', false, 'manager'), title: '協作主管', agent: 'user-30' },
+    { ...P('c', 'LLM-Wiki-AEGIVERSE') },
+  ]
+  const text = roster(crew, 0)
+  const lines = text.split('\n')
+  expect(lines[0]).toContain('3 人在線')
+  expect(lines[3]).toContain('30') // 主管排第一列
+  expect(lines[3]).toContain('協作主管')
+  expect(lines[3]).toContain('user-30')
+  expect(text).toContain('▶ IT')
+  expect(text).toContain('等待核准權限（Bash）')
+  expect(text).toContain('未登記')
+})
+
+test('/office title sets a free-text title (Chinese ok) and /office who prints the roster', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  expect((await $.command.run({ command: 'office', args: 'title 系統管理' } as any)).text).toContain('職稱＝系統管理')
+  expect(JSON.parse(writes[writes.length - 1]).title).toBe('系統管理')
+  expect((await $.command.run({ command: 'office', args: 'title 這個職稱真的非常非常非常非常非常長喔' } as any)).text).toContain('太長')
+  const who = (await $.command.run({ command: 'office', args: 'who' } as any)).text!
+  expect(who).toContain('像素辦公室名單')
+  expect(who).toContain('系統管理')
+})
+
+test('models can read the roster through office_roster', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', title: 'IT', agent: 'MODS' } as any)
+  const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_roster' } as any)
+  expect(typeof out.result).toBe('string')
+  expect(out.result).toContain('| IT |')
+  expect(out.result).toContain('MODS')
+})
