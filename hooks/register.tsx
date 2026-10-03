@@ -25,6 +25,7 @@ let nightMode = false
 let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
+let permissionMode = ''
 let notices: Notice[] = []
 // 每位同事上一次看到的送信／收信時間與狀態；第一次看到只記錄、不觸發（避免開面板時重播舊事件）
 const seenSent = new Map<string, number | undefined>()
@@ -75,6 +76,18 @@ async function sharedDir($: EngineInterface): Promise<string> {
   return dir
 }
 
+/** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
+async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: Role; name?: string; agent?: string; title?: string } | undefined> {
+  try {
+    const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
+    const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
+    const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title) }
+  } catch {
+    return undefined
+  }
+}
+
 // 把自己的狀態寫到共用資料夾：一個 session 一個檔，不會互相覆蓋
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
@@ -120,8 +133,10 @@ export function roster(list: Coworker[], now: number): string {
 }
 
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
-export function waitsForApproval(decision: string, toolUseId: string | undefined): boolean {
-  return decision === 'ask' && toolUseId !== undefined
+const NO_HUMAN_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']) // 這些模式下的 ask 不會等人按
+
+export function waitsForApproval(decision: string, toolUseId: string | undefined, mode = ''): boolean {
+  return decision === 'ask' && toolUseId !== undefined && !NO_HUMAN_MODES.has(mode)
 }
 
 /** 收件者名稱 → 辦公室裡的人：比對大家登記的 agent（ListAgents 名稱） */
@@ -282,7 +297,10 @@ export const register: Register = on => {
     })
     const id = await $.session.id()
     me = { ...me, id, name: plateName(await $.session.cwd(), id) }
-    const saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string } | undefined
+    // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
+    let saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string; agent?: string; title?: string } | undefined
+    const own = await readOwnStatus($, id)
+    if (own) saved = { role: saved?.role ?? own.role, name: saved?.name ?? own.name, agent: saved?.agent ?? own.agent, title: saved?.title ?? own.title }
     if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
     if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
     const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
@@ -355,11 +373,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // 記下目前的權限模式（PreToolUse 在 tool.check 之前；auto 模式的 ask 由分類器決定，不算等人核准）
+  on('classic.PreToolUse', ($, e, next) => {
+    const mode = (e as { permission_mode?: unknown }).permission_mode
+    if (typeof mode === 'string') permissionMode = mode
+    return next(e)
+  })
+
   // 引擎判定這次工具呼叫要「問」→ 等待核准（舉手＋黃色問號，其他視窗跳 toast）
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     try {
-      if (waitsForApproval(verdict.decision, e.tool_use_id)) await setMode($, 'waiting', String(e.tool))
+      if (waitsForApproval(verdict.decision, e.tool_use_id, permissionMode)) await setMode($, 'waiting', String(e.tool))
     } catch {}
     return verdict
   })

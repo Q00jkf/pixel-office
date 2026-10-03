@@ -328,6 +328,11 @@ test('only a real call judged ask counts as waiting for approval', () => {
   expect(waitsForApproval('ask', undefined)).toBe(false) // $.tool.check 查詢
   expect(waitsForApproval('allow', 'toolu_1')).toBe(false)
   expect(waitsForApproval('deny', 'toolu_1')).toBe(false)
+  // auto／bypass／dontAsk 模式的 ask 不等人：交給分類器或直接決定
+  expect(waitsForApproval('ask', 'toolu_1', 'auto')).toBe(false)
+  expect(waitsForApproval('ask', 'toolu_1', 'bypassPermissions')).toBe(false)
+  expect(waitsForApproval('ask', 'toolu_1', 'default')).toBe(true)
+  expect(waitsForApproval('ask', 'toolu_1', 'acceptEdits')).toBe(true)
 })
 
 test('another session starting to wait pops a toast here', async ($, on) => {
