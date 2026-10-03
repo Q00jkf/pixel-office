@@ -34,6 +34,7 @@ const C = {
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, heart: 0xff4081, heartBowl: 0x90a4ae,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
+  wait: 0xffca28, waitDark: 0xff8f00, plane: 0xf1f8ff, planeFold: 0xb0bec5, envelope: 0xfff8e1, envelopeLine: 0xd84315,
 }
 const BOOKS = [0xef5350, 0x42a5f5, 0x66bb6a, 0xffca28, 0xab47bc, 0x26c6da, 0x8d6e63]
 const SHIRTS = [0xd97757, 0x5c6bc0, 0x26a69a, 0xec407a, 0x7e57c2, 0x66bb6a, 0x8d6e63, 0x29b6f6]
@@ -181,6 +182,7 @@ function screenPixel(mode: OfficeMode | null, frame: number, i: number): number 
   if (mode === 'typing') return (i + frame) % 3 === 0 ? C.code : C.codeDim
   if (mode === 'reading') return i % 2 ? C.white : C.ink
   if (mode === 'error') return frame % 2 ? C.err : C.errDark
+  if (mode === 'waiting') return frame % 2 ? C.wait : C.waitDark
   if (mode === 'done') return C.ok
   if (mode === 'thinking') return C.screenDim
   return i === frame % 6 ? C.white : C.screen
@@ -373,6 +375,13 @@ function person(p: Px, cx: number, cy: number, who: Coworker, frame: number, dir
     p.set(cx + 2, cy, C.skin)
     p.rect(cx + 4, cy - 1, 1, 2, C.err)
     p.set(cx + 4, cy + 2, C.err)
+  } else if (mode === 'waiting') {
+    // 舉右手
+    p.set(cx + 3, sy - 1, C.skin)
+    p.set(cx + 3, sy - 2, C.skin)
+    p.set(cx - 2, handY, C.skin)
+    // 頭上閃黃色問號
+    if (frame % 2 === 0) for (const [dx, dy] of [[-1, -4], [0, -5], [1, -4], [0, -3], [0, -1]]) p.set(cx + dx, cy + dy, C.wait)
   } else {
     p.set(cx - 2, handY, C.skin)
     p.set(cx + 2, handY, C.skin)
@@ -517,7 +526,7 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
 // ---------- 夜間模式：整體變暗，只留螢幕、指示燈、檯燈；窗外是夜空 ----------
 
 function nightify(p: Px, frame: number) {
-  const glow = new Set([C.screen, C.screenDim, C.code, C.codeDim, C.err, C.errDark, C.ok, C.led, C.gold, C.spark, C.heart])
+  const glow = new Set([C.screen, C.screenDim, C.code, C.codeDim, C.err, C.errDark, C.ok, C.led, C.gold, C.spark, C.heart, C.wait, C.waitDark])
   for (let i = 0; i < p.px.length; i++) {
     const c = p.px[i]
     if (c === C.glass || c === C.glassHi) p.px[i] = C.nightSky
@@ -531,7 +540,37 @@ function nightify(p: Px, frame: number) {
 
 export type Scene = { px: Uint32Array; labels: Label[]; width: number; rows: number }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number }
+/** 紙飛機：從寄件者座位飛到收件者座位 */
+export type Plane = { from: Seat; to: Seat; start: number }
+/** 收件者頭上的信封：在 [start, end) 期間顯示 */
+export type Notice = { id: string; start: number; end: number }
+
+export const PLANE_FRAMES = 10 // 約 2.5 秒飛到
+export const NOTICE_FRAMES = 10
+
+export function planePos(pl: Plane, frame: number): (Seat & { dx: number }) | null {
+  const t = (frame - pl.start) / PLANE_FRAMES
+  if (t < 0 || t > 1) return null
+  // 中途往上拱一點，像拋物線
+  const arc = Math.round(Math.sin(Math.PI * t) * 4)
+  return { x: Math.round(pl.from.x + (pl.to.x - pl.from.x) * t), y: Math.round(pl.from.y + (pl.to.y - pl.from.y) * t) - arc, dx: Math.sign(pl.to.x - pl.from.x) || 1 }
+}
+
+function plane(p: Px, at: Seat & { dx: number }) {
+  const s = at.dx
+  p.set(at.x, at.y, C.plane)
+  p.set(at.x - s, at.y - 1, C.plane)
+  p.set(at.x - s, at.y + 1, C.planeFold)
+  p.set(at.x - 2 * s, at.y, C.plane)
+  p.set(at.x - 2 * s, at.y - 1, C.planeFold)
+}
+
+function envelope(p: Px, x: number, y: number) {
+  p.rect(x, y, 3, 2, C.envelope)
+  p.set(x + 1, y, C.envelopeLine)
+}
+
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[] }
 
 export function drawScene(
   crew: Coworker[],
@@ -566,6 +605,15 @@ export function drawScene(
   for (const [id, at] of moving) {
     const who = byId.get(id)
     if (who) walking(p, at, who, frame)
+  }
+
+  for (const n of opts.notices ?? []) {
+    const pl = placed.get(n.id)
+    if (pl && frame >= n.start && frame < n.end && frame % 2 === 0) envelope(p, pl.stand.x + 3, pl.stand.y - 3)
+  }
+  for (const pl of opts.planes ?? []) {
+    const at = planePos(pl, frame)
+    if (at) plane(p, at)
   }
 
   cat(p, crew.some(c => c.mode === 'error'), frame, opts.treatFrame, opts.catOffset)

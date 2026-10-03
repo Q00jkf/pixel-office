@@ -263,3 +263,80 @@ test('the system prompt gets one short pixel-office section', async ($, on) => {
   expect(ids).toEqual(['intro', 'pixel-office:role'])
   expect(out.sections[1].text).toContain('office_profile')
 })
+
+// ---------- 紙飛機、等待核准 ----------
+
+import { PLANE_FRAMES, planePos } from './scene'
+import { findRecipient, waitsForApproval } from './register'
+
+test('waiting for permission: raised hand, yellow ? and a yellow screen', () => {
+  const s = drawScene([P('a', 'x', 'waiting', true)], 2, 60, 40)
+  expect([...s.px].some(c => c === 0xffca28)).toBe(true)
+})
+
+test('a paper plane flies from sender to recipient along an arc, then lands', () => {
+  const pl = { from: { x: 10, y: 40 }, to: { x: 40, y: 30 }, start: 100 }
+  expect(planePos(pl, 99)).toBeNull()
+  expect(planePos(pl, 100)).toMatchObject({ x: 10, y: 40 })
+  const mid = planePos(pl, 100 + PLANE_FRAMES / 2)!
+  expect(mid.x).toBe(25)
+  expect(mid.y).toBeLessThan(35) // 拋物線：中途比直線高
+  expect(planePos(pl, 100 + PLANE_FRAMES)).toMatchObject({ x: 40, y: 30 })
+  expect(planePos(pl, 101 + PLANE_FRAMES)).toBeNull()
+  const s = drawScene([], 100 + PLANE_FRAMES / 2, 60, 40, [], undefined, { planes: [pl] })
+  expect([...s.px].some(c => c === 0xf1f8ff)).toBe(true)
+})
+
+test('recipients are found by their registered ListAgents name, with or without a [ref]', () => {
+  const crew = [{ ...P('b', 'u30'), agent: 'user-30' }, { ...P('c', 'e2'), agent: 'llm-wiki-aegiverse-6a' }]
+  expect(findRecipient(crew, 'user-30')?.id).toBe('b')
+  expect(findRecipient(crew, 'llm-wiki-aegiverse-6a [a38cb7]')?.id).toBe('c')
+  expect(findRecipient(crew, 'nobody')).toBeUndefined()
+})
+
+test('sending a message records who it went to', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('session.send', () => ({ isDelivered: true }) as any)
+  await ($ as any).session.send({ to: 'user-30', text: 'hi' })
+  const last = JSON.parse(writes[writes.length - 1])
+  expect(last.sentTo).toBe('user-30')
+  expect(typeof last.sentAt).toBe('number')
+})
+
+test('office_profile registers the ListAgents name (agent)', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'user-30 [b11cf3]' } as any)
+  expect(out.result).toContain('agent＝user-30')
+  expect(JSON.parse(writes[writes.length - 1]).agent).toBe('user-30')
+})
+
+// 測試環境的 $.tool.call 不經過 tool.check（實測：只有 $.tool.check 查詢會觸發，且查詢不帶 tool_use_id），
+// 所以這裡驗判斷函式；真實呼叫的切換要在 session 裡實測
+test('only a real call judged ask counts as waiting for approval', () => {
+  expect(waitsForApproval('ask', 'toolu_1')).toBe(true)
+  expect(waitsForApproval('ask', undefined)).toBe(false) // $.tool.check 查詢
+  expect(waitsForApproval('allow', 'toolu_1')).toBe(false)
+  expect(waitsForApproval('deny', 'toolu_1')).toBe(false)
+})
+
+test('another session starting to wait pops a toast here', async ($, on) => {
+  const NOW = 1_000_000
+  let mode = 'typing'
+  const toasts: string[] = []
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: NOW }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [{ name: 'b.json', kind: 'file', size: 1, mtimeMs: NOW, isLink: false }] }) as any)
+  on('fs.read', () => ({ value: JSON.stringify({ id: 'b', name: 'u30', role: 'staff', mode, tool: 'Bash', updatedAt: NOW, left: false }) }))
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('ui.toast', (_$, e: any) => {
+    toasts.push(String(e.text ?? e))
+    return { value: undefined } as any
+  })
+  await $.command.run({ command: 'office', args: '' } as any) // 第一次看到 b：只記錄
+  mode = 'waiting'
+  await $.command.run({ command: 'office', args: '' } as any) // b 進入等待 → toast
+  expect(toasts.some(t => t.includes('u30') && t.includes('核准'))).toBe(true)
+})

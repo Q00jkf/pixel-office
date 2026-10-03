@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, OfficeMode, Role } from '../types'
-import { TREAT_FRAMES, assignSeats, drawScene, encode, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
-import type { Placement, SceneOptions, Walker } from './scene'
+import { NOTICE_FRAMES, PLANE_FRAMES, TREAT_FRAMES, assignSeats, drawScene, encode, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
@@ -24,8 +24,18 @@ let walkers: Walker[] = []
 let nightMode = false
 let treatFrame: number | undefined
 let catOffset = 0
+let planes: Plane[] = []
+let notices: Notice[] = []
+// 每位同事上一次看到的送信／收信時間與狀態；第一次看到只記錄、不觸發（避免開面板時重播舊事件）
+const seenSent = new Map<string, number | undefined>()
+const seenGot = new Map<string, number | undefined>()
+const seenMode = new Map<string, OfficeMode>()
 
-const sceneOpts = (): SceneOptions => ({ night: nightMode, treatFrame, catOffset })
+const sceneOpts = (): SceneOptions => {
+  planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
+  notices = notices.filter(n => frame < n.end)
+  return { night: nightMode, treatFrame, catOffset, planes, notices }
+}
 
 // 餵貓：把上一次吃飯停下的時間併進位移，再開始新的一次
 function feedCat() {
@@ -69,7 +79,7 @@ async function sharedDir($: EngineInterface): Promise<string> {
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -78,7 +88,46 @@ async function showCrew($: EngineInterface) {
   if (json === lastCrew) return
   lastCrew = json
   trackMoves(list)
+  trackEvents($, list)
   await update($, crew, () => list)
+}
+
+/** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
+export function waitsForApproval(decision: string, toolUseId: string | undefined): boolean {
+  return decision === 'ask' && toolUseId !== undefined
+}
+
+/** 收件者名稱 → 辦公室裡的人：比對大家登記的 agent（ListAgents 名稱） */
+export function findRecipient(list: Coworker[], to: string): Coworker | undefined {
+  const want = to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '') // 去掉可能附帶的 [ref]
+  return list.find(c => c.agent !== undefined && c.agent === want)
+}
+
+// 送信 → 紙飛機＋收件者信封；只收到（寄件者不在辦公室）→ 只有信封；有人開始等核准 → toast
+function trackEvents($: EngineInterface, list: Coworker[]) {
+  for (const c of list) {
+    if (seenSent.has(c.id) && c.sentAt !== undefined && c.sentAt !== seenSent.get(c.id) && c.sentTo) {
+      const target = findRecipient(list, c.sentTo)
+      const from = lastPlaced?.get(c.id)
+      const to = target ? lastPlaced?.get(target.id) : undefined
+      if (target && from && to) {
+        planes.push({ from: from.stand, to: to.stand, start: frame })
+        notices.push({ id: target.id, start: frame + PLANE_FRAMES, end: frame + PLANE_FRAMES + NOTICE_FRAMES })
+        seenGot.set(target.id, target.gotAt) // 這封信已用飛機表現，收件端不再另外亮信封
+      }
+    }
+    seenSent.set(c.id, c.sentAt)
+
+    if (seenGot.has(c.id) && c.gotAt !== undefined && c.gotAt !== seenGot.get(c.id)) {
+      notices.push({ id: c.id, start: frame, end: frame + NOTICE_FRAMES })
+    }
+    seenGot.set(c.id, c.gotAt)
+
+    if (seenMode.has(c.id) && c.mode === 'waiting' && seenMode.get(c.id) !== 'waiting' && !c.isMe) {
+      $.ui.toast(`${c.name} 在等你核准權限`)
+    }
+    seenMode.set(c.id, c.mode)
+  }
 }
 
 // 讀其他 session 的檔，丟掉已離開或太久沒心跳的
@@ -93,7 +142,18 @@ async function refresh($: EngineInterface) {
       const raw = await $.fs.read(`${d}/${entry.name}`)
       const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
       if (!s.left && typeof s.updatedAt === 'number' && now - s.updatedAt < STALE_MS) {
-        found.push({ id: String(s.id), name: String(s.name), mode: s.mode as OfficeMode, tool: String(s.tool ?? ''), isMe: false, role: s.role === 'manager' ? 'manager' : 'staff' })
+        found.push({
+          id: String(s.id),
+          name: String(s.name),
+          mode: s.mode as OfficeMode,
+          tool: String(s.tool ?? ''),
+          isMe: false,
+          role: s.role === 'manager' ? 'manager' : 'staff',
+          agent: typeof s.agent === 'string' ? s.agent : undefined,
+          sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
+          sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
+          gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
+        })
       }
     } catch {}
   }
@@ -121,10 +181,17 @@ export function validName(name: string): boolean {
 }
 
 // 角色與名牌：/office 指令和模型工具共用；依 session 編號記在 $.store
-async function applyProfile($: EngineInterface, input: { role?: string; name?: string }): Promise<string> {
+async function applyProfile($: EngineInterface, input: { role?: string; name?: string; agent?: string }): Promise<string> {
   const notes: string[] = []
   let role = me.role
   let name = me.name
+  let agent = me.agent
+  if (input.agent !== undefined) {
+    const a = input.agent.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
+    if (a.length === 0 || a.length > 64) return `agent 名稱「${input.agent}」不行：要 1～64 字（用 ListAgents 顯示的 This session is 後面那個名稱）。`
+    agent = a
+    notes.push(`agent＝${agent}`)
+  }
   if (input.role !== undefined) {
     const parsed = parseRole(input.role)
     if (parsed === undefined) return `看不懂角色「${input.role}」，請用 主管 或 員工。`
@@ -136,9 +203,9 @@ async function applyProfile($: EngineInterface, input: { role?: string; name?: s
     name = input.name
     notes.push(`名牌＝${name}`)
   }
-  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）或 name（英數字）。'
-  me = { ...me, role, name }
-  await $.store.set(`profile:${me.id}`, { role, name }).catch(() => undefined) // 存不了只是重開後不記得
+  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）或 agent（ListAgents 名稱）。'
+  me = { ...me, role, name, agent }
+  await $.store.set(`profile:${me.id}`, { role, name, agent }).catch(() => undefined) // 存不了只是重開後不記得
   await showCrew($)
   await publish($, false).catch(() => undefined)
   return `已設定：${notes.join('、')}。`
@@ -158,12 +225,13 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'office_profile',
       description:
-        '設定你在「像素辦公室」裡的角色與名牌。知道自己是主管（例如被指派為協作主管）就設 role="主管"，一般 session 設 "員工"；name 是桌上名牌，只能英數字 1～12 字，建議用你的短代號（例如 58、e2）。只影響辦公室畫面，不影響任何權限或檔案。',
+        '設定你在「像素辦公室」裡的角色、名牌與 ListAgents 名稱。知道自己是主管（例如被指派為協作主管）就設 role="主管"，一般 session 設 "員工"；name 是桌上名牌，只能英數字 1～12 字，建議用你的短代號（例如 58、e2）；agent 是 ListAgents 顯示的「This session is X」裡的 X，登記後別人傳訊息給你時辦公室會畫紙飛機。只影響辦公室畫面，不影響任何權限或檔案。',
       inputSchema: {
         type: 'object',
         properties: {
           role: { type: 'string', enum: ['主管', '員工'], description: '主管 或 員工' },
           name: { type: 'string', description: '名牌，英數字 1～12 字' },
+          agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）' },
         },
       },
     })
@@ -172,6 +240,8 @@ export const register: Register = on => {
     const saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string } | undefined
     if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
     if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
+    const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
+    if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
     await publish($, false).catch(() => undefined)
     await refresh($).catch(() => undefined)
 
@@ -190,10 +260,51 @@ export const register: Register = on => {
     const composed = await next(e)
     const section = {
       id: 'pixel-office:role',
-      text: '像素辦公室：使用者有開一個辦公室面板顯示每個 session。當你被指派或卸下主管等角色時，呼叫 mcp__pixel-office__office_profile 更新 role（主管／員工），名牌 name 可設成你的短代號。只影響畫面，不影響權限。',
+      text:
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session。(1) 若你還沒登記，第一次用到 ListAgents 時，把「This session is X」的 X 用 mcp__pixel-office__office_profile(agent=X) 登記一次，別人傳訊息給你時辦公室才找得到你。(2) 被指派或卸下主管等角色時，呼叫同一個工具更新 role（主管／員工），名牌 name 可設成你的短代號。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
+  })
+
+  // office_profile 不要延後載入：開場就讓模型看到完整說明（user-30 2026-10-03 指出 deferred 時說明不會觸發）
+  on('tool.describe', { tool: TOOL }, async ($, e, next) => {
+    const described = await next(e)
+    return { ...described, isDeferred: false }
+  })
+
+  // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
+  on('session.send', async ($, e, next) => {
+    const sent = await next(e)
+    try {
+      if (sent.isDelivered) {
+        me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
+        await showCrew($)
+        await publish($, false)
+      }
+    } catch {}
+    return sent
+  })
+
+  // 收到別的 session 的訊息：記下時間，頭上亮信封
+  on('session.receive', async ($, e, next) => {
+    try {
+      if (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message') {
+        me = { ...me, gotAt: await $.clock.now() }
+        await showCrew($)
+        await publish($, false)
+      }
+    } catch {}
+    return next(e)
+  })
+
+  // 引擎判定這次工具呼叫要「問」→ 等待核准（舉手＋黃色問號，其他視窗跳 toast）
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    try {
+      if (waitsForApproval(verdict.decision, e.tool_use_id)) await setMode($, 'waiting', String(e.tool))
+    } catch {}
+    return verdict
   })
 
   on('session.end', async ($, e, next) => {
@@ -208,7 +319,8 @@ export const register: Register = on => {
     const value = rest.join(' ')
     if (sub === 'role') return { text: await applyProfile($, { role: value }) }
     if (sub === 'name') return { text: await applyProfile($, { name: value }) }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office role 主管|員工｜/office name <英數字>' }
+    if (sub === 'agent') return { text: await applyProfile($, { agent: value }) }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office role 主管|員工｜/office name <英數字>｜/office agent <ListAgents 名稱>' }
 
     await refresh($).catch(() => undefined)
     await $.ui.open({ id: PANE, title: '像素辦公室' })
@@ -218,8 +330,8 @@ export const register: Register = on => {
 
   // 模型自己設定角色／名牌
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const input = e as unknown as { role?: string; name?: string }
-    const text = await applyProfile($, { role: input.role, name: input.name })
+    const input = e as unknown as { role?: string; name?: string; agent?: string }
+    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
     return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}）` }
