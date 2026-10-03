@@ -34,7 +34,7 @@ const C = {
   potRim: 0xa1887f, soil: 0x5d4037, leaf: 0x66bb6a, leafMid: 0x4caf50, leafDark: 0x33691e, // 不可與螢幕／完成的綠撞色碼，否則夜裡會被當成發光
   copier: 0xbdbdbd, copierTop: 0x757575, led: 0x76ff03,
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
-  cat: 0xffa726, catDark: 0xe65100, heart: 0xff4081, heartBowl: 0x90a4ae,
+  cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
   wait: 0xffca28, waitDark: 0xff8f00, plane: 0xf1f8ff, planeFold: 0xb0bec5, envelope: 0xfff8e1, envelopeLine: 0xd84315,
 }
@@ -472,27 +472,66 @@ function bossDesk(p: Px, x: number, y: number, who: Coworker | null, frame: numb
   }
 }
 
-// ---------- 貓（俯視角，四格走路） ----------
-
+// ---------- 貓（側面，12×8；俯視 RPG 的動物多畫側面，耳朵和臉才認得出是貓） ----------
+// 面向右；面向左時左右翻轉。O 橘、D 深橘（條紋、尾巴、陰影）、L 亮橘（受光）、W 奶油（口鼻、胸、腳掌）、K 眼、P 粉紅鼻
+const CAT_HEAD = [
+  '........O..O', // 兩隻三角耳
+  'D.......OOOO',
+  'D......LOKOW', // 眼睛、口鼻
+  '.D.LDLDOOOWP', // 背上條紋＋受光，粉紅鼻（尾巴從這裡接到背）
+]
 const CAT_BODY = [
-  ['.........', 'TT.GGGGDG', '..GDGDGGG', '...GGGGDG', '.........'],
-  ['.........', '...GGGGDG', '..GDGDGGG', 'TT.GGGGDG', '.........'],
+  '.OOOOOOOOWW.', // 身體 3 像素厚（含上一列的背），胸口奶油色
+  '.OOOOOOOOW..',
 ]
-// 四隻腳：[列, 欄]；左後、左前、右後、右前（也是抬腳順序）
-const CAT_LEGS: [number, number][] = [[0, 4], [0, 7], [4, 4], [4, 7]]
+// 四格走路：腳（第 7 列）與腳掌（第 8 列）的位置；1、3 格身體下沉 1 像素（接觸），0、2 格抬起（通過）
+const CAT_LEGS: number[][] = [
+  [2, 8], // 通過
+  [1, 3, 7, 9], // 接觸
+  [3, 7], // 通過（另一組腳）
+  [2, 4, 6, 8], // 接觸（另一組腳）
+]
 const CAT_SIT = [
-  ['.........', '...GGGDG.', '...GDGGGG', '...GGGDG.', '..TTTT...'],
-  ['.........', '...GGGDG.', '...GDGGGG', '...GGGDG.', '.TTTT....'],
+  [
+    '........O..O',
+    '........OOOO',
+    '.......LOKOW',
+    '......LOOOWP',
+    '.....DLOOWW.',
+    '....OOOOOW..',
+    'D...OOOOOO..',
+    '.DDDWW.WW...',
+  ],
+  [
+    '........O..O',
+    '........OOOO',
+    '.......LOKOW',
+    '......LOOOWP',
+    '.....DLOOWW.',
+    '....OOOOOW..',
+    '.D..OOOOOO..',
+    'D.DDWW.WW...',
+  ],
 ]
-const CAT_W = 9
+const CAT_W = 12
+const CAT_H = 8
 const CAT_REST = 12
 
+/** 走路第 step 格的 8 列（第 0 列可能是空的：身體抬起時往上一格） */
 export function catWalkRows(step: number): string[] {
-  const rows = CAT_BODY[step % 2].map(r => [...r])
-  CAT_LEGS.forEach(([r, x], leg) => {
-    rows[r][leg === step % 4 ? x + 1 : x] = 'G'
-  })
-  return rows.map(r => r.join(''))
+  const legs = CAT_LEGS[step % 4]
+  const up = step % 2 === 0 // 通過的那兩格身體抬起
+  const legRow = [...'.'.repeat(CAT_W)]
+  const pawRow = [...'.'.repeat(CAT_W)]
+  for (const x of legs) {
+    legRow[x] = 'O'
+    pawRow[x] = 'W'
+  }
+  const body = [...CAT_HEAD, ...CAT_BODY]
+  // 抬起時：身體 6 列在第 0～5 列、腳 1 列＋腳掌；下沉時：身體在第 1～6 列、腳只剩腳掌
+  return up
+    ? [...body, legRow.join(''), pawRow.join('')]
+    : ['.'.repeat(CAT_W), ...body, pawRow.join('')]
 }
 
 export function catPose(frame: number, range: number) {
@@ -525,18 +564,19 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
   const sitting = fed || pose.sitting
   const rows = sitting ? CAT_SIT[frame % 2] : catWalkRows(frame)
   const x0 = WALL + 7 + x
-  const y0 = p.h - WALL - 7 - (startled && !fed && frame % 2 ? 1 : 0)
-  const color: Record<string, number> = { G: C.cat, D: C.catDark, T: C.catDark }
+  const y0 = p.h - WALL - CAT_H - (startled && !fed && frame % 2 ? 2 : 0)
+  const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
   rows.forEach((row, j) => {
     const line = facingRight ? row : [...row].reverse().join('')
     for (let i = 0; i < CAT_W; i++) if (line[i] !== '.') p.set(x0 + i, y0 + j, color[line[i]])
   })
   if (fed) {
-    // 飼料碗＋往上飄的愛心
-    p.rect(x0 + (facingRight ? 9 : -2), y0 + 2, 2, 2, C.heartBowl)
-    const hy = y0 - 2 - (Math.floor((frame - treatFrame!) / 2) % 3)
-    const hx = x0 + 4
-    for (const [dx, dy] of [[-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1], [0, 2]]) p.set(hx + dx, hy + dy, C.heart)
+    // 飼料碗在臉前面，愛心從頭上往上飄
+    const bowlX = facingRight ? x0 + CAT_W : x0 - 3
+    p.rect(bowlX, y0 + CAT_H - 2, 3, 2, C.heartBowl)
+    const headX = facingRight ? x0 + 9 : x0 + 2
+    const hy = y0 - 4 - (Math.floor((frame - treatFrame!) / 2) % 3)
+    for (const [dx, dy] of [[-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1], [0, 2]]) p.set(headX + dx, hy + dy, C.heart)
   }
 }
 

@@ -84,10 +84,16 @@ test('nameplates are ASCII only', () => {
   expect(plateName('C:\\Users\\user\\.claude\\dev-mods\\43186042-aa86-487c-bdd0-7f1faa67df28', '43186042-aa86')).toBe('s-4318')
 })
 
-test('top-down cat: four distinct walking frames, stays in the corridor', () => {
+test('side-view cat: 8 rows, two pointed ears, four distinct walk frames with a 1px bob, stays in the corridor', () => {
   const frames = [0, 1, 2, 3].map(catWalkRows)
   expect(new Set(frames.map(f => f.join('|'))).size).toBe(4)
-  for (const f of frames) expect(f).toHaveLength(5)
+  for (const f of frames) {
+    expect(f).toHaveLength(8)
+    for (const row of f) expect(row).toHaveLength(12)
+  }
+  // 抬起的格（0、2）耳朵在第 0 列，下沉的格（1、3）在第 1 列
+  expect(frames[0][0]).toBe('........O..O')
+  expect(frames[1][1]).toBe('........O..O')
   const range = catRange(48)
   for (let f = 0; f < 300; f++) {
     const { x } = catPose(f, range)
