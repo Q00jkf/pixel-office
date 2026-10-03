@@ -32,6 +32,7 @@ let notices: Notice[] = []
 const seenSent = new Map<string, number | undefined>()
 const seenGot = new Map<string, number | undefined>()
 const seenMode = new Map<string, OfficeMode>()
+const seenBlocked = new Map<string, number | undefined>()
 
 const sceneOpts = (): SceneOptions => {
   planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
@@ -77,6 +78,12 @@ async function sharedDir($: EngineInterface): Promise<string> {
   return dir
 }
 
+/** 工具結果是不是被 auto 模式分類器擋下（訊息含「auto mode classifier」） */
+export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?: string }): boolean {
+  const msg = ran.deny ?? (ran.isError ? ran.text ?? '' : '')
+  return /auto mode classifier/i.test(msg)
+}
+
 /** 從 ListAgents 名稱推名牌：取最後一段（llm-wiki-aegiverse-55 → 55），只留英數字；推不出來回 undefined */
 export function plateFromAgent(agent: string): string | undefined {
   const ascii = agent.replace(/[^\x21-\x7e]/g, ' ').trim()
@@ -106,7 +113,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: R
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, blocked: me.blocked, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -127,6 +134,7 @@ const MODE_LABEL: Record<OfficeMode, string> = {
   error: '出錯',
   done: '剛完成',
   waiting: '等待核准權限',
+  blocked: '被權限擋下',
 }
 
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
@@ -134,12 +142,18 @@ export function roster(list: Coworker[], now: number): string {
   if (list.length === 0) return '辦公室目前沒有人。'
   const sorted = [...list].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
   const rows = sorted.map(c => {
-    const doing = c.mode === 'typing' || c.mode === 'reading' || c.mode === 'waiting' ? `${MODE_LABEL[c.mode]}（${c.tool}）` : MODE_LABEL[c.mode] ?? c.mode
+    const doing = c.blocked
+      ? `🔴 被擋（${c.blocked.tool}），已等 ${Math.max(0, Math.round((now - c.blocked.at) / 60000))} 分，要使用者在它的視窗說「放行」`
+      : c.mode === 'typing' || c.mode === 'reading' || c.mode === 'waiting'
+        ? `${MODE_LABEL[c.mode]}（${c.tool}）`
+        : MODE_LABEL[c.mode] ?? c.mode
     const agent = c.agent ?? '（未登記，傳訊息找不到）'
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''} | ${agent} | ${doing} |`
   })
+  const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const head = [
     `像素辦公室名單（${list.length} 人在線，${new Date(now).toISOString().slice(11, 19)} UTC）`,
+    ...(blockedNames.length > 0 ? [`🔴 待放行：${blockedNames.join('、')}（要使用者在各自的視窗說「放行」，別的 session 轉達無效）`] : []),
     '| 名牌 | 職稱 | 角色 | ListAgents 名稱（SendMessage 用） | 目前 |',
     '|---|---|---|---|---|',
   ]
@@ -181,6 +195,12 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
     }
     seenGot.set(c.id, c.gotAt)
 
+    const blockedAt = c.blocked?.at
+    if (seenBlocked.has(c.id) && blockedAt !== undefined && blockedAt !== seenBlocked.get(c.id) && !c.isMe) {
+      $.ui.toast(`${c.name} 被權限擋下（${c.blocked!.tool}），要你在它的視窗說「放行」`)
+    }
+    seenBlocked.set(c.id, blockedAt)
+
     if (seenMode.has(c.id) && c.mode === 'waiting' && seenMode.get(c.id) !== 'waiting' && !c.isMe) {
       $.ui.toast(`${c.name} 在等你核准權限`)
     }
@@ -210,6 +230,7 @@ async function refresh($: EngineInterface) {
           agent: typeof s.agent === 'string' ? s.agent : undefined,
           title: typeof s.title === 'string' ? s.title : undefined,
           auto: s.auto === true ? true : undefined,
+          blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
           gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
@@ -476,6 +497,7 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     try {
+      me = { ...me, blocked: undefined } // 使用者在這個視窗輸入了（例如說放行），紅牌放下
       await setMode($, 'thinking')
     } catch {}
 
@@ -489,7 +511,11 @@ export const register: Register = on => {
     } catch {}
     const ran = await next(e)
     try {
-      if (ran.deny !== undefined || ran.isError === true) {
+      if (classifierBlocked(ran as { deny?: string; isError?: boolean; text?: string })) {
+        me = { ...me, blocked: { tool: name, at: await $.clock.now() } }
+        await setMode($, 'error', name)
+        revertLater($, 2500, 'thinking')
+      } else if (ran.deny !== undefined || ran.isError === true) {
         await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else {

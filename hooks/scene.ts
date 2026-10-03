@@ -187,6 +187,7 @@ function screenPixel(mode: OfficeMode | null, frame: number, i: number): number 
   if (mode === 'reading') return i % 2 ? C.white : C.ink
   if (mode === 'error') return frame % 2 ? C.err : C.errDark
   if (mode === 'waiting') return frame % 2 ? C.wait : C.waitDark
+  if (mode === 'blocked') return frame % 4 < 2 ? C.errDark : C.mon
   if (mode === 'done') return C.ok
   if (mode === 'thinking') return C.screenDim
   return i === frame % 6 ? C.white : C.screen
@@ -384,6 +385,13 @@ function person(p: Px, cx: number, cy: number, who: Coworker, frame: number, dir
     p.set(cx + 2, cy, C.skin)
     p.rect(cx + 4, cy - 1, 1, 2, C.err)
     p.set(cx + 4, cy + 2, C.err)
+  } else if (mode === 'blocked') {
+    // 舉紅牌：右手舉高、頭上一塊紅牌（白邊）
+    p.set(cx + 3, sy - 1, C.skin)
+    p.set(cx + 3, sy - 2, C.skin)
+    p.rect(cx + 2, cy - 5, 4, 3, C.white)
+    p.rect(cx + 3, cy - 4, 2, 1, C.err)
+    p.set(cx - 2, handY, C.skin)
   } else if (mode === 'waiting') {
     // 舉右手
     p.set(cx + 3, sy - 1, C.skin)
@@ -590,6 +598,7 @@ export function drawScene(
   seating?: Map<string, Placement>,
   opts: SceneOptions = {},
 ): Scene {
+  crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
   const L = layout(width, rows)
   const p = canvas(width, L.h)
   building(p, L, frame)

@@ -486,3 +486,41 @@ test('running ListAgents registers the session automatically', async ($, on) => 
   expect(last.agent).toBe('llm-wiki-aegiverse-ff')
   expect(last.name).toBe('ff')
 })
+
+// ---------- 0.3.8：被分類器擋下、等使用者說放行 ----------
+
+import { classifierBlocked } from './register'
+
+const CLASSIFIER_MSG = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Persistence].'
+
+test('a classifier denial is told apart from other errors', () => {
+  expect(classifierBlocked({ deny: CLASSIFIER_MSG })).toBe(true)
+  expect(classifierBlocked({ isError: true, text: CLASSIFIER_MSG })).toBe(true)
+  expect(classifierBlocked({ isError: true, text: 'Exit code 1' })).toBe(false)
+  expect(classifierBlocked({ deny: 'blocked by a deny rule Bash(git push --force*)' })).toBe(false)
+  expect(classifierBlocked({ text: CLASSIFIER_MSG })).toBe(false) // 不是錯誤就不算
+})
+
+test('a blocked coworker raises a red card that stays while they keep working', () => {
+  const crew = [{ ...P('a', 'ff', 'typing'), blocked: { tool: 'Write', at: 0 } }]
+  const s = drawScene(crew, 2, 60, 40)
+  const px = [...s.px]
+  expect(px.some(c => c === 0xe53935)).toBe(true) // 紅牌
+  expect(px.some(c => c === 0x69f0ae)).toBe(false) // 不畫成打字中的綠螢幕
+})
+
+test('the roster flags who needs a release and for how long', () => {
+  const crew = [{ ...P('a', 'ff'), blocked: { tool: 'Write', at: 0 } }, P('b', '55')]
+  const text = roster(crew, 5 * 60000)
+  expect(text).toContain('🔴 待放行：ff')
+  expect(text).toContain('被擋（Write），已等 5 分')
+})
+
+test('a classifier denial marks me blocked in the status file', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('tool.call', (_$, e) => (String(e.tool) === 'Write' ? ({ deny: CLASSIFIER_MSG } as any) : undefined))
+  await $.tool.call({ tool: 'Write', file_path: 'x', content: 'y' } as any).catch(() => undefined)
+  const last = JSON.parse(writes[writes.length - 1])
+  expect(last.blocked.tool).toBe('Write')
+})
