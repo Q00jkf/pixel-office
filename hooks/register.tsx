@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Coworker, OfficeMode, Role } from '../types'
+import type { Coworker, CustomButton, OfficeMode, Role } from '../types'
 import { NOTICE_FRAMES, PLANE_FRAMES, TREAT_FRAMES, assignSeats, drawScene, encode, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
@@ -9,6 +9,7 @@ const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
 const night = atom({ plugin: 'pixel-office', key: 'night' } as const, false)
+const buttons = atom({ plugin: 'pixel-office', key: 'buttons' } as const, [] as CustomButton[])
 const READING = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead'])
 
 // 模組變數只給動畫與心跳用；熱重載會重跑 session.start 補回
@@ -95,6 +96,51 @@ export function plateFromAgent(agent: string): string | undefined {
 export function selfFromListAgents(text: string): string | undefined {
   const m = text.match(/This session is (.+?) \[[0-9a-f]+\]/)
   return m ? m[1].trim() : undefined
+}
+
+const MAX_BUTTONS = 6
+
+/** 檢查設定檔的按鈕：label 1～12 字；url 只收 http(s)；prompt 1～2000 字；最多 6 顆 */
+export function parseButtons(raw: unknown): CustomButton[] {
+  if (!Array.isArray(raw)) return []
+  const out: CustomButton[] = []
+  for (const b of raw) {
+    if (!b || typeof b !== 'object') continue
+    const label = typeof b.label === 'string' ? b.label.trim() : ''
+    if (label.length === 0 || label.length > 12) continue
+    if (typeof b.url === 'string' && /^https?:\/\//i.test(b.url)) out.push({ label, url: b.url })
+    else if (typeof b.prompt === 'string' && b.prompt.trim().length > 0 && b.prompt.length <= 2000) out.push({ label, prompt: b.prompt.trim() })
+    if (out.length >= MAX_BUTTONS) break
+  }
+  return out
+}
+
+async function loadButtons($: EngineInterface): Promise<CustomButton[]> {
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '.'
+  const path = `${home.replace(/\\/g, '/')}/.claude/pixel-office/buttons.json`
+  try {
+    const raw = await $.fs.read(path)
+    const list = parseButtons(JSON.parse(typeof raw === 'string' ? raw : '[]'))
+    await update($, buttons, () => list)
+    return list
+  } catch {
+    await update($, buttons, () => [])
+    return []
+  }
+}
+
+/** 按下個人按鈕：/ 開頭先當 slash 指令執行，不行再當使用者輸入送出；其他文字直接當使用者輸入 */
+async function runButton($: EngineInterface, b: CustomButton) {
+  if (!b.prompt) return
+  const text = b.prompt
+  if (text.startsWith('/')) {
+    const [name, ...rest] = text.slice(1).split(/\s+/)
+    try {
+      await $.command.run({ command: name, args: rest.join(' ') } as never)
+      return
+    } catch {}
+  }
+  await $.prompt.submit({ text, asUser: true })
 }
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
@@ -363,6 +409,7 @@ export const register: Register = on => {
     if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
     await publish($, false).catch(() => undefined)
     await refresh($).catch(() => undefined)
+    await loadButtons($).catch(() => undefined)
 
     $.clock.every(250, () => {
       frame += 1
@@ -473,13 +520,18 @@ export const register: Register = on => {
       if (v !== 'on' && v !== 'off') return { text: '用法：/office auto on（auto 模式，不舉手）｜/office auto off（會等人核准）' }
       return { text: await applyProfile($, { auto: v === 'on' }) }
     }
+    if (sub === 'buttons') {
+      const list = await loadButtons($)
+      return { text: list.length > 0 ? `已載入 ${list.length} 顆個人按鈕：${list.map(b => b.label).join('、')}` : '沒有個人按鈕：~/.claude/pixel-office/buttons.json 不存在或格式不對。' }
+    }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office auto on|off' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office auto on|off｜/office buttons（重讀個人按鈕）' }
 
     await refresh($).catch(() => undefined)
+    await loadButtons($).catch(() => undefined)
     await $.ui.open({ id: PANE, title: '像素辦公室' })
 
     return { text: `像素辦公室已開啟。你是${ROLE_LABEL[me.role]}，名牌 ${me.name}。` }
@@ -555,7 +607,8 @@ export const register: Register = on => {
       )
     }
 
-    const { Box, Raster, Button, Text } = $.ui.resolve(e)
+    const { Box, Raster, Button, Text, Link } = $.ui.resolve(e)
+    const mine = await read($, buttons)
     width = sceneWidth(e.props.bodyColumns)
     rows = sceneRows(e.props.scroll?.bodyRows) // 撐滿面板，扣掉預留空白與按鈕列
     lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined)
@@ -563,8 +616,20 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
-        {/* 預留一列：之後放小對話框或更多按鈕 */}
-        <Text key="reserved"> </Text>
+        {/* 預留列：放個人按鈕（~/.claude/pixel-office/buttons.json），沒有就空一列 */}
+        {mine.length > 0 ? (
+          <Box flexDirection="row">
+            {mine.map((b, i) =>
+              b.url ? (
+                <Link key={`mine-${i}`} href={b.url} label={`[${b.label}]`} />
+              ) : (
+                <Button key={`mine-${i}`} label={b.label} onPress={() => runButton($, b)} />
+              ),
+            )}
+          </Box>
+        ) : (
+          <Text key="reserved"> </Text>
+        )}
         <Box flexDirection="row">
           <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />
           <Text> </Text>

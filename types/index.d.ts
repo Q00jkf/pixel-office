@@ -25,8 +25,11 @@ export type Coworker = {
   gotAt?: number
 }
 
+/** 個人按鈕（~/.claude/pixel-office/buttons.json）：prompt 送給這個視窗，url 用瀏覽器開 */
+export type CustomButton = { label: string; prompt?: string; url?: string }
+
 declare module 'claude-code' {
   interface PluginState {
-    'pixel-office': { crew: Coworker[]; night: boolean }
+    'pixel-office': { crew: Coworker[]; night: boolean; buttons: CustomButton[] }
   }
 }

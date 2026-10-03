@@ -405,7 +405,7 @@ test('the scene fills the pane height and leaves one reserved row above the butt
   expect((raster!.props as any).rows).toBe(48)
   const tree: any = await ui.drawn()
   // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
-  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box'])
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box']) // 沒有個人按鈕：空一列
   await ui.unmount()
 })
 
@@ -523,4 +523,59 @@ test('a classifier denial marks me blocked in the status file', async ($, on) =>
   await $.tool.call({ tool: 'Write', file_path: 'x', content: 'y' } as any).catch(() => undefined)
   const last = JSON.parse(writes[writes.length - 1])
   expect(last.blocked.tool).toBe('Write')
+})
+
+// ---------- 0.4.0：個人按鈕 ----------
+
+import { parseButtons } from './register'
+
+test('personal buttons: only valid ones are kept (label 1-12, http(s) url or a prompt), at most 6', () => {
+  const list = parseButtons([
+    { label: '開工', prompt: '/llm-wiki:wiki-collab status' },
+    { label: 'Superset', url: 'http://localhost:8088' },
+    { label: '壞網址', url: 'file:///C:/secret' },
+    { label: '', prompt: 'x' },
+    { label: '這個標籤真的太長了超過十二', prompt: 'x' },
+    { label: '空指令', prompt: '   ' },
+    'nope',
+  ])
+  expect(list).toEqual([
+    { label: '開工', prompt: '/llm-wiki:wiki-collab status' },
+    { label: 'Superset', url: 'http://localhost:8088' },
+  ])
+  expect(parseButtons(Array.from({ length: 9 }, (_, i) => ({ label: `b${i}`, prompt: 'x' })))).toHaveLength(6)
+  expect(parseButtons({ not: 'an array' })).toEqual([])
+})
+
+const BUTTONS_FILE = JSON.stringify([
+  { label: '開工', prompt: '/llm-wiki:wiki-collab status' },
+  { label: '說嗨', prompt: 'hi there' },
+  { label: 'Superset', url: 'http://localhost:8088' },
+])
+
+test('the reserved row shows personal buttons; a slash prompt runs as a command, plain text is sent as my words', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('fs.read', () => ({ value: BUTTONS_FILE }))
+  const ran: any[] = []
+  const submitted: any[] = []
+  on('command.run', (_$, e: any) => {
+    if (e.command === 'office') return undefined as any
+    ran.push(e)
+    return { text: 'ok' } as any
+  })
+  on('prompt.submit', (_$, e: any) => {
+    submitted.push(e)
+    return { text: e.text } as any // prompt.submit 的回傳是 { text }
+  })
+  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('3 顆')
+  const ui = await $.ui.mount({ ...PANE_PROPS, props: { ...PANE_PROPS.props, scroll: { offset: 0, bodyRows: 50 } } })
+  const tree: any = await ui.drawn()
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Box', 'Box'])
+  expect((await ui.find({ type: 'Link' }))?.props.href).toBe('http://localhost:8088')
+  await ui.press({ key: 'mine-0' })
+  expect(ran.some(e => e.command === 'llm-wiki:wiki-collab' && e.args === 'status')).toBe(true)
+  await ui.press({ key: 'mine-1' })
+  expect(submitted.some(e => e.text === 'hi there')).toBe(true)
+  await ui.unmount()
 })

@@ -28,6 +28,22 @@
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。
 
+## 個人按鈕（不進 repo）
+
+在自己電腦建 `~/.claude/pixel-office/buttons.json`，按鈕會出現在辦公室與下方按鈕列之間那一列（最多 6 顆）：
+
+```json
+[
+  { "label": "開工", "prompt": "/llm-wiki:wiki-collab status" },
+  { "label": "收工", "prompt": "/llm-wiki:wiki-collab wrapup" },
+  { "label": "文件", "url": "https://example.com" }
+]
+```
+
+- `prompt`：送給**按下按鈕的那個視窗**，等同你親自輸入；`/` 開頭當 slash 指令執行。照常受權限管控。
+- `url`：用瀏覽器開，只收 `http`／`https`。
+- `label` 1～12 字。改完檔案輸入 `/office buttons` 重讀。沒有這個檔就不顯示。
+
 ## 畫面
 
 俯視平面圖：上排會議室＋主管室，下方員工區（四人一組、十字隔板），底部走廊有貓與影印機。
