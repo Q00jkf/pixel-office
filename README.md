@@ -20,6 +20,10 @@
 | `/office` | 開辦公室面板 |
 | `/office role 主管` ／ `/office role 員工` | 設定這個 session 的角色；角色變了人會走進／走出主管室 |
 | `/office name <英數字>` | 桌上名牌（1～12 字，中文在像素畫寬兩格放不下） |
+| `/office title <職稱>` | 職稱（最多 16 字，可中文；不畫在圖上，名單裡看得到） |
+| `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態 |
+| `/office agent <名稱>` | 登記 ListAgents 名稱，別人傳訊息給你時才畫得出紙飛機 |
+| `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
 | 面板按鈕「升為主管／設為員工」(`r`)、「餵貓」(`c`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。

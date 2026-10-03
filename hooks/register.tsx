@@ -77,12 +77,12 @@ async function sharedDir($: EngineInterface): Promise<string> {
 }
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
-async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: Role; name?: string; agent?: string; title?: string } | undefined> {
+async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: Role; name?: string; agent?: string; title?: string; auto?: boolean } | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title) }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined }
   } catch {
     return undefined
   }
@@ -92,7 +92,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: R
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -122,7 +122,7 @@ export function roster(list: Coworker[], now: number): string {
   const rows = sorted.map(c => {
     const doing = c.mode === 'typing' || c.mode === 'reading' || c.mode === 'waiting' ? `${MODE_LABEL[c.mode]}（${c.tool}）` : MODE_LABEL[c.mode] ?? c.mode
     const agent = c.agent ?? '（未登記，傳訊息找不到）'
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'} | ${agent} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''} | ${agent} | ${doing} |`
   })
   const head = [
     `像素辦公室名單（${list.length} 人在線，${new Date(now).toISOString().slice(11, 19)} UTC）`,
@@ -195,6 +195,7 @@ async function refresh($: EngineInterface) {
           role: s.role === 'manager' ? 'manager' : 'staff',
           agent: typeof s.agent === 'string' ? s.agent : undefined,
           title: typeof s.title === 'string' ? s.title : undefined,
+          auto: s.auto === true ? true : undefined,
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
           gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
@@ -227,8 +228,16 @@ export function validName(name: string): boolean {
 }
 
 // 角色與名牌：/office 指令和模型工具共用；依 session 編號記在 $.store
-async function applyProfile($: EngineInterface, input: { role?: string; name?: string; agent?: string; title?: string }): Promise<string> {
+async function applyProfile(
+  $: EngineInterface,
+  input: { role?: string; name?: string; agent?: string; title?: string; auto?: boolean },
+): Promise<string> {
   const notes: string[] = []
+  let auto = me.auto
+  if (input.auto !== undefined) {
+    auto = input.auto ? true : undefined
+    notes.push(input.auto ? '模式＝auto（不舉手等核准）' : '模式＝會等人核准')
+  }
   let role = me.role
   let name = me.name
   let agent = me.agent
@@ -256,9 +265,9 @@ async function applyProfile($: EngineInterface, input: { role?: string; name?: s
     name = input.name
     notes.push(`名牌＝${name}`)
   }
-  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）或 agent（ListAgents 名稱）。'
-  me = { ...me, role, name, agent, title }
-  await $.store.set(`profile:${me.id}`, { role, name, agent, title }).catch(() => undefined) // 存不了只是重開後不記得
+  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）、agent（ListAgents 名稱）或 auto（true／false）。'
+  me = { ...me, role, name, agent, title, auto }
+  await $.store.set(`profile:${me.id}`, { role, name, agent, title, auto }).catch(() => undefined) // 存不了只是重開後不記得
   await showCrew($)
   await publish($, false).catch(() => undefined)
   return `已設定：${notes.join('、')}。`
@@ -286,6 +295,7 @@ export const register: Register = on => {
           name: { type: 'string', description: '名牌，英數字 1～12 字' },
           agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）' },
           title: { type: 'string', description: '職稱，自由填寫最多 16 字（例如 IT、查證、ArduPilot），可用中文' },
+          auto: { type: 'boolean', description: '你的 session 是 auto 權限模式（系統提示寫 auto mode is active）就設 true；否則 false' },
         },
       },
     })
@@ -298,13 +308,14 @@ export const register: Register = on => {
     const id = await $.session.id()
     me = { ...me, id, name: plateName(await $.session.cwd(), id) }
     // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
-    let saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string; agent?: string; title?: string } | undefined
+    let saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string; agent?: string; title?: string; auto?: boolean } | undefined
     const own = await readOwnStatus($, id)
-    if (own) saved = { role: saved?.role ?? own.role, name: saved?.name ?? own.name, agent: saved?.agent ?? own.agent, title: saved?.title ?? own.title }
+    if (own) saved = { role: saved?.role ?? own.role, name: saved?.name ?? own.name, agent: saved?.agent ?? own.agent, title: saved?.title ?? own.title, auto: saved?.auto ?? own.auto }
     if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
     if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
     const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
     if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
+    if (saved?.auto === true) me = { ...me, auto: true }
     const savedTitle = (saved as { title?: unknown } | undefined)?.title
     if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
     await publish($, false).catch(() => undefined)
@@ -326,7 +337,7 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session。(1) 若你還沒登記，第一次用到 ListAgents 時，把「This session is X」的 X 用 mcp__pixel-office__office_profile(agent=X) 登記一次，別人傳訊息給你時辦公室才找得到你。(2) 被指派或卸下主管等角色時，呼叫同一個工具更新 role（主管／員工）；職稱 title（例如 IT、查證）與名牌 name（短代號）也可順便設。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。只影響畫面，不影響權限。',
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session。(1) 若你還沒登記，第一次用到 ListAgents 時，把「This session is X」的 X 用 mcp__pixel-office__office_profile(agent=X) 登記一次，別人傳訊息給你時辦公室才找得到你。(2) 被指派或卸下主管等角色時，呼叫同一個工具更新 role（主管／員工）；職稱 title（例如 IT、查證）與名牌 name（短代號）也可順便設。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
@@ -384,7 +395,8 @@ export const register: Register = on => {
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     try {
-      if (waitsForApproval(verdict.decision, e.tool_use_id, permissionMode)) await setMode($, 'waiting', String(e.tool))
+      // 自己宣告 auto 的 session 不舉手；classic.PreToolUse 在這版沒有觸發，permissionMode 只當備用
+      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) await setMode($, 'waiting', String(e.tool))
     } catch {}
     return verdict
   })
@@ -403,11 +415,16 @@ export const register: Register = on => {
     if (sub === 'name') return { text: await applyProfile($, { name: value }) }
     if (sub === 'agent') return { text: await applyProfile($, { agent: value }) }
     if (sub === 'title') return { text: await applyProfile($, { title: value }) }
+    if (sub === 'auto') {
+      const v = value.trim().toLowerCase()
+      if (v !== 'on' && v !== 'off') return { text: '用法：/office auto on（auto 模式，不舉手）｜/office auto off（會等人核准）' }
+      return { text: await applyProfile($, { auto: v === 'on' }) }
+    }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office auto on|off' }
 
     await refresh($).catch(() => undefined)
     await $.ui.open({ id: PANE, title: '像素辦公室' })
@@ -417,8 +434,9 @@ export const register: Register = on => {
 
   // 模型自己設定角色／名牌
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string }
-    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title })
+    const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string; auto?: unknown }
+    const auto = input.auto === true || input.auto === 'true' ? true : input.auto === false || input.auto === 'false' ? false : undefined
+    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
     return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}）` }

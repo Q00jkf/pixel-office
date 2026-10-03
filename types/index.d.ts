@@ -12,6 +12,8 @@ export type Coworker = {
   role: Role
   /** 職稱（自由填寫，例如 IT、查證）；不畫在像素圖上，可用中文 */
   title?: string
+  /** 自己宣告的權限模式：true＝auto（ask 交給分類器，不等人），不會舉手等核准 */
+  auto?: boolean
   /** ListAgents 上的名稱（SendMessage 的收件者就是它），不顯示，只用來找人 */
   agent?: string
   /** 最近一次送出訊息：收件者名稱與時間（ms） */

@@ -422,3 +422,23 @@ test('door signs: MANAGER beside the office door, MEETING beside the meeting roo
     expect(text[11]).toContain('MEETING')
   }
 })
+
+test('/office auto on stops the raised hand; the roster marks auto sessions', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  expect((await $.command.run({ command: 'office', args: 'auto on' } as any)).text).toContain('auto')
+  expect(JSON.parse(writes[writes.length - 1]).auto).toBe(true)
+  expect((await $.command.run({ command: 'office', args: 'auto maybe' } as any)).text).toContain('用法')
+  const who = (await $.command.run({ command: 'office', args: 'who' } as any)).text!
+  expect(who).toContain('（auto）')
+  expect((await $.command.run({ command: 'office', args: 'auto off' } as any)).text).toContain('會等人核准')
+  expect(JSON.parse(writes[writes.length - 1]).auto).toBeUndefined()
+})
+
+test('the model can declare auto mode through office_profile', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', auto: true } as any)
+  expect(out.result).toContain('模式＝auto')
+  expect(JSON.parse(writes[writes.length - 1]).auto).toBe(true)
+})
