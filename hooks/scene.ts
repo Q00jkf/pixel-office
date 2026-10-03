@@ -255,6 +255,11 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   const front = Math.floor(w / 2) - 3
   p.rect(front, h - WALL, 6, WALL, C.tileA)
 
+  // 門牌：掛在上排房間與員工區之間那道牆（剛好一整個終端列），中文寬兩格放不下，用英文
+  const signRow = (WALL + TOP_H) / 2
+  p.labels.push({ row: signRow, col: officeX + 6, text: 'MANAGER', fg: C.gold, bg: C.wall })
+  if (meetDoor - WALL - 1 >= 7) p.labels.push({ row: signRow, col: WALL + 1, text: 'MEETING', fg: C.glassHi, bg: C.wall })
+
   // 會議室：白板、橢圓長桌（亮面）、一圈椅子
   p.rect(WALL, WALL + 6, 1, 8, C.board)
   p.set(WALL, WALL + 8, C.marker)

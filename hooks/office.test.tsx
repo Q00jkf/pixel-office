@@ -409,3 +409,11 @@ test('at the minimum height the first cluster still clears the corridor (cat and
   const lowest = Math.max(...L.seats.map(s => s.y + 12))
   expect(lowest).toBeLessThanOrEqual(L.h - 10) // 底部走廊 10 像素
 })
+
+test('door signs: MANAGER beside the office door, MEETING beside the meeting room', () => {
+  for (const w of [48, 60, 112]) {
+    const text = cellText(encode(drawScene([], 0, w, 40)), w, 40)
+    expect(text[11]).toContain('MANAGER')
+    expect(text[11]).toContain('MEETING')
+  }
+})
