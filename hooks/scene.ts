@@ -720,6 +720,46 @@ export function drawScene(
   return { px: p.px, labels: p.labels, width, rows }
 }
 
+export const SVG_MAX = 131072 // Desktop Svg 元素的 source 上限（字元）
+
+const hex = (c: number) => '#' + (c & 0xffffff).toString(16).padStart(6, '0')
+const xml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * 給 Desktop 的 Svg 元素：一像素一單位、同列同色相鄰像素合併成一個方塊（字元數才壓得進上限），
+ * 名牌疊等寬文字（一個字元寬 1 像素、高 2 像素，與終端格同比例）
+ */
+export function encodeSvg(scene: Scene, pxSize = 8): string {
+  const { px, labels, width, rows } = scene
+  const h = rows * 2
+  // 同色的方塊合併成一條 path（每段 "Mx yh{n}v1h-{n}z"），比一格一個 <rect> 小約四倍
+  const byColor = new Map<number, string[]>()
+  for (let y = 0; y < h; y++) {
+    let x = 0
+    while (x < width) {
+      const c = px[y * width + x]
+      let run = 1
+      while (x + run < width && px[y * width + x + run] === c) run++
+      let segs = byColor.get(c)
+      if (!segs) byColor.set(c, (segs = []))
+      segs.push(`M${x} ${y}h${run}v1h-${run}z`)
+      x += run
+    }
+  }
+  const parts: string[] = []
+  for (const [c, segs] of byColor) parts.push(`<path fill="${hex(c)}" d="${segs.join('')}"/>`)
+  for (const { row, col, text, fg, bg } of labels) {
+    if (row < 0 || row >= rows) continue
+    const t = text.slice(0, Math.max(0, width - col))
+    if (!t) continue
+    parts.push(`<rect x="${col}" y="${row * 2}" width="${t.length}" height="2" fill="${hex(bg)}"/>`)
+    parts.push(
+      `<text x="${col}" y="${row * 2 + 1.6}" font-size="1.8" font-family="Consolas,Menlo,monospace" font-weight="bold" fill="${hex(fg)}" textLength="${t.length}" lengthAdjust="spacingAndGlyphs">${xml(t)}</text>`,
+    )
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${h}" width="${width * pxSize}" height="${h * pxSize}" shape-rendering="crispEdges">${parts.join('')}</svg>`
+}
+
 // 每格用「▀」：前景 = 上像素、背景 = 下像素；名牌那幾格改放 ASCII 字元
 export function encode(scene: Scene): string {
   const { px, labels, width, rows } = scene

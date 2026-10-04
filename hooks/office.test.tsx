@@ -140,7 +140,27 @@ test('/office reads the other sessions: fresh ones sit down, stale and left ones
   expect(writes.some(w => /tester[\\/]\.claude[\\/]pixel-office[\\/]sessions[\\/]/.test(w))).toBe(true)
 })
 
-test('desktop gets a text fallback with the head count', async $ => {
+test('desktop draws the office as an SVG under the size limit, with all buttons', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount({
+    plugin: 'pixel-office',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'pixel-office',
+    props: { title: '像素辦公室', isFocused: false, bodyColumns: 112, placement: 'dock', scroll: { offset: 0, bodyRows: 80 }, view: undefined },
+  } as any)
+  const svg = await ui.find({ type: 'Svg' })
+  const src = String(svg!.props.source)
+  expect(src.startsWith('<svg')).toBe(true)
+  expect(src).toContain('<path')
+  expect(src.length).toBeLessThanOrEqual(131072)
+  expect(String(svg!.props.alt)).toContain('人在線')
+  for (const key of ['role', 'cat', 'night']) expect(await ui.find({ key })).toBeDefined()
+  await ui.unmount()
+})
+
+test('desktop keeps a text line for the head count (old behaviour)', async $ => {
   const ui = await $.ui.mount({
     plugin: 'pixel-office',
     surface: 'desktop',
@@ -148,7 +168,7 @@ test('desktop gets a text fallback with the head count', async $ => {
     requestId: 'pixel-office',
     props: { title: '像素辦公室', isFocused: false, bodyColumns: 48, placement: 'dock', scroll: undefined, view: undefined },
   } as any)
-  expect(await ui.find({ type: 'Text', text: /人在線/ })).toBeDefined()
+  expect((await ui.find({ type: 'Svg' }))?.props.alt).toContain('人在線')
   await ui.unmount()
 })
 

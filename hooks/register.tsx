@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, OfficeMode, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, TREAT_FRAMES, assignSeats, drawScene, encode, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -25,6 +25,7 @@ let me: Coworker = { id: 'me', name: 'me', mode: 'idle', tool: '', isMe: true, r
 let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
+let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
 let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
@@ -459,6 +460,10 @@ export const register: Register = on => {
       if (width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
+    // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
+    $.clock.every(500, () => {
+      if (svgOpen) $.ui.invalidate('ui.render')
+    })
     $.clock.every(5000, () => void publish($, false).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
@@ -645,16 +650,60 @@ export const register: Register = on => {
     const toggleNight = () => update($, night, v => !v)
 
     if (e.surface !== 'terminal') {
-      const { Box, Text, Button } = $.ui.resolve(e)
-      width = 0
+      const els = $.ui.resolve(e) as Record<string, unknown>
+      const { Box, Text, Button, Link } = $.ui.resolve(e)
+      const Svg = els.Svg as typeof Box | undefined
+      width = 0 // 終端的 blit 只給 Raster 用
+      const mine = await read($, buttons)
+      if (!Svg) {
+        svgOpen = false
+        return (
+          <Box flexDirection="column">
+            <Text bold>像素辦公室：{shown.length} 人在線</Text>
+            <Text dimColor>這個介面沒有可以畫圖的元素，只顯示文字。</Text>
+            <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
+          </Box>
+        )
+      }
+      svgOpen = true
+      // 同色合併成 path 後，最大 112×80 約 7.4 萬字元（2026-10-05 實測），仍在 Svg 上限 131072 內；超過就縮小再畫
+      let sw = sceneWidth(e.props.bodyColumns)
+      let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
+      let svg = ''
+      for (let tries = 0; tries < 4; tries++) {
+        const placed = assignSeats(shown, sw, sr, lastPlaced ?? undefined)
+        svg = encodeSvg(drawScene(shown, frame, sw, sr, liveWalkers(), placed, sceneOpts()))
+        if (svg.length <= SVG_MAX) break
+        sw = Math.max(48, sw - 12)
+        sr = Math.max(40, sr - 8)
+      }
       return (
         <Box flexDirection="column">
-          <Text bold>像素辦公室：{shown.length} 人在線</Text>
-          <Text dimColor>像素畫只在終端版顯示。</Text>
-          <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
+          <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
+          {mine.length > 0 ? (
+            <Box flexDirection="row">
+              {mine.map((b, i) =>
+                b.url ? (
+                  <Link key={`mine-${i}`} href={b.url} label={b.label} />
+                ) : (
+                  <Button key={`mine-${i}`} label={b.label} onPress={() => runButton($, b)} />
+                ),
+              )}
+            </Box>
+          ) : (
+            <Text key="reserved" dimColor>
+              個人按鈕：~/.claude/pixel-office/buttons.json
+            </Text>
+          )}
+          <Box flexDirection="row">
+            <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
+            <Button key="cat" label="餵貓" onPress={() => feedCat()} />
+            <Button key="night" label={nightMode ? '開燈' : '夜間模式'} onPress={toggleNight} />
+          </Box>
         </Box>
       )
     }
+    svgOpen = false
 
     const { Box, Raster, Button, Text, Link } = $.ui.resolve(e)
     const mine = await read($, buttons)
