@@ -1,6 +1,10 @@
 # pixel-office（像素辦公室）
 
-把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事。llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
+把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事。
+
+<img src="docs/office.png" alt="像素辦公室截圖" width="420">
+
+llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 
 > ⚠️ 使用 Claude Code 的 function hooks（early access，版本間可能變動）。2026-10-03 於 Claude Code 2.1.288 開發與測試。
 
