@@ -684,3 +684,33 @@ test('reload keeps every profile field, team included (store wins, status file f
   expect(mergeProfile({ role: 'staff', name: 'ff', agent: 'a', title: 't', auto: true }, { team: 'user-30' })!.team).toBe('user-30')
   expect(mergeProfile(undefined, undefined)).toBeUndefined()
 })
+
+test('closed sessions are read once, then skipped until the one-minute recheck', async ($, on) => {
+  let now = 10_000_000
+  const reads: string[] = []
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: now }))
+  on('fs.write', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('fs.list', () => ({
+    value: [
+      { name: 'fresh.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false },
+      { name: 'gone.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false },
+    ],
+  }) as any)
+  on('fs.read', (_$, e) => {
+    reads.push(e.path)
+    const gone = e.path.endsWith('gone.json')
+    return { value: JSON.stringify({ id: gone ? 'g' : 'f', name: gone ? 'gone' : 'fresh', mode: 'idle', tool: '', updatedAt: now, left: gone }) }
+  })
+  const goneReads = () => reads.filter(p => p.endsWith('gone.json')).length
+  for (let i = 0; i < 5; i++) {
+    await $.command.run({ command: 'office', args: 'who' } as any)
+    now += 1000
+  }
+  expect(goneReads()).toBe(1) // 5 次刷新只讀 1 次
+  expect(reads.filter(p => p.endsWith('fresh.json')).length).toBe(5) // 活著的每次都讀
+  now += 60_000
+  await $.command.run({ command: 'office', args: 'who' } as any)
+  expect(goneReads()).toBe(2) // 一分鐘後重新確認
+})

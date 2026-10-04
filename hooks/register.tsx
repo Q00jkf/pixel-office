@@ -7,6 +7,8 @@ import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
+const DEAD_RECHECK_MS = 60000 // 已關的 session 檔，每分鐘才再讀一次
+const dead = new Map<string, number>() // 檔名 → 上次確認已關的時間
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
 const night = atom({ plugin: 'pixel-office', key: 'night' } as const, false)
 const buttons = atom({ plugin: 'pixel-office', key: 'buttons' } as const, [] as CustomButton[])
@@ -274,10 +276,19 @@ async function refresh($: EngineInterface) {
   const found: Coworker[] = []
   for (const entry of entries) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name === `${me.id}.json`) continue
+    // 已關的 session：舊檔不刪（MOD 的 $.fs 沒有刪除功能），但不每秒重讀 ——
+    // 讀過確認已關的記在 dead，每分鐘才再確認一次（--resume 會讓同一個檔重新活過來）；
+    // 檔案修改時間若拿得到且已超過心跳上限，也直接跳過
+    if (typeof entry.mtimeMs === 'number' && entry.mtimeMs > 0 && now - entry.mtimeMs > STALE_MS) continue
+    const lastDead = dead.get(entry.name)
+    if (lastDead !== undefined && now - lastDead < DEAD_RECHECK_MS) continue
     try {
       const raw = await $.fs.read(`${d}/${entry.name}`)
       const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
-      if (!s.left && typeof s.updatedAt === 'number' && now - s.updatedAt < STALE_MS) {
+      const alive = !s.left && typeof s.updatedAt === 'number' && now - s.updatedAt < STALE_MS
+      if (alive) dead.delete(entry.name)
+      else dead.set(entry.name, now)
+      if (alive) {
         found.push({
           id: String(s.id),
           name: String(s.name),
