@@ -36,6 +36,7 @@ const C = {
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
+  teamRug: 0xeadfc8, teamRugEdge: 0xc9a227, teamText: 0x5d4037,
   wait: 0xffca28, waitDark: 0xff8f00, plane: 0xf1f8ff, planeFold: 0xb0bec5, envelope: 0xfff8e1, envelopeLine: 0xd84315,
 }
 const BOOKS = [0xef5350, 0x42a5f5, 0x66bb6a, 0xffca28, 0xab47bc, 0x26c6da, 0x8d6e63]
@@ -659,6 +660,23 @@ export function drawScene(
   const L = layout(width, rows)
   const p = canvas(width, L.h)
   building(p, L, frame)
+  // peer 區：有主管在線且排得出兩欄時，最右一欄的座位群鋪金邊地毯，上方掛「TEAM <主管名牌>」
+  const lead = crew.find(c => c.role === 'manager')
+  if (lead && L.cols >= 2) {
+    L.clusters.forEach((k, i) => {
+      if (i % L.cols !== L.cols - 1) return
+      const x0 = k.x - 2
+      const y0 = k.y - 4
+      const rw = CLUSTER_W + 4
+      const rh = CLUSTER_H + 6
+      p.rect(x0, y0, rw, rh, C.teamRugEdge)
+      p.rect(x0 + 1, y0 + 1, rw - 2, rh - 2, C.teamRug)
+      if (i === L.cols - 1) {
+        const text = `TEAM ${lead.name}`.slice(0, rw - 2)
+        p.labels.push({ row: y0 / 2, col: x0 + Math.floor((rw - text.length) / 2), text, fg: C.teamText, bg: C.teamRugEdge })
+      }
+    })
+  }
   for (const k of L.clusters) partitions(p, k)
 
   const moving = new Map<string, Step>()

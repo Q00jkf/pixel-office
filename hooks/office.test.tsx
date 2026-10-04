@@ -656,3 +656,19 @@ test('walking between any two seats never enters a wall', () => {
     }
   }
 })
+
+// ---------- 0.5.1：peer 區地毯與門牌 ----------
+
+test('the peer area gets a gold-edged rug and a TEAM sign only when a manager is online and there are two columns', () => {
+  const boss: Coworker = { ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }
+  const has = (s: { px: Uint32Array }) => [...s.px].some(c => c === 0xeadfc8)
+  const withBoss = drawScene([boss], 0, 60, 40)
+  expect(has(withBoss)).toBe(true)
+  expect(cellText(encode(withBoss), 60, 40).join('\n')).toContain('TEAM 30')
+  expect(has(drawScene([P('a', 'x')], 0, 60, 40))).toBe(false) // 沒有主管
+  expect(has(drawScene([boss], 0, 48, 40))).toBe(false) // 只排得下一欄
+  // 地毯在右邊那一組
+  const L = layout(60, 40)
+  const rugXs = [...withBoss.px].map((c, i) => (c === 0xeadfc8 ? i % 60 : -1)).filter(x => x >= 0)
+  expect(Math.min(...rugXs)).toBeGreaterThanOrEqual(L.clusters[1].x - 2)
+})
