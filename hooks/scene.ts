@@ -660,7 +660,7 @@ export function drawScene(
   const L = layout(width, rows)
   const p = canvas(width, L.h)
   building(p, L, frame)
-  // peer 區：有主管在線且排得出兩欄時，最右一欄的座位群鋪金邊地毯，上方掛「TEAM」
+  // peer 區：有主管在線且排得出兩欄時，最右一欄的座位群鋪金邊地毯，上方掛「TEAM <主管名牌>」
   const lead = crew.find(c => c.role === 'manager')
   if (lead && L.cols >= 2) {
     L.clusters.forEach((k, i) => {
@@ -672,7 +672,7 @@ export function drawScene(
       p.rect(x0, y0, rw, rh, C.teamRugEdge)
       p.rect(x0 + 1, y0 + 1, rw - 2, rh - 2, C.teamRug)
       if (i === L.cols - 1) {
-        const text = 'TEAM'
+        const text = `TEAM ${lead.name}`.slice(0, rw - 2)
         p.labels.push({ row: y0 / 2, col: x0 + Math.floor((rw - text.length) / 2), text, fg: C.teamText, bg: C.teamRugEdge })
       }
     })
