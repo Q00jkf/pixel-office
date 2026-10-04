@@ -55,7 +55,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 
 - `prompt`：送給**按下按鈕的那個視窗**，等同你親自輸入；`/` 開頭當 slash 指令執行。照常受權限管控。
 - `url`：用瀏覽器開，只收 `http`／`https`。
-- `label` 1～12 字。改完檔案輸入 `/office buttons` 重讀。沒有這個檔就不顯示。
+- `label` 1～12 字。改完檔案約 10 秒內自動生效（也可輸入 `/office buttons` 立刻重讀）。沒有這個檔就不顯示。
 
 ## 畫面
 

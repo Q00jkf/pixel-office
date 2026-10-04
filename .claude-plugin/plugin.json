@@ -1,6 +1,6 @@
 {
   "name": "pixel-office",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "像素辦公室：把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事（俯視平面圖、主管室、員工座位、即時反映在打字／讀檔／思考／出錯），可選裝。",
   "author": {
     "name": "呂冠佑 (Lu Guan-You), 呂筱婕 (Lu Hsiao-Chieh)"

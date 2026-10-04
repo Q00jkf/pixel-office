@@ -117,16 +117,25 @@ export function parseButtons(raw: unknown): CustomButton[] {
   return out
 }
 
+let lastButtons = ''
+// 內容沒變就不寫 state（避免每次自動重讀都觸發重畫）
+async function setButtons($: EngineInterface, list: CustomButton[]) {
+  const json = JSON.stringify(list)
+  if (json === lastButtons) return
+  lastButtons = json
+  await update($, buttons, () => list)
+}
+
 async function loadButtons($: EngineInterface): Promise<CustomButton[]> {
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '.'
   const path = `${home.replace(/\\/g, '/')}/.claude/pixel-office/buttons.json`
   try {
     const raw = await $.fs.read(path)
     const list = parseButtons(JSON.parse(typeof raw === 'string' ? raw : '[]'))
-    await update($, buttons, () => list)
+    await setButtons($, list)
     return list
   } catch {
-    await update($, buttons, () => [])
+    await setButtons($, [])
     return []
   }
 }
@@ -451,6 +460,8 @@ export const register: Register = on => {
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
     $.clock.every(5000, () => void publish($, false).catch(() => undefined))
+    // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
+    $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
 
     return next(e)
   })
@@ -667,7 +678,7 @@ export const register: Register = on => {
           </Box>
         ) : (
           <Text key="reserved" dimColor>
-            個人按鈕：建 ~/.claude/pixel-office/buttons.json（範例 buttons.example.json，見 README）
+            個人按鈕：~/.claude/pixel-office/buttons.json
           </Text>
         )}
         <Box flexDirection="row">
