@@ -105,7 +105,7 @@ export function layout(width: number, rows: number) {
   const officeW = Math.max(22, Math.floor((width - 2 * WALL) * 0.45))
   const officeX = width - WALL - officeW
   const manager: Seat = { x: officeX + officeW - BOSS_W - 1, y: WALL + 2 }
-  return { seats, clusters, manager, officeX, officeW, h }
+  return { seats, clusters, manager, officeX, officeW, h, cols }
 }
 
 // ---------- 座位分配：先坐回上次的位子，新來的人才依編號挑預設座位 ----------
@@ -125,20 +125,32 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
     out.set(c.id, { kind: 'staff', slot, seat, stand: { x: seat.x + 5, y: seat.y + 1 }, cluster: L.clusters[Math.floor(slot / 4)] })
   }
   const staff = crew.filter(c => c !== boss)
+  // 分區：最右邊那一欄的座位群給主管的 peer，其餘給其他 session；只有一欄時不分區
+  const managers = new Set(crew.filter(c => c.role === 'manager').flatMap(c => [c.agent, c.name].filter(Boolean) as string[]))
+  const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
+  const zoneOf = (slot: number) => (L.cols < 2 ? 'any' : Math.floor(slot / 4) % L.cols === L.cols - 1 ? 'peer' : 'other')
+  const fits = (c: Coworker, slot: number) => zoneOf(slot) === 'any' || zoneOf(slot) === (isPeer(c) ? 'peer' : 'other')
   const rest: Coworker[] = []
   for (const c of staff) {
     const prev = previous?.get(c.id)
-    if (prev && prev.kind === 'staff' && prev.slot < n && !taken[prev.slot]) put(c, prev.slot)
+    if (prev && prev.kind === 'staff' && prev.slot < n && !taken[prev.slot] && fits(c, prev.slot)) put(c, prev.slot)
     else rest.push(c)
   }
+  const overflow: Coworker[] = []
   for (const c of rest) {
+    // 先在自己那一區找（依編號的預設位子往後找），找不到再坐另一區的空位
     let slot = hash(c.id) % n
     let tries = 0
-    while (taken[slot] && tries < n) {
+    while ((taken[slot] || !fits(c, slot)) && tries < n) {
       slot = (slot + 1) % n
       tries += 1
     }
-    if (tries < n) put(c, slot) // 坐滿了 → 算在 +N
+    if (tries < n) put(c, slot)
+    else overflow.push(c)
+  }
+  for (const c of overflow) {
+    const slot = taken.findIndex(t => !t)
+    if (slot >= 0) put(c, slot) // 都坐滿了 → 算在 +N
   }
   return out
 }
@@ -150,13 +162,18 @@ export type Walker = { id: string; path: Seat[]; start: number }
 /** 從 from 走到 to 的路線（只走水平／垂直線段）：出座位 → 上方走道 → 主管室門 → 目的地 */
 export function route(from: Placement, to: Placement, width: number, rows: number): Seat[] {
   const L = layout(width, rows)
-  const hall = OPEN_Y
+  const hall = OPEN_Y + 3 // 員工區上方的大走道（離牆 3 像素，人不貼牆）
   const door = L.officeX + 3
   const inside = WALL + TOP_H - 4
   const exit = (pl: Placement): Seat[] => {
     if (pl.kind === 'boss') return [pl.stand, { x: pl.stand.x, y: inside }, { x: door, y: inside }, { x: door, y: hall }]
-    const side = pl.seat.x === pl.cluster.x ? pl.cluster.x - 3 : pl.cluster.x + CLUSTER_W + 2
-    return [pl.stand, { x: side, y: pl.stand.y }, { x: side, y: hall }]
+    // 上排：椅子後面就是空地，直接往上到大走道
+    if (pl.seat.y === pl.cluster.y) return [pl.stand, { x: pl.stand.x, y: hall }]
+    // 下排：往上到上下兩排之間的走道 → 橫走到座位群之間的走道（最右一群走左側，其餘走右側，永遠不靠外牆）→ 往上到大走道
+    const aisleY = pl.cluster.y + UNIT_H + 2 + ROW_SPLIT / 2 - 1
+    const rightmost = pl.cluster.x + CLUSTER_W + AISLE > L.officeX + L.officeW
+    const side = rightmost && L.cols > 1 ? pl.cluster.x - Math.ceil(AISLE / 2) : pl.cluster.x + CLUSTER_W + Math.floor(AISLE / 2)
+    return [pl.stand, { x: pl.stand.x, y: aisleY }, { x: side, y: aisleY }, { x: side, y: hall }]
   }
   return [...exit(from), ...exit(to).reverse()]
 }

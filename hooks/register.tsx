@@ -55,7 +55,7 @@ function trackMoves(list: Coworker[]) {
   if (lastPlaced) {
     for (const [id, pl] of now) {
       const old = lastPlaced.get(id)
-      if (old && old.kind !== pl.kind) {
+      if (old && (old.kind !== pl.kind || old.slot !== pl.slot)) {
         walkers = walkers.filter(w => w.id !== id)
         walkers.push({ id, path: route(old, pl, width, rows), start: frame })
       }
@@ -159,7 +159,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: R
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, blocked: me.blocked, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -194,7 +194,7 @@ export function roster(list: Coworker[], now: number): string {
         ? `${MODE_LABEL[c.mode]}（${c.tool}）`
         : MODE_LABEL[c.mode] ?? c.mode
     const agent = c.agent ?? '（未登記，傳訊息找不到）'
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''} | ${agent} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const head = [
@@ -276,6 +276,7 @@ async function refresh($: EngineInterface) {
           agent: typeof s.agent === 'string' ? s.agent : undefined,
           title: typeof s.title === 'string' ? s.title : undefined,
           auto: s.auto === true ? true : undefined,
+          team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
@@ -311,9 +312,16 @@ export function validName(name: string): boolean {
 // 角色與名牌：/office 指令和模型工具共用；依 session 編號記在 $.store
 async function applyProfile(
   $: EngineInterface,
-  input: { role?: string; name?: string; agent?: string; title?: string; auto?: boolean },
+  input: { role?: string; name?: string; agent?: string; title?: string; auto?: boolean; team?: string },
 ): Promise<string> {
   const notes: string[] = []
+  let team = me.team
+  if (input.team !== undefined) {
+    const t = input.team.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
+    if (t.length > 64) return `歸屬「${input.team}」太長：用主管在 ListAgents 上的名稱。`
+    team = t.length > 0 && t !== 'off' ? t : undefined
+    notes.push(team ? `歸屬＝${team}（坐 peer 區）` : '歸屬已清除')
+  }
   let auto = me.auto
   if (input.auto !== undefined) {
     auto = input.auto ? true : undefined
@@ -353,9 +361,9 @@ async function applyProfile(
     name = input.name
     notes.push(`名牌＝${name}`)
   }
-  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）、agent（ListAgents 名稱）或 auto（true／false）。'
-  me = { ...me, role, name, agent, title, auto }
-  await $.store.set(`profile:${me.id}`, { role, name, agent, title, auto }).catch(() => undefined) // 存不了只是重開後不記得
+  if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）、agent（ListAgents 名稱）、auto（true／false）或 team（主管名稱）。'
+  me = { ...me, role, name, agent, title, auto, team }
+  await $.store.set(`profile:${me.id}`, { role, name, agent, title, auto, team }).catch(() => undefined) // 存不了只是重開後不記得
   await showCrew($)
   await publish($, false).catch(() => undefined)
   return `已設定：${notes.join('、')}。`
@@ -383,6 +391,7 @@ export const register: Register = on => {
           name: { type: 'string', description: '名牌，英數字 1～12 字' },
           agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）' },
           title: { type: 'string', description: '職稱，自由填寫最多 16 字（例如 IT、查證、ArduPilot），可用中文' },
+          team: { type: 'string', description: '你是哪位主管的 peer：填主管的 ListAgents 名稱（例如 user-30）；不再是 peer 時填 off' },
           auto: { type: 'boolean', description: '你的 session 是 auto 權限模式（系統提示寫 auto mode is active）就設 true；否則 false' },
         },
       },
@@ -405,6 +414,8 @@ export const register: Register = on => {
     const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
     if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
     if (saved?.auto === true) me = { ...me, auto: true }
+    const savedTeam = (saved as { team?: unknown } | undefined)?.team
+    if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
     const savedTitle = (saved as { title?: unknown } | undefined)?.title
     if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
     await publish($, false).catch(() => undefined)
@@ -427,7 +438,7 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。只影響畫面，不影響權限。',
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
@@ -515,6 +526,10 @@ export const register: Register = on => {
     if (sub === 'name') return { text: await applyProfile($, { name: value }) }
     if (sub === 'agent') return { text: await applyProfile($, { agent: value }) }
     if (sub === 'title') return { text: await applyProfile($, { title: value }) }
+    if (sub === 'team') {
+      if (value.trim() === '') return { text: '用法：/office team <主管的 ListAgents 名稱>（坐 peer 區）｜/office team off（取消）' }
+      return { text: await applyProfile($, { team: value }) }
+    }
     if (sub === 'auto') {
       const v = value.trim().toLowerCase()
       if (v !== 'on' && v !== 'off') return { text: '用法：/office auto on（auto 模式，不舉手）｜/office auto off（會等人核准）' }
@@ -528,7 +543,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office auto on|off｜/office buttons（重讀個人按鈕）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -539,9 +554,9 @@ export const register: Register = on => {
 
   // 模型自己設定角色／名牌
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string; auto?: unknown }
+    const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string; auto?: unknown; team?: string }
     const auto = input.auto === true || input.auto === 'true' ? true : input.auto === false || input.auto === 'false' ? false : undefined
-    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto })
+    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto, team: input.team })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
     return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}）` }

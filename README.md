@@ -24,6 +24,7 @@
 | `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態 |
 | `/office agent <名稱>` | 登記 ListAgents 名稱，別人傳訊息給你時才畫得出紙飛機 |
 | `/office buttons` | 重讀個人按鈕設定（`~/.claude/pixel-office/buttons.json`，見下方「個人按鈕」） |
+| `/office team <主管名稱>｜off` | 登記你是哪位主管的 peer（填主管的 ListAgents 名稱）；peer 坐最右邊那一區，其他人坐左邊 |
 | `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
 | 面板按鈕「升為主管／設為員工」(`r`)、「餵貓」(`c`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
@@ -57,7 +58,8 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 俯視平面圖：上排會議室＋主管室，下方員工區（四人一組、十字隔板），底部走廊有貓與影印機。
 
 - 每個 session 的狀態即時反映在小人與螢幕：打字、讀檔、思考、出錯、完成
-- 第一位主管坐主管室；其餘的人依編號有固定座位，別人進出不會讓他換位
+- 第一位主管坐主管室；登記為他 peer 的人（`/office team`）坐最右邊那一區，其他人坐左邊；換區時會起身走過去
+- 每人有固定座位，別人進出不會讓他換位
 - 坐不下時左上角顯示 `+N`
 - 只有終端版畫像素；Desktop 顯示文字版
 

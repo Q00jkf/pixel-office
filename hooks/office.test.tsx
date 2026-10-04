@@ -587,3 +587,72 @@ test('the reserved row shows personal buttons; a slash prompt runs as a command,
   await ui.unmount()
 })
 
+
+// ---------- 0.5.0：peer 區 ----------
+
+test('the manager\'s peers sit in the rightmost cluster; everyone else sits left', () => {
+  const crew: Coworker[] = [
+    { ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' },
+    { ...P('p1', '55'), team: 'user-30' },
+    { ...P('p2', 'ff'), team: 'user-30' },
+    { ...P('o1', 'IT') },
+    { ...P('o2', 'desk') },
+  ]
+  const L = layout(60, 40)
+  expect(L.cols).toBe(2)
+  const seats = assignSeats(crew, 60, 40)
+  const rightX = L.clusters[1].x
+  for (const id of ['p1', 'p2']) expect(seats.get(id)!.seat.x).toBeGreaterThanOrEqual(rightX)
+  for (const id of ['o1', 'o2']) expect(seats.get(id)!.seat.x).toBeLessThan(rightX)
+})
+
+test('a team that matches no online manager does not count; more than 4 peers spill into the other area', () => {
+  const ghost = [{ ...P('x', 'x'), team: 'nobody' }]
+  const L = layout(60, 40)
+  expect(assignSeats(ghost, 60, 40).get('x')!.seat.x).toBeLessThan(L.clusters[1].x)
+  const boss: Coworker = { ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }
+  const peers = Array.from({ length: 6 }, (_, i) => ({ ...P(`p${i}`, `p${i}`), team: 'user-30' }))
+  const seats = assignSeats([boss, ...peers], 60, 40)
+  expect(peers.every(p => seats.has(p.id))).toBe(true) // 6 人都有位子
+  expect(peers.filter(p => seats.get(p.id)!.seat.x >= L.clusters[1].x)).toHaveLength(4)
+})
+
+test('becoming a peer moves you to the peer area (and keeps your seat after that)', () => {
+  const boss: Coworker = { ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }
+  const me = P('zz', 'IT')
+  const before = assignSeats([boss, me], 60, 40)
+  const after = assignSeats([boss, { ...me, team: 'user-30' }], 60, 40, before)
+  expect(after.get('zz')!.slot).not.toBe(before.get('zz')!.slot)
+  const again = assignSeats([boss, { ...me, team: 'user-30' }], 60, 40, after)
+  expect(again.get('zz')!.slot).toBe(after.get('zz')!.slot)
+})
+
+test('/office team sets and clears the team; the roster shows it', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  expect((await $.command.run({ command: 'office', args: 'team user-30 [b0fe80]' } as any)).text).toContain('歸屬＝user-30')
+  expect(JSON.parse(writes[writes.length - 1]).team).toBe('user-30')
+  expect((await $.command.run({ command: 'office', args: 'who' } as any)).text).toContain('屬 user-30')
+  expect((await $.command.run({ command: 'office', args: 'team off' } as any)).text).toContain('歸屬已清除')
+  expect(JSON.parse(writes[writes.length - 1]).team).toBeUndefined()
+})
+
+test('walking between any two seats never enters a wall', () => {
+  for (const [w, r] of [[48, 40], [60, 40], [112, 60]] as const) {
+    const L = layout(w, r)
+    const boss: Coworker = { ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }
+    const crew = [boss, ...L.seats.map((_, i) => P(`s${i}`, `s${i}`))]
+    const placed = [...assignSeats(crew, w, r).values()]
+    for (const a of placed) {
+      for (const b of placed) {
+        if (a === b) continue
+        const path = route(a, b, w, r)
+        for (let i = 0; i < path.length - 1; i++) {
+          const p0 = path[i], p1 = path[i + 1]
+          expect(p0.x === p1.x || p0.y === p1.y).toBe(true)
+          for (const p of [p0, p1]) expect(p.x >= 2 + 3 && p.x <= w - 2 - 4).toBe(true) // 人寬 7，不碰左右外牆
+        }
+      }
+    }
+  }
+})
