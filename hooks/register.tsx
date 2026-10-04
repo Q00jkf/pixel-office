@@ -144,12 +144,24 @@ async function runButton($: EngineInterface, b: CustomButton) {
 }
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
-async function readOwnStatus($: EngineInterface, id: string): Promise<{ role?: Role; name?: string; agent?: string; title?: string; auto?: boolean } | undefined> {
+/** 會跨熱重載保存的個人設定；新增欄位只要加在這裡和 PROFILE_KEYS */
+export type Profile = { role?: Role; name?: string; agent?: string; title?: string; auto?: boolean; team?: string }
+const PROFILE_KEYS = ['role', 'name', 'agent', 'title', 'auto', 'team'] as const
+
+/** 合併兩份設定：$.store 有值就用它的，沒有才用狀態檔的。逐欄通用處理，新增欄位不會被漏掉 */
+export function mergeProfile(saved: Profile | undefined, own: Profile | undefined): Profile | undefined {
+  if (!saved && !own) return undefined
+  const out: Record<string, unknown> = {}
+  for (const k of PROFILE_KEYS) out[k] = saved?.[k] ?? own?.[k]
+  return out as Profile
+}
+
+async function readOwnStatus($: EngineInterface, id: string): Promise<Profile | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team) }
   } catch {
     return undefined
   }
@@ -406,9 +418,9 @@ export const register: Register = on => {
     defaultName = plateName(await $.session.cwd(), id)
     me = { ...me, id, name: defaultName }
     // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
-    let saved = (await $.store.get(`profile:${id}`).catch(() => undefined)) as { role?: Role; name?: string; agent?: string; title?: string; auto?: boolean } | undefined
+    const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
     const own = await readOwnStatus($, id)
-    if (own) saved = { role: saved?.role ?? own.role, name: saved?.name ?? own.name, agent: saved?.agent ?? own.agent, title: saved?.title ?? own.title, auto: saved?.auto ?? own.auto }
+    const saved = mergeProfile(stored, own)
     if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
     if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
     const savedAgent = (saved as { agent?: unknown } | undefined)?.agent

@@ -672,3 +672,15 @@ test('the peer area gets a gold-edged rug and a TEAM sign only when a manager is
   const rugXs = [...withBoss.px].map((c, i) => (c === 0xeadfc8 ? i % 60 : -1)).filter(x => x >= 0)
   expect(Math.min(...rugXs)).toBeGreaterThanOrEqual(L.clusters[1].x - 2)
 })
+
+// ---------- 0.5.4：熱重載後設定不遺失 ----------
+
+import { mergeProfile } from './register'
+
+test('reload keeps every profile field, team included (store wins, status file fills gaps)', () => {
+  const own = { role: 'staff' as const, name: 'ff', agent: 'llm-wiki-aegiverse-ff', title: '待命', auto: true, team: 'user-30' }
+  expect(mergeProfile(undefined, own)).toEqual(own)
+  expect(mergeProfile({ name: 'mine' }, own)).toEqual({ ...own, name: 'mine' })
+  expect(mergeProfile({ role: 'staff', name: 'ff', agent: 'a', title: 't', auto: true }, { team: 'user-30' })!.team).toBe('user-30')
+  expect(mergeProfile(undefined, undefined)).toBeUndefined()
+})
