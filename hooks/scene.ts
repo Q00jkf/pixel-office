@@ -650,19 +650,22 @@ export function catMoveFrame(frame: number, treatFrame: number | undefined, catO
 
 /** 放貓：targetId 被咬的人、start 放出去的那一格 */
 export type CatRaid = { targetId: string; start: number }
-export const CAT_RUN = 6 // 跑步：每格動畫跑幾個像素（人走路是 2）
+export const CAT_RUN = 4 // 跑步：每格動畫跑幾個像素（人走路是 2；再快就一格一格跳）
 export const BITE_FRAMES = 12 // 咬約 3 秒
 
-/** 貓的去程：從貓當下在走廊的位置 → 直走道 → 大走道 → 被咬的人右手邊（借用跑腿路線反過來走） */
+/** 貓的去程：走廊上貓當下的位置 → 座位群旁最近的直走道 → 那一排旁邊的橫走道 → 被咬的人右手邊；不繞到上方大走道 */
 export function raidPath(target: Placement, width: number, rows: number, start: number, treatFrame?: number, catOffset = 0): Seat[] {
   const pose = catPose(catMoveFrame(start, treatFrame, catOffset), catRange(width))
-  const out = errandRoute(target, 'file', width, rows)
-  const go = out.slice(0, Math.ceil(out.length / 2)) // 座位 → … → 檔案櫃
-  const home = { x: WALL + CAT_START + pose.x + CAT_W / 2, y: go[go.length - 1].y }
-  const mid = [...go].reverse().slice(1, -1) // 去掉檔案櫃與座位本身
-  const turn = mid[mid.length - 1] ?? home // 走道上正對座位的那一點：改停在人的右手邊，不先走到他頭上再折回
+  // 跟平常散步同一個位置出發（raidingCat 以腳底中央定位），不會先瞬移
+  const home = { x: WALL + CAT_START + pose.x + CAT_W / 2, y: rows * 2 - WALL - CAT_LIFT - 1 }
+  const k = target.cluster
+  const top = target.seat.y === k.y
+  const laneY = top ? k.y - Math.ceil(CLUSTER_GAP / 2) : k.y + UNIT_H + 2 + ROW_SPLIT / 2 - 1 // 上排走座位群上方，下排走上下兩排之間
   const bx = target.stand.x + 6
-  return [home, ...mid.slice(0, -1), { x: bx, y: turn.y }, { x: bx, y: target.stand.y + 4 }]
+  const left = k.x - Math.ceil(AISLE / 2)
+  const right = k.x + CLUSTER_W + Math.floor(AISLE / 2)
+  const aisleX = Math.abs(left - bx) <= Math.abs(right - bx) ? left : right
+  return [home, { x: aisleX, y: home.y }, { x: aisleX, y: laneY }, { x: bx, y: laneY }, { x: bx, y: target.stand.y + 4 }]
 }
 
 /** 放貓的總長度（格）：去程＋咬＋回程 */

@@ -992,3 +992,17 @@ test('the release button and /office bite: needs the pane first, then sends the 
   expect(String((again as any).text)).toContain('貓還在外面')
   await ui.unmount()
 })
+
+test('the released cat takes the nearest aisle: never above the target row, at most two turns before the last step', () => {
+  const crew = [P('boss', 'K', 'idle', true, 'manager'), ...'abcdefgh'.split('').map(c => P(c, c + c))]
+  const placed = assignSeats(crew, 112, 60)
+  for (const [id, pl] of placed) {
+    if (pl.kind !== 'staff') continue
+    const path = raidPath(pl, 112, 60, 0)
+    expect(path).toHaveLength(5)
+    const highest = Math.min(...path.map(p => p.y))
+    expect(highest).toBeGreaterThanOrEqual(pl.cluster.y - 4) // 不再爬到最上面的大走道
+    expect(path[1].y).toBe(path[0].y) // 先沿走廊橫走，起點跟散步的貓同一列
+    void id
+  }
+})
