@@ -1,4 +1,4 @@
-import type { Coworker, OfficeMode } from '../types'
+import type { Coworker, ErrandKind, OfficeMode } from '../types'
 
 // 俯視平面圖：上排會議室＋主管室，下方員工區（四人一組、隔板），底部走廊
 const MIN_W = 48
@@ -16,6 +16,10 @@ const AISLE = 6
 const CLUSTER_GAP = 4
 const BOTTOM = 10 // 底部走廊＋牆
 const BOSS_W = 17
+// 底部走廊家具，由左到右：盆栽 1～5｜檔案櫃 7～12｜（貓）｜郵筒（大門左邊）｜影印機｜盆栽
+const CABINET_X = WALL + 5
+const CAT_START = 13 // 貓從 WALL+13 起走，避開盆栽與檔案櫃
+const mailboxX = (width: number) => Math.floor(width / 2) - 7
 export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
 export const OFFICE_DOOR_W = 7
 const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
@@ -38,6 +42,7 @@ const C = {
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
+  cabinet: 0x8d6e63, cabinetDark: 0x6d4c41, handle: 0xd7ccc8, mailbox: 0xc62828, mailboxDark: 0x8e0000, folder: 0xa1887f, parcel: 0xbcaaa4,
   teamRug: 0xeadfc8, teamRugEdge: 0xc9a227, teamText: 0x5d4037,
   wait: 0xffca28, waitDark: 0xff8f00, plane: 0xf1f8ff, planeFold: 0xb0bec5, envelope: 0xfff8e1, envelopeLine: 0xd84315,
 }
@@ -160,7 +165,7 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
 
 // ---------- 走路：沿走道走到新座位 ----------
 
-export type Walker = { id: string; path: Seat[]; start: number }
+export type Walker = { id: string; path: Seat[]; start: number; kind?: ErrandKind }
 
 /** 從 from 走到 to 的路線（只走水平／垂直線段）：出座位 → 上方走道 → 主管室門 → 目的地 */
 export function route(from: Placement, to: Placement, width: number, rows: number): Seat[] {
@@ -179,6 +184,40 @@ export function route(from: Placement, to: Placement, width: number, rows: numbe
     return [pl.stand, { x: pl.stand.x, y: aisleY }, { x: side, y: aisleY }, { x: side, y: hall }]
   }
   return [...exit(from), ...exit(to).reverse()]
+}
+
+export function pathLength(path: Seat[]): number {
+  let n = 0
+  for (let i = 0; i < path.length - 1; i++) n += Math.abs(path[i + 1].x - path[i].x) + Math.abs(path[i + 1].y - path[i].y)
+  return n
+}
+
+/** 對外動作的目的地（站在家具前面的位置）：影印機、檔案櫃、郵筒 */
+export function errandSpot(kind: ErrandKind, width: number, rows: number): Seat {
+  const h = rows * 2
+  const cpx = width - WALL - 16
+  const y = h - WALL - 10 // 底部走廊，站在家具上方
+  if (kind === 'mail') return { x: cpx + 3, y }
+  if (kind === 'file') return { x: CABINET_X + 3, y }
+  return { x: mailboxX(width) + 1, y }
+}
+
+/** 座位 → 上方大走道 → 座位群之間（或右側）的直走道 → 底部走廊 → 目的地，再原路回座位 */
+export function errandRoute(from: Placement, kind: ErrandKind, width: number, rows: number): Seat[] {
+  const L = layout(width, rows)
+  const hall = OPEN_Y + 3
+  const k0 = L.clusters[0]
+  const aisleX = L.cols > 1 ? k0.x + CLUSTER_W + Math.floor(AISLE / 2) : k0.x + CLUSTER_W + 3
+  const spot = errandSpot(kind, width, rows)
+  // 借用 route 的「出座位到大走道」那一段：route(from, from) 的前半
+  const out = route(from, from, width, rows)
+  const exit = out.slice(0, Math.ceil(out.length / 2))
+  const last = exit[exit.length - 1]
+  const go = [...exit]
+  if (last.y !== hall) go.push({ x: last.x, y: hall })
+  go.push({ x: aisleX, y: hall }, { x: aisleX, y: spot.y }, { x: spot.x, y: spot.y })
+  const back = [...go].reverse().slice(1)
+  return [...go, ...back]
 }
 
 export type Step = Seat & { dx: number; dy: number } // 位置＋這一段的行進方向（-1／0／1）
@@ -329,6 +368,20 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   p.rect(cpx, cpy, 8, 1, C.copierTop)
   p.rect(cpx + 1, cpy + 2, 4, 2, C.paper)
   p.set(cpx + 6, cpy + 2, frame % 4 < 2 ? C.led : C.copierTop)
+
+  // 檔案櫃（左下盆栽右邊）：三層抽屜
+  const fx = CABINET_X
+  p.rect(fx, cpy - 1, 6, 6, C.cabinet)
+  for (const dy of [0, 2, 4]) {
+    p.rect(fx, cpy - 1 + dy, 6, 1, C.cabinetDark)
+    p.set(fx + 3, cpy + dy, C.handle)
+  }
+
+  // 郵筒（大門左邊；右邊在窄面板會撞到影印機）
+  const mx = mailboxX(w)
+  p.rect(mx, h - WALL - 6, 3, 4, C.mailbox)
+  p.rect(mx, h - WALL - 6, 3, 1, C.mailboxDark)
+  p.set(mx + 1, h - WALL - 4, C.mailboxDark)
 }
 
 // ---------- 隔板（亮面＋暗面，看起來有高度） ----------
@@ -430,6 +483,21 @@ function person(p: Px, cx: number, cy: number, who: Coworker, frame: number, dir
  * 走路中的人：身體跟著行進方向轉。上下走肩膀橫、左右走肩膀直；
  * 頭前緣一個膚色點代表臉朝哪；雙腳沿行進方向一前一後交替
  */
+/** 走路時手上拿的東西（去程才拿，回程空手） */
+function carry(p: Px, at: Step, kind: ErrandKind) {
+  const x = at.x + (at.dx !== 0 ? at.dx * 3 : 3)
+  const y = at.y + (at.dx !== 0 ? 1 : 2)
+  if (kind === 'mail') {
+    p.rect(x, y, 2, 2, C.paper)
+    p.set(x + 1, y, C.ink)
+  } else if (kind === 'file') {
+    p.rect(x, y, 2, 2, C.folder)
+  } else {
+    p.rect(x, y, 2, 2, C.parcel)
+    p.set(x, y, C.cabinetDark)
+  }
+}
+
 function walking(p: Px, at: Step, who: Coworker, frame: number) {
   const hh = hash(who.id)
   const shirt = who.role === 'manager' ? C.suit : SHIRTS[hh % SHIRTS.length]
@@ -565,7 +633,7 @@ export function catPose(frame: number, range: number) {
 }
 
 export function catRange(width: number): number {
-  return width - 2 * WALL - 6 - 17 - CAT_W // 避開左下盆栽與右下影印機
+  return width - 2 * WALL - CAT_START - 17 - CAT_W // 從檔案櫃右邊走到影印機左邊
 }
 
 export const TREAT_FRAMES = 20 // 餵貓後坐著吃約 5 秒
@@ -583,7 +651,7 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
   const { x, facingRight } = pose
   const sitting = fed || pose.sitting
   const rows = sitting ? CAT_SIT[frame % 2] : catWalkRows(frame)
-  const x0 = WALL + 7 + x
+  const x0 = WALL + CAT_START + x
   const y0 = p.h - WALL - CAT_H - (startled && !fed && frame % 2 ? 2 : 0)
   const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
   rows.forEach((row, j) => {
@@ -682,9 +750,12 @@ export function drawScene(
   for (const k of L.clusters) partitions(p, k)
 
   const moving = new Map<string, Step>()
+  const errandOut = new Map<string, ErrandKind>() // 正在去程、手上拿東西的人
   for (const w of walkers) {
     const at = walkerPos(w, frame)
-    if (at) moving.set(w.id, at)
+    if (!at) continue
+    moving.set(w.id, at)
+    if (w.kind && (frame - w.start) * WALK_SPEED < pathLength(w.path) / 2) errandOut.set(w.id, w.kind)
   }
   const placed = assignSeats(crew, width, rows, seating)
   const byId = new Map(crew.map(c => [c.id, c]))
@@ -700,6 +771,8 @@ export function drawScene(
   for (const [id, at] of moving) {
     const who = byId.get(id)
     if (who) walking(p, at, who, frame)
+    const kind = errandOut.get(id)
+    if (who && kind) carry(p, at, kind)
   }
 
   for (const n of opts.notices ?? []) {

@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Coworker, CustomButton, OfficeMode, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import type { Coworker, CustomButton, ErrandKind, OfficeMode, Role } from '../types'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -38,6 +38,7 @@ const seenSent = new Map<string, number | undefined>()
 const seenGot = new Map<string, number | undefined>()
 const seenMode = new Map<string, OfficeMode>()
 const seenBlocked = new Map<string, number | undefined>()
+const seenErrand = new Map<string, number | undefined>()
 
 const sceneOpts = (): SceneOptions => {
   planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
@@ -81,6 +82,18 @@ async function sharedDir($: EngineInterface): Promise<string> {
     dir = `${home.replace(/\\/g, '/')}/.claude/pixel-office/sessions`
   }
   return dir
+}
+
+/** 這次成功的工具呼叫算不算對外動作：寄信、上傳文件、推 git */
+export function detectErrand(tool: string, input: unknown): ErrandKind | undefined {
+  const t = tool.toLowerCase()
+  if (/gmail|mail/.test(t) && /(send|reply|forward|draft)/.test(t)) return 'mail'
+  if (/(google_?drive|notion)/.test(t) && /(create|update|upload|copy|move|duplicate)/.test(t)) return 'file'
+  if (t === 'bash' || t === 'powershell') {
+    const cmd = String((input as { command?: unknown })?.command ?? '')
+    if (/\bgit\b[^\n|;&]*\bpush\b/.test(cmd)) return 'push'
+  }
+  return undefined
 }
 
 /** 工具結果是不是被 auto 模式分類器擋下（訊息含「auto mode classifier」） */
@@ -184,7 +197,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<Profile | 
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -266,6 +279,14 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
     }
     seenGot.set(c.id, c.gotAt)
 
+    // 對外動作：從座位走去影印機／檔案櫃／郵筒再走回來（正在走路的不疊加）
+    const errandAt = c.errand?.at
+    if (seenErrand.has(c.id) && errandAt !== undefined && errandAt !== seenErrand.get(c.id) && !walkers.some(w => w.id === c.id)) {
+      const pl = lastPlaced?.get(c.id)
+      if (pl && width > 0 && rows > 0) walkers.push({ id: c.id, path: errandRoute(pl, c.errand!.kind, width, rows), start: frame, kind: c.errand!.kind })
+    }
+    seenErrand.set(c.id, errandAt)
+
     const blockedAt = c.blocked?.at
     if (seenBlocked.has(c.id) && blockedAt !== undefined && blockedAt !== seenBlocked.get(c.id) && !c.isMe) {
       $.ui.toast(`${c.name} 被權限擋下（${c.blocked!.tool}），要你在它的視窗說「放行」`)
@@ -312,6 +333,7 @@ async function refresh($: EngineInterface) {
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
+          errand: s.errand && ['mail', 'file', 'push'].includes(s.errand.kind) && typeof s.errand.at === 'number' ? { kind: s.errand.kind, at: s.errand.at } : undefined,
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
           gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
@@ -626,6 +648,8 @@ export const register: Register = on => {
         await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else {
+        const kind = detectErrand(name, e)
+        if (kind) me = { ...me, errand: { kind, at: await $.clock.now() } }
         await setMode($, 'thinking')
       }
     } catch {}

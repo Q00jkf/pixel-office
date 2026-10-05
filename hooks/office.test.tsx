@@ -777,3 +777,70 @@ test('desktop: a promotion walks and a message flies a paper plane (layout is sh
   expect(src).toContain('#f1f8ff') // 紙飛機的顏色出現在 Desktop 的 SVG 裡
   await ui2.unmount()
 })
+
+// ---------- 0.7.0：對外動作的跑腿動畫 ----------
+
+import { detectErrand } from './register'
+import { errandRoute, errandSpot } from './scene'
+
+test('outgoing actions are recognised: mail, file upload, git push', () => {
+  expect(detectErrand('mcp__claude_ai_Gmail__send_message', {})).toBe('mail')
+  expect(detectErrand('mcp__claude_ai_Gmail__create_draft', {})).toBe('mail')
+  expect(detectErrand('mcp__claude_ai_Gmail__search_threads', {})).toBeUndefined()
+  expect(detectErrand('mcp__claude_ai_Google_Drive__create_file', {})).toBe('file')
+  expect(detectErrand('mcp__claude_ai_Notion__notion-update-page', {})).toBe('file')
+  expect(detectErrand('mcp__claude_ai_Notion__notion-fetch', {})).toBeUndefined()
+  expect(detectErrand('Bash', { command: 'cd repo && git push origin main' })).toBe('push')
+  expect(detectErrand('PowerShell', { command: 'git -C x push' })).toBe('push')
+  expect(detectErrand('Bash', { command: 'git status' })).toBeUndefined()
+  expect(detectErrand('Read', { file_path: 'push.md' })).toBeUndefined()
+})
+
+test('errand routes go seat → furniture → seat along aisles, never into a wall', () => {
+  for (const [w, r] of [[48, 40], [60, 44], [112, 60]] as const) {
+    const crew = [{ ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }, ...layout(w, r).seats.slice(0, 6).map((_, i) => P(`s${i}`, `s${i}`))]
+    for (const pl of assignSeats(crew, w, r).values()) {
+      for (const kind of ['mail', 'file', 'push'] as const) {
+        const path = errandRoute(pl, kind, w, r)
+        expect(path[0]).toEqual(pl.stand)
+        expect(path[path.length - 1]).toEqual(pl.stand)
+        expect(path).toContainEqual(errandSpot(kind, w, r))
+        for (let i = 0; i < path.length - 1; i++) {
+          expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
+          for (const p of [path[i], path[i + 1]]) expect(p.x >= 5 && p.x <= w - 6 && p.y >= 2 && p.y < r * 2 - 2).toBe(true)
+        }
+      }
+    }
+  }
+})
+
+test('a successful Gmail send records a mail errand; a failed one does not', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('tool.call', (_$, e) => {
+    if (String(e.tool) === 'mcp__claude_ai_Gmail__send_message') return { result: 'sent' } as any
+    if (String(e.tool) === 'mcp__claude_ai_Gmail__reply') return { result: 'boom', isError: true } as any
+    return undefined
+  })
+  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__reply' } as any).catch(() => undefined)
+  expect(JSON.parse(writes[writes.length - 1]).errand).toBeUndefined()
+  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message' } as any).catch(() => undefined)
+  expect(JSON.parse(writes[writes.length - 1]).errand.kind).toBe('mail')
+})
+
+test('the office now has a filing cabinet and a mailbox', () => {
+  const s = drawScene([], 0, 60, 44)
+  expect([...s.px].some(c => c === 0x8d6e63)).toBe(true) // 檔案櫃
+  expect([...s.px].some(c => c === 0xc62828)).toBe(true) // 郵筒
+})
+
+test('bottom-corridor furniture never overlaps (cabinet, mailbox, copier) at any width', () => {
+  for (const w of [48, 60, 80, 112]) {
+    const cab = [2 + 5, 2 + 5 + 5] // CABINET_X..+5
+    const mb = [Math.floor(w / 2) - 7, Math.floor(w / 2) - 5]
+    const cp = [w - 2 - 16, w - 2 - 16 + 7]
+    const door = [Math.floor(w / 2) - 3, Math.floor(w / 2) + 2]
+    const overlap = (a: number[], b: number[]) => a[0] <= b[1] && b[0] <= a[1]
+    expect(overlap(cab, mb) || overlap(mb, cp) || overlap(cab, cp) || overlap(cab, door) || overlap(cp, door)).toBe(false)
+  }
+})

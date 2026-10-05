@@ -2,6 +2,9 @@ export type OfficeMode = 'idle' | 'thinking' | 'typing' | 'reading' | 'error' | 
 
 export type Role = 'manager' | 'staff'
 
+/** 對外動作的種類：mail＝寄信（影印機）、file＝上傳文件（檔案櫃）、push＝推 git（郵筒） */
+export type ErrandKind = 'mail' | 'file' | 'push'
+
 /** 辦公室裡的一位同事 = 一個 Claude Code session */
 export type Coworker = {
   id: string
@@ -18,6 +21,8 @@ export type Coworker = {
   blocked?: { tool: string; at: number }
   /** 歸屬：主管的 ListAgents 名稱（例如 user-30）；符合在線主管的就是他的 peer，坐右邊那一區 */
   team?: string
+  /** 最近一次對外動作（寄信／上傳文件／推 git）：各視窗據此播放走去影印機／檔案櫃／郵筒的動畫 */
+  errand?: { kind: ErrandKind; at: number }
   /** ListAgents 上的名稱（SendMessage 的收件者就是它），不顯示，只用來找人 */
   agent?: string
   /** 最近一次送出訊息：收件者名稱與時間（ms） */
