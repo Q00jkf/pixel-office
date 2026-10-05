@@ -752,3 +752,28 @@ test('walking into the manager office goes through the middle of the door, body 
     expect(x + 3).toBeLessThan(L.officeX + OFFICE_DOOR_X + OFFICE_DOOR_W)
   }
 })
+
+test('desktop: a promotion walks and a message flies a paper plane (layout is shared, not switched off)', async ($, on) => {
+  const NOW = 2_000_000
+  let other = { id: 'b', name: 'u79', role: 'staff', mode: 'idle', tool: '', agent: 'user-79', updatedAt: NOW, left: false } as any
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: NOW }))
+  on('fs.write', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('fs.list', () => ({ value: [{ name: 'b.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }) as any)
+  on('fs.read', (_$, e) => ({ value: e.path.endsWith('b.json') ? JSON.stringify(other) : '[]' }))
+  const DESK = {
+    plugin: 'pixel-office', surface: 'desktop', component: 'Pane', requestId: 'pixel-office',
+    props: { title: '像素辦公室', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 46 }, view: undefined },
+  } as any
+  const ui = await $.ui.mount(DESK)
+  await $.command.run({ command: 'office', args: 'who' } as any) // 第一次看到 b：只記錄，不觸發
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'me-agent' } as any) // 我登記 agent，b 才找得到我
+  other = { ...other, sentTo: 'me-agent', sentAt: NOW } // b 傳訊息給我
+  await $.command.run({ command: 'office', args: 'who' } as any)
+  await ui.unmount()
+  const ui2 = await $.ui.mount(DESK) // 重畫一次 Desktop
+  const src = String((await ui2.find({ type: 'Svg' }))!.props.source)
+  expect(src).toContain('#f1f8ff') // 紙飛機的顏色出現在 Desktop 的 SVG 裡
+  await ui2.unmount()
+})

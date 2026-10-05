@@ -26,6 +26,7 @@ let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
 let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
+let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
@@ -457,7 +458,7 @@ export const register: Register = on => {
 
     $.clock.every(250, () => {
       frame += 1
-      if (width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
+      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
     // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
@@ -653,10 +654,11 @@ export const register: Register = on => {
       const els = $.ui.resolve(e) as Record<string, unknown>
       const { Box, Text, Button, Link } = $.ui.resolve(e)
       const Svg = els.Svg as typeof Box | undefined
-      width = 0 // 終端的 blit 只給 Raster 用
+      rasterOpen = false // 終端的 blit 只給 Raster 用（版面 width／rows 照常更新，走路與紙飛機才算得出位置）
       const mine = await read($, buttons)
       if (!Svg) {
         svgOpen = false
+    rasterOpen = true
         return (
           <Box flexDirection="column">
             <Text bold>像素辦公室：{shown.length} 人在線</Text>
@@ -671,8 +673,12 @@ export const register: Register = on => {
       let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
       let svg = ''
       for (let tries = 0; tries < 4; tries++) {
-        const placed = assignSeats(shown, sw, sr, lastPlaced ?? undefined)
-        svg = encodeSvg(drawScene(shown, frame, sw, sr, liveWalkers(), placed, sceneOpts()))
+        if (width !== sw || rows !== sr) {
+          width = sw
+          rows = sr
+        }
+        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined)
+        svg = encodeSvg(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
