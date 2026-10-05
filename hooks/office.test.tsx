@@ -734,3 +734,21 @@ test('closed sessions are read once, then skipped until the one-minute recheck',
   await $.command.run({ command: 'office', args: 'who' } as any)
   expect(goneReads()).toBe(2) // 一分鐘後重新確認
 })
+
+import { OFFICE_DOOR_W, OFFICE_DOOR_X } from './scene'
+
+test('walking into the manager office goes through the middle of the door, body fully inside the doorway', () => {
+  for (const [w, r] of [[48, 40], [60, 44], [112, 60]] as const) {
+    const me = P('zz', 'IT')
+    const before = assignSeats([me], w, r)
+    const after = assignSeats([{ ...me, role: 'manager' as const }], w, r, before)
+    const path = route(before.get('zz')!, after.get('zz')!, w, r)
+    const L = layout(w, r)
+    const wallY = 2 + 20 // 上排房間與員工區之間的牆（WALL + TOP_H）
+    const crossing = path.findIndex((p, i) => i > 0 && path[i - 1].x === p.x && (path[i - 1].y - wallY) * (p.y - wallY) < 0)
+    expect(crossing).toBeGreaterThan(0)
+    const x = path[crossing].x
+    expect(x - 3).toBeGreaterThanOrEqual(L.officeX + OFFICE_DOOR_X)
+    expect(x + 3).toBeLessThan(L.officeX + OFFICE_DOOR_X + OFFICE_DOOR_W)
+  }
+})

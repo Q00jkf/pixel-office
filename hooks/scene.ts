@@ -16,6 +16,8 @@ const AISLE = 6
 const CLUSTER_GAP = 4
 const BOTTOM = 10 // 底部走廊＋牆
 const BOSS_W = 17
+export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
+export const OFFICE_DOOR_W = 7
 const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
 
 const C = {
@@ -164,8 +166,8 @@ export type Walker = { id: string; path: Seat[]; start: number }
 export function route(from: Placement, to: Placement, width: number, rows: number): Seat[] {
   const L = layout(width, rows)
   const hall = OPEN_Y + 3 // 員工區上方的大走道（離牆 3 像素，人不貼牆）
-  const door = L.officeX + 3
-  const inside = WALL + TOP_H - 4
+  const door = L.officeX + OFFICE_DOOR_X + Math.floor(OFFICE_DOOR_W / 2) // 門洞正中央：人寬 7，身體整個落在門洞裡
+  const inside = WALL + TOP_H - 5 // 進房後的橫向走道，不貼地毯金邊
   const exit = (pl: Placement): Seat[] => {
     if (pl.kind === 'boss') return [pl.stand, { x: pl.stand.x, y: inside }, { x: door, y: inside }, { x: door, y: hall }]
     // 上排：椅子後面就是空地，直接往上到大走道
@@ -269,14 +271,14 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   // 門：會議室、主管室（含開門弧線）、大門
   const meetDoor = Math.floor(officeX / 2) - 2
   p.rect(meetDoor, WALL + TOP_H, 4, WALL, C.tileA)
-  p.rect(officeX + 1, WALL + TOP_H, 4, WALL, C.tileA)
-  for (const [dx, dy] of [[0, -1], [1, -1], [2, -2], [3, -3]]) p.set(officeX + 1 + dx, WALL + TOP_H + dy, C.ink)
+  p.rect(officeX + OFFICE_DOOR_X, WALL + TOP_H, OFFICE_DOOR_W, WALL, C.tileA)
+  for (let i = 0; i < OFFICE_DOOR_W; i += 2) p.set(officeX + OFFICE_DOOR_X + i, WALL + TOP_H - 1 - Math.floor(i / 2), C.ink) // 開門弧線
   const front = Math.floor(w / 2) - 3
   p.rect(front, h - WALL, 6, WALL, C.tileA)
 
   // 門牌：掛在上排房間與員工區之間那道牆（剛好一整個終端列），中文寬兩格放不下，用英文
   const signRow = (WALL + TOP_H) / 2
-  p.labels.push({ row: signRow, col: officeX + 6, text: 'MANAGER', fg: C.gold, bg: C.wall })
+  p.labels.push({ row: signRow, col: officeX + OFFICE_DOOR_X + OFFICE_DOOR_W + 1, text: 'MANAGER', fg: C.gold, bg: C.wall }) // 門洞右邊，不遮住走過門的人
   if (meetDoor - WALL - 1 >= 7) p.labels.push({ row: signRow, col: WALL + 1, text: 'MEETING', fg: C.glassHi, bg: C.wall })
 
   // 會議室：白板、橢圓長桌（亮面）、一圈椅子
