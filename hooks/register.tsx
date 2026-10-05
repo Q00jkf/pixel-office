@@ -458,7 +458,7 @@ export const register: Register = on => {
 
     $.clock.every(250, () => {
       frame += 1
-      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
+      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) }).catch(() => undefined)
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
     // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
@@ -658,7 +658,6 @@ export const register: Register = on => {
       const mine = await read($, buttons)
       if (!Svg) {
         svgOpen = false
-    rasterOpen = true
         return (
           <Box flexDirection="column">
             <Text bold>像素辦公室：{shown.length} 人在線</Text>
@@ -710,6 +709,7 @@ export const register: Register = on => {
       )
     }
     svgOpen = false
+    rasterOpen = true
 
     const { Box, Raster, Button, Text, Link } = $.ui.resolve(e)
     const mine = await read($, buttons)

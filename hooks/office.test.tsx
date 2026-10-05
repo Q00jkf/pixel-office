@@ -777,3 +777,31 @@ test('desktop: a promotion walks and a message flies a paper plane (layout is sh
   expect(src).toContain('#f1f8ff') // 紙飛機的顏色出現在 Desktop 的 SVG 裡
   await ui2.unmount()
 })
+
+import { mock } from 'claude-code/testing'
+
+test('the terminal pane animates: the 250 ms timer blits new frames while it is open', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.write', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'me' }) as any)
+  on('session.cwd', () => ({ value: 'C:/work/hub' }) as any)
+  mock.store(on)
+  const blits: string[] = []
+  on('ui.blit', (_$: any, e: any) => {
+    blits.push(e.cells)
+    return {} as any
+  })
+  await ($ as any).session.start({ cwd: 'C:/work/hub', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await clock.advance(1000)
+  expect(blits.length).toBeGreaterThanOrEqual(3)
+  expect(new Set(blits).size).toBeGreaterThan(1) // 畫格真的在變（貓在走、時鐘在轉）
+  await ui.unmount()
+})
