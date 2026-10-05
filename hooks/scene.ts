@@ -646,6 +646,60 @@ export function catMoveFrame(frame: number, treatFrame: number | undefined, catO
   return frame - catOffset - paused
 }
 
+// ---------- 放貓咬人：貓從走廊跑到員工座位旁，咬幾口再跑回來 ----------
+
+/** 放貓：targetId 被咬的人、start 放出去的那一格 */
+export type CatRaid = { targetId: string; start: number }
+export const CAT_RUN = 6 // 跑步：每格動畫跑幾個像素（人走路是 2）
+export const BITE_FRAMES = 12 // 咬約 3 秒
+
+/** 貓的去程：從貓當下在走廊的位置 → 直走道 → 大走道 → 被咬的人右手邊（借用跑腿路線反過來走） */
+export function raidPath(target: Placement, width: number, rows: number, start: number, treatFrame?: number, catOffset = 0): Seat[] {
+  const pose = catPose(catMoveFrame(start, treatFrame, catOffset), catRange(width))
+  const out = errandRoute(target, 'file', width, rows)
+  const go = out.slice(0, Math.ceil(out.length / 2)) // 座位 → … → 檔案櫃
+  const home = { x: WALL + CAT_START + pose.x + CAT_W / 2, y: go[go.length - 1].y }
+  const mid = [...go].reverse().slice(1, -1) // 去掉檔案櫃與座位本身
+  const turn = mid[mid.length - 1] ?? home // 走道上正對座位的那一點：改停在人的右手邊，不先走到他頭上再折回
+  const bx = target.stand.x + 6
+  return [home, ...mid.slice(0, -1), { x: bx, y: turn.y }, { x: bx, y: target.stand.y + 4 }]
+}
+
+/** 放貓的總長度（格）：去程＋咬＋回程 */
+export function raidFrames(path: Seat[]): number {
+  return Math.ceil(pathLength(path) / CAT_RUN) * 2 + BITE_FRAMES
+}
+
+type RaidPose = { at: Seat; dx: number; biting: boolean }
+
+export function raidPose(path: Seat[], start: number, frame: number): RaidPose | null {
+  const run = Math.ceil(pathLength(path) / CAT_RUN)
+  const t = frame - start
+  if (t < 0 || t >= run * 2 + BITE_FRAMES) return null
+  if (t >= run && t < run + BITE_FRAMES) return { at: path[path.length - 1], dx: -1, biting: true }
+  const back = t >= run + BITE_FRAMES
+  const pts = back ? [...path].reverse() : path
+  const w: Walker = { id: 'cat', path: pts, start: 0 }
+  const step = walkerPos(w, ((back ? t - run - BITE_FRAMES : t) * CAT_RUN) / WALK_SPEED)
+  if (!step) return { at: pts[pts.length - 1], dx: 1, biting: false }
+  return { at: step, dx: step.dx || 1, biting: false }
+}
+
+function raidingCat(p: Px, pose: RaidPose, frame: number) {
+  const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
+  // 咬：坐姿往左撲（每兩格往前 2 像素），嘴邊冒紅色咬痕
+  const lunge = pose.biting && frame % 2 ? -2 : 0
+  const rows = pose.biting ? CAT_SIT[frame % 2] : catWalkRows(frame)
+  const x0 = pose.at.x - CAT_W / 2 + lunge
+  const y0 = pose.at.y - CAT_H + 1
+  const facingRight = pose.dx > 0
+  rows.forEach((row, j) => {
+    const line = facingRight ? row : [...row].reverse().join('')
+    for (let i = 0; i < CAT_W; i++) if (line[i] !== '.') p.set(x0 + i, y0 + j, color[line[i]])
+  })
+  if (pose.biting && frame % 2) for (const [dx, dy] of [[-2, 2], [-3, 3], [-2, 4], [-4, 1]]) p.set(x0 + dx, y0 + dy, C.err)
+}
+
 function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOffset = 0) {
   const fed = treatFrame !== undefined && frame >= treatFrame && frame - treatFrame < TREAT_FRAMES
   const pose = catPose(catMoveFrame(frame, treatFrame, catOffset), catRange(p.w))
@@ -716,7 +770,7 @@ function envelope(p: Px, x: number, y: number) {
   p.set(x + 1, y, C.envelopeLine)
 }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[] }
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid }
 
 export function drawScene(
   crew: Coworker[],
@@ -759,6 +813,12 @@ export function drawScene(
     if (w.kind && (frame - w.start) * WALK_SPEED < pathLength(w.path) / 2) errandOut.set(w.id, w.kind)
   }
   const placed = assignSeats(crew, width, rows, seating)
+  // 放貓：被咬的人坐在位子上才算數；咬的那幾格他會抖、頭上冒紅色驚嘆號（借用 error 的樣子）
+  const prey = opts.raid ? placed.get(opts.raid.targetId) : undefined
+  const raid = opts.raid && prey?.kind === 'staff' && !moving.has(opts.raid.targetId)
+    ? raidPose(raidPath(prey, width, rows, opts.raid.start, opts.treatFrame, opts.catOffset), opts.raid.start, frame)
+    : null
+  if (raid?.biting) crew = crew.map(c => (c.id === opts.raid!.targetId ? { ...c, mode: 'error' as const } : c))
   const byId = new Map(crew.map(c => [c.id, c]))
 
   // 主管室：有主管且沒在走路才坐在位子上
@@ -785,7 +845,8 @@ export function drawScene(
     if (at) plane(p, at)
   }
 
-  cat(p, crew.some(c => c.mode === 'error'), frame, opts.treatFrame, opts.catOffset)
+  if (raid) raidingCat(p, raid, frame)
+  else cat(p, crew.some(c => c.mode === 'error'), frame, opts.treatFrame, opts.catOffset)
 
   const extra = crew.length - placed.size
   if (extra > 0) p.labels.push({ row: 0, col: WALL, text: `+${extra}`, fg: C.white, bg: C.wall })

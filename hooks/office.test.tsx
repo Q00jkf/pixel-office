@@ -935,3 +935,60 @@ test('after /resume the window follows the new session id: old file marked left,
   expect(now.name).toBe('boss')
   expect(now.role).toBe('manager')
 })
+
+// ---------- 放貓咬人 ----------
+
+import { BITE_FRAMES, raidFrames, raidPath, raidPose } from './scene'
+
+test('a released cat runs along the aisles to the prey, bites, then runs back home', () => {
+  const crew = [P('boss', 'K', 'idle', true, 'manager'), P('a', 'aa'), P('b', 'bb')]
+  for (const [w, r] of [[60, 46], [112, 80]] as const) {
+    const placed = assignSeats(crew, w, r)
+    for (const id of ['a', 'b']) {
+      const pl = placed.get(id)!
+      const path = raidPath(pl, w, r, 10)
+      // 只走水平／垂直線段，終點在被咬的人右手邊
+      for (let i = 0; i < path.length - 1; i++) expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
+      const end = path[path.length - 1]
+      expect(end.x - pl.stand.x).toBe(6)
+      expect(Math.abs(end.y - pl.stand.y)).toBeLessThan(8)
+      const total = raidFrames(path)
+      const run = (total - BITE_FRAMES) / 2
+      expect(raidPose(path, 10, 9)).toBe(null)
+      expect(raidPose(path, 10, 10 + run)?.biting).toBe(true)
+      expect(raidPose(path, 10, 10 + run + BITE_FRAMES - 1)?.biting).toBe(true)
+      const home = raidPose(path, 10, 10 + total - 1)!
+      expect(home.biting).toBe(false)
+      expect(Math.abs(home.at.x - path[0].x) + Math.abs(home.at.y - path[0].y)).toBeLessThanOrEqual(6)
+      expect(raidPose(path, 10, 10 + total)).toBe(null)
+    }
+  }
+})
+
+test('while biting, the prey shakes with a red mark and the boss cannot be the prey', () => {
+  const crew = [P('boss', 'K', 'idle', true, 'manager'), P('a', 'aa')]
+  const w = 60
+  const r = 46
+  const placed = assignSeats(crew, w, r)
+  const path = raidPath(placed.get('a')!, w, r, 0)
+  const run = (raidFrames(path) - BITE_FRAMES) / 2
+  const f = run % 2 ? run : run + 1 // 咬的那幾格裡的奇數格（咬痕一格有、一格沒有）
+  const red = (px: Uint32Array) => [...px].filter(c => c === 0xe53935).length
+  const bitten = drawScene(crew, f, w, r, [], placed, { raid: { targetId: 'a', start: 0 } })
+  const calm = drawScene(crew, f, w, r, [], placed)
+  expect(red(bitten.px)).toBeGreaterThan(red(calm.px))
+  // 指到主管：不放貓，畫面跟平常一樣
+  const boss = drawScene(crew, f, w, r, [], placed, { raid: { targetId: 'boss', start: 0 } })
+  expect([...boss.px]).toEqual([...calm.px])
+})
+
+test('the release button and /office bite: needs the pane first, then sends the cat', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount(PANE_PROPS)
+  expect((await ui.find({ key: 'bite' }))?.text).toBe('放貓')
+  await ui.press({ key: 'bite' }) // 只有自己（員工）：咬自己
+  const again = await $.command.run({ command: 'office', args: 'bite' } as any)
+  expect(String((again as any).text)).toContain('貓還在外面')
+  await ui.unmount()
+})

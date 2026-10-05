@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
-import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
@@ -30,6 +30,8 @@ let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要�
 let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
 let catOffset = 0
+let raid: CatRaid | undefined
+let raidEnd = 0 // 放貓結束的那一格；結束後把這段時間併進 catOffset，貓從出發的地方接著走
 let planes: Plane[] = []
 let permissionMode = ''
 let instance = '' // 這個視窗（程序）的實例代碼：撞號偵測用
@@ -47,15 +49,35 @@ const seenErrand = new Map<string, number | undefined>()
 const sceneOpts = (): SceneOptions => {
   planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
   notices = notices.filter(n => frame < n.end)
-  return { night: nightMode, treatFrame, catOffset, planes, notices }
+  if (raid && frame >= raidEnd) {
+    catOffset += raidEnd - raid.start
+    raid = undefined
+  }
+  return { night: nightMode, treatFrame, catOffset, planes, notices, raid }
 }
 
 // 餵貓：把上一次吃飯停下的時間併進位移，再開始新的一次
 function feedCat() {
+  if (raid) return // 貓出去咬人了，不在碗旁邊
   if (treatFrame !== undefined) catOffset += Math.min(TREAT_FRAMES, frame - treatFrame)
   treatFrame = frame
 }
 let lastPlaced: Map<string, Placement> | null = null
+
+// 放貓咬人：name 指定名牌，沒指定就隨機挑一位坐在員工座位的人（先挑別人，只剩自己才咬自己）；回傳給使用者看的一句話
+function releaseCat(name?: string): string {
+  if (raid) return '貓還在外面，等牠回來再放。'
+  if (!lastPlaced || width === 0) return '先輸入 /office 打開辦公室面板，貓才知道大家坐哪。'
+  const staff = everyone().filter(c => lastPlaced!.get(c.id)?.kind === 'staff')
+  const want = name?.trim().toLowerCase()
+  const pool = want ? staff.filter(c => c.name.toLowerCase() === want) : staff.filter(c => !c.isMe).length > 0 ? staff.filter(c => !c.isMe) : staff
+  if (pool.length === 0) return want ? `員工座位上沒有叫 ${name!.trim()} 的人（主管在主管室，貓進不去）。` : '員工座位上沒有人可以咬。'
+  const prey = pool[Math.floor(Math.random() * pool.length)]
+  const start = frame + 1
+  raid = { targetId: prey.id, start }
+  raidEnd = start + raidFrames(raidPath(lastPlaced.get(prey.id)!, width, rows, start, treatFrame, catOffset))
+  return `🐈 放貓了，目標：${prey.name}`
+}
 
 // 角色變了（員工↔主管）就排一段走路動畫：從舊座位沿走道走到新座位
 function trackMoves(list: Coworker[]) {
@@ -632,6 +654,11 @@ export const register: Register = on => {
     const [sub, ...rest] = e.args.trim().split(/\s+/)
     const value = rest.join(' ')
     if (sub === 'role') return { text: await applyProfile($, { role: value }) }
+    if (sub === 'bite') {
+      const text = releaseCat(value)
+      $.ui.invalidate('ui.render')
+      return { text }
+    }
     if (sub === 'name') return { text: await applyProfile($, { name: value }) }
     if (sub === 'agent') return { text: await applyProfile($, { agent: value }) }
     if (sub === 'title') return { text: await applyProfile($, { title: value }) }
@@ -652,7 +679,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -774,6 +801,7 @@ export const register: Register = on => {
           <Box flexDirection="row">
             <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
             <Button key="cat" label="餵貓" onPress={() => feedCat()} />
+            <Button key="bite" label="放貓" onPress={() => $.ui.toast(releaseCat())} />
             <Button key="night" label={nightMode ? '開燈' : '夜間模式'} onPress={toggleNight} />
           </Box>
         </Box>
@@ -811,6 +839,8 @@ export const register: Register = on => {
           <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />
           <Text> </Text>
           <Button key="cat" label="餵貓" hotkey="c" onPress={() => feedCat()} />
+          <Text> </Text>
+          <Button key="bite" label="放貓" hotkey="b" onPress={() => $.ui.toast(releaseCat())} />
           <Text> </Text>
           <Button key="night" label={nightMode ? '開燈' : '夜間模式'} hotkey="n" onPress={toggleNight} />
         </Box>
