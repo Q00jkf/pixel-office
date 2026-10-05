@@ -37,6 +37,6 @@ export type CustomButton = { label: string; prompt?: string; url?: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'pixel-office': { crew: Coworker[]; night: boolean; buttons: CustomButton[] }
+    'pixel-office': { crew: Coworker[]; night: boolean; buttons: CustomButton[]; instance: string }
   }
 }

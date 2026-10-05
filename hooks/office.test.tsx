@@ -855,3 +855,24 @@ test('the cat walks above the furniture row, not over the cabinet, mailbox or co
     }
   }
 })
+
+// ---------- 0.7.3：撞號偵測 ----------
+
+import { isCollision } from './register'
+
+test('a status file freshly written by another instance of the same session id is a collision', () => {
+  const now = 1_000_000
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000 }, 'A', now)).toBe(true)
+  expect(isCollision({ instance: 'A', updatedAt: now - 2000 }, 'A', now)).toBe(false) // 自己寫的（含熱重載後）
+  expect(isCollision({ instance: 'B', updatedAt: now - 60000 }, 'A', now)).toBe(false) // 舊檔
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000, left: true }, 'A', now)).toBe(false) // 已離開
+  expect(isCollision({ updatedAt: now - 2000 }, 'A', now)).toBe(false) // 舊版沒有 instance
+  expect(isCollision(undefined, 'A', now)).toBe(false)
+})
+
+test('every status file now carries this window\'s instance id', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  await $.command.run({ command: 'office', args: 'title x' } as any)
+  expect(typeof JSON.parse(writes[writes.length - 1]).instance).toBe('string')
+})

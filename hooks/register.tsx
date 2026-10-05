@@ -12,6 +12,7 @@ const dead = new Map<string, number>() // 檔名 → 上次確認已關的時間
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
 const night = atom({ plugin: 'pixel-office', key: 'night' } as const, false)
 const buttons = atom({ plugin: 'pixel-office', key: 'buttons' } as const, [] as CustomButton[])
+const instanceRef = atom({ plugin: 'pixel-office', key: 'instance' } as const, '')
 const READING = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead'])
 
 // 模組變數只給動畫與心跳用；熱重載會重跑 session.start 補回
@@ -31,6 +32,9 @@ let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
 let permissionMode = ''
+let instance = '' // 這個視窗（程序）的實例代碼：撞號偵測用
+let lastWriteAt = 0
+let collisionWarned = false
 let defaultName = 'me' // 預設名牌（初始值同 me.name，session.start 改成資料夾推出的值）；名牌仍是它時才自動改
 let notices: Notice[] = []
 // 每位同事上一次看到的送信／收信時間與狀態；第一次看到只記錄、不觸發（避免開面板時重播舊事件）
@@ -100,6 +104,21 @@ export function detectErrand(tool: string, input: unknown): ErrandKind | undefin
 export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?: string }): boolean {
   const msg = ran.deny ?? (ran.isError ? ran.text ?? '' : '')
   return /auto mode classifier/i.test(msg)
+}
+
+/**
+ * 撞號：自己的狀態檔最近被「另一個實例」寫過（兩個視窗共用同一個 session 編號，常見於 --resume 接到同一段對話）。
+ * 不算撞號：檔案沒有 instance（舊版寫的）、已標記離開、太久沒更新、或就是自己寫的。
+ */
+function warnCollision($: EngineInterface) {
+  if (collisionWarned) return
+  collisionWarned = true
+  $.ui.toast(`⚠ 另一個視窗和這個視窗共用同一個 session 編號（${me.id.slice(0, 8)}），辦公室資料會互相覆蓋：請關掉其中一個，用 claude --resume 選不同的對話重開`)
+}
+
+export function isCollision(own: { instance?: string; updatedAt?: number; left?: boolean } | undefined, mine: string, now: number, staleMs = 20000): boolean {
+  if (!own || !own.instance || own.instance === mine || own.left) return false
+  return typeof own.updatedAt === 'number' && now - own.updatedAt < staleMs
 }
 
 /** 從 ListAgents 名稱推名牌：取最後一段（llm-wiki-aegiverse-55 → 55），只留英數字；推不出來回 undefined */
@@ -182,12 +201,12 @@ export function mergeProfile(saved: Profile | undefined, own: Profile | undefine
   return out as Profile
 }
 
-async function readOwnStatus($: EngineInterface, id: string): Promise<Profile | undefined> {
+async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean }) | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team) }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
   } catch {
     return undefined
   }
@@ -197,7 +216,8 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<Profile | 
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  lastWriteAt = updatedAt
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -305,6 +325,11 @@ async function refresh($: EngineInterface) {
   const d = await sharedDir($)
   const now = await $.clock.now()
   const entries = await $.fs.list(d).catch(() => [])
+  if (!collisionWarned && me.id !== 'me' && instance) {
+    const ownNow = await readOwnStatus($, me.id)
+    // 別人在我上次寫入之後又寫了一次 → 有另一個視窗在用同一個編號
+    if (ownNow && typeof ownNow.updatedAt === 'number' && ownNow.updatedAt > lastWriteAt && isCollision(ownNow, instance, now)) warnCollision($)
+  }
   const found: Coworker[] = []
   for (const entry of entries) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name === `${me.id}.json`) continue
@@ -463,7 +488,15 @@ export const register: Register = on => {
     me = { ...me, id, name: defaultName }
     // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
     const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
-    const own = await readOwnStatus($, id)
+    instance = await read($, instanceRef)
+    if (!instance) {
+      instance = crypto.randomUUID()
+      await update($, instanceRef, () => instance)
+    }
+    const ownRaw = await readOwnStatus($, id)
+    const clash = isCollision(ownRaw, instance, await $.clock.now())
+    if (clash) warnCollision($)
+    const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
     const saved = mergeProfile(stored, own)
     if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
     if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
@@ -622,7 +655,7 @@ export const register: Register = on => {
     const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto, team: input.team })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
-    return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}）` }
+    return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}，session ${me.id.slice(0, 8)}）` }
   })
 
   on('prompt.submit', async ($, e, next) => {
