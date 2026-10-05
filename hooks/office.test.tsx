@@ -38,9 +38,9 @@ test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 co
   expect(layout(48, 32).seats).toHaveLength(4)
   expect(layout(60, 32).seats).toHaveLength(8)
   expect(layout(60, 47).seats).toHaveLength(8) // 47 列只排得下一排座位群
-  expect(layout(60, 58).seats).toHaveLength(16)
-  expect(sceneRows(undefined)).toBe(40)
-  expect(sceneRows(20)).toBe(40)
+  expect(layout(60, 62).seats).toHaveLength(16) // 底部走廊 18 像素（貓走家具上方）後，兩排座位群要 62 列
+  expect(sceneRows(undefined)).toBe(44)
+  expect(sceneRows(20)).toBe(44)
   expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
   expect(sceneWidth(20)).toBe(48)
   // 名牌要對齊終端列：每個座位的 y 都是偶數
@@ -437,9 +437,9 @@ test('the scene fills the pane height and leaves one reserved row above the butt
 })
 
 test('at the minimum height the first cluster still clears the corridor (cat and copier)', () => {
-  const L = layout(48, 40)
+  const L = layout(48, 44) // MIN_ROWS
   const lowest = Math.max(...L.seats.map(s => s.y + 12))
-  expect(lowest).toBeLessThanOrEqual(L.h - 10) // 底部走廊 10 像素
+  expect(lowest).toBeLessThanOrEqual(L.h - 18) // 底部走廊 18 像素（家具＋貓走的道）
 })
 
 test('door signs: MANAGER beside the office door, MEETING beside the meeting room', () => {
@@ -804,4 +804,36 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
   expect(blits.length).toBeGreaterThanOrEqual(3)
   expect(new Set(blits).size).toBeGreaterThan(1) // 畫格真的在變（貓在走、時鐘在轉）
   await ui.unmount()
+})
+
+// ---------- 0.7.3：撞號偵測 ----------
+
+import { isCollision } from './register'
+
+test('a status file freshly written by another instance of the same session id is a collision', () => {
+  const now = 1_000_000
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000 }, 'A', now)).toBe(true)
+  expect(isCollision({ instance: 'A', updatedAt: now - 2000 }, 'A', now)).toBe(false) // 自己寫的（含熱重載後）
+  expect(isCollision({ instance: 'B', updatedAt: now - 60000 }, 'A', now)).toBe(false) // 舊檔
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000, left: true }, 'A', now)).toBe(false) // 已離開
+  expect(isCollision({ updatedAt: now - 2000 }, 'A', now)).toBe(false) // 舊版沒有 instance
+  expect(isCollision(undefined, 'A', now)).toBe(false)
+})
+
+test('every status file now carries this window\'s instance id', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  await $.command.run({ command: 'office', args: 'title x' } as any)
+  expect(typeof JSON.parse(writes[writes.length - 1]).instance).toBe('string')
+})
+
+test('the cat walks above the furniture row, not over the cabinet, mailbox or copier', () => {
+  for (const [w, r] of [[48, 44], [60, 44], [112, 60]] as const) {
+    const h = r * 2
+    const cat = new Set([0xffa726, 0xe65100, 0xffcc80, 0xfff3e0, 0xf48fb1])
+    for (let f = 0; f < 120; f += 7) {
+      const s = drawScene([], f, w, r)
+      for (let x = 0; x < w; x++) for (let y = h - 2 - 8; y < h - 2; y++) expect(cat.has(s.px[y * w + x]) && s.px[y * w + x] !== 0xfff3e0).toBe(false)
+    }
+  }
 })

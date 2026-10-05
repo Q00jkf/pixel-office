@@ -14,7 +14,7 @@ const CLUSTER_H = UNIT_H * 2 + 2 + ROW_SPLIT // 34：兩排桌＋橫隔板＋走
 const AREA_TOP = 2 + 8 // 員工座位區離上方內牆的距離（原 2，往下移 4 個終端列）
 const AISLE = 6
 const CLUSTER_GAP = 4
-const BOTTOM = 10 // 底部走廊＋牆
+const BOTTOM = 18 // 底部走廊＋牆（家具一排＋上方貓走的那條道）
 const BOSS_W = 17
 export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
 export const OFFICE_DOOR_W = 7
@@ -83,7 +83,7 @@ export function sceneWidth(bodyColumns: number): number {
 
 /** 面板內容區列數 → 場景列數：扣掉預留空白 1 列＋按鈕 1 列；至少 40 列才放得下上排房間＋一排座位群＋走廊 */
 export const RESERVED_ROWS = 2
-export const MIN_ROWS = 40 // 2*40=80 像素 ≥ 上排房間 24＋座位區上緣 10＋座位群 34＋走廊 10
+export const MIN_ROWS = 44 // 2*44=88 像素 ≥ 上排房間 24＋座位區上緣 10＋座位群 34＋走廊 18
 export function sceneRows(bodyRows: number | undefined): number {
   return Math.max(MIN_ROWS, (bodyRows ?? MIN_ROWS + RESERVED_ROWS) - RESERVED_ROWS)
 }
@@ -534,6 +534,7 @@ const CAT_SIT = [
   ],
 ]
 const CAT_W = 12
+const CAT_LIFT = 8 // 貓往上抬 8 像素：腳底在底部家具（影印機、盆栽）頂端之上
 const CAT_H = 8
 const CAT_REST = 12
 
@@ -584,7 +585,7 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
   const sitting = fed || pose.sitting
   const rows = sitting ? CAT_SIT[frame % 2] : catWalkRows(frame)
   const x0 = WALL + 7 + x
-  const y0 = p.h - WALL - CAT_H - (startled && !fed && frame % 2 ? 2 : 0)
+  const y0 = p.h - WALL - CAT_H - CAT_LIFT - (startled && !fed && frame % 2 ? 2 : 0) // 走在家具那一排上方，不擋到底部的影印機、盆栽和按鈕列
   const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
   rows.forEach((row, j) => {
     const line = facingRight ? row : [...row].reverse().join('')
