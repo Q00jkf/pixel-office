@@ -109,6 +109,7 @@ test('/office reads the other sessions: fresh ones sit down, stale and left ones
     'd.json': JSON.stringify({ id: 'd', name: 'gone', mode: 'idle', tool: '', updatedAt: NOW - 1000, left: true }),
   }
   const writes: string[] = []
+  on('clock.after', () => ({ value: undefined }))
   on('env.get', () => ({ value: 'C:/Users/tester' }))
   on('clock.now', () => ({ value: NOW }))
   on('fs.list', () => ({ value: Object.keys(files).map(name => ({ name, kind: 'file', size: 1, mtimeMs: NOW, isLink: false })) }) as any)
@@ -172,7 +173,14 @@ test('desktop keeps a text line for the head count (old behaviour)', async $ => 
   await ui.unmount()
 })
 
+// 背景寫入是非同步的：等條件成立（最多約 1 秒）再檢查
+const waitFor = async (cond: () => boolean) => {
+  for (let i = 0; i < 100 && !cond(); i++) await new Promise(r => setTimeout(r, 10))
+}
+const lastWrite = (writes: string[]) => JSON.parse(writes[writes.length - 1])
+
 const MOCKS = (on: any, writes: string[]) => {
+  on('clock.after', () => ({ value: undefined })) // 背景寫入排在 clock.after：測試裡立刻執行
   on('env.get', () => ({ value: 'C:/Users/tester' }))
   on('clock.now', () => ({ value: 1_000_000 }))
   on('fs.list', () => ({ value: [] }))
@@ -334,7 +342,8 @@ test('sending a message records who it went to', async ($, on) => {
   MOCKS(on, writes)
   on('session.send', () => ({ isDelivered: true }) as any)
   await ($ as any).session.send({ to: 'user-30', text: 'hi' })
-  const last = JSON.parse(writes[writes.length - 1])
+  await waitFor(() => writes.length > 0 && lastWrite(writes).sentTo === 'user-30')
+  const last = lastWrite(writes)
   expect(last.sentTo).toBe('user-30')
   expect(typeof last.sentAt).toBe('number')
 })
@@ -548,7 +557,8 @@ test('a classifier denial marks me blocked in the status file', async ($, on) =>
   MOCKS(on, writes)
   on('tool.call', (_$, e) => (String(e.tool) === 'Write' ? ({ deny: CLASSIFIER_MSG } as any) : undefined))
   await $.tool.call({ tool: 'Write', file_path: 'x', content: 'y' } as any).catch(() => undefined)
-  const last = JSON.parse(writes[writes.length - 1])
+  await waitFor(() => writes.length > 0 && !!lastWrite(writes).blocked)
+  const last = lastWrite(writes)
   expect(last.blocked.tool).toBe('Write')
 })
 
@@ -823,9 +833,11 @@ test('a successful Gmail send records a mail errand; a failed one does not', asy
     return undefined
   })
   await $.tool.call({ tool: 'mcp__claude_ai_Gmail__reply' } as any).catch(() => undefined)
-  expect(JSON.parse(writes[writes.length - 1]).errand).toBeUndefined()
+  await waitFor(() => writes.length > 0 && lastWrite(writes).mode === 'error')
+  expect(lastWrite(writes).errand).toBeUndefined()
   await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message' } as any).catch(() => undefined)
-  expect(JSON.parse(writes[writes.length - 1]).errand.kind).toBe('mail')
+  await waitFor(() => writes.length > 0 && !!lastWrite(writes).errand)
+  expect(lastWrite(writes).errand.kind).toBe('mail')
 })
 
 test('the office now has a filing cabinet and a mailbox', () => {

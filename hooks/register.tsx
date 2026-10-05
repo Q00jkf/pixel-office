@@ -377,6 +377,27 @@ async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
   await publish($, false).catch(() => undefined)
 }
 
+// 熱路徑（送出訊息、每次工具呼叫）不等寫檔：只改記憶體，寫檔交給計時器在背景做，短時間內多次更新合併成一次
+// 為什麼：每次 $.fs.write／state 更新都要跨程序一趟（實測 prompt.submit 原本多等約 0.4 秒、session.start 約 3 秒）
+let flushPending = false
+function flushSoon($: EngineInterface) {
+  if (flushPending) return
+  flushPending = true
+  $.clock.after(0, () => {
+    flushPending = false
+    void (async () => {
+      await showCrew($).catch(() => undefined)
+      await publish($, false).catch(() => undefined)
+    })()
+  })
+}
+
+function setModeSoon($: EngineInterface, next: OfficeMode, name?: string) {
+  seq += 1
+  me = { ...me, mode: next, tool: name ?? me.tool }
+  flushSoon($)
+}
+
 const TOOL = 'mcp__pixel-office__office_profile'
 const ROSTER = 'mcp__pixel-office__office_roster'
 const ROLE_WORDS: Record<string, Role> = { 主管: 'manager', manager: 'manager', boss: 'manager', 員工: 'staff', staff: 'staff', employee: 'staff' }
@@ -454,7 +475,7 @@ async function applyProfile(
 function revertLater($: EngineInterface, ms: number, to: OfficeMode) {
   const mine = seq
   $.clock.after(ms, () => {
-    if (seq === mine) void setMode($, to)
+    if (seq === mine) void setMode($, to).catch(() => undefined)
   })
 }
 
@@ -483,33 +504,38 @@ export const register: Register = on => {
         '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。只讀，不改任何東西。',
       inputSchema: { type: 'object', properties: {} },
     })
-    const id = await $.session.id()
-    defaultName = plateName(await $.session.cwd(), id)
-    me = { ...me, id, name: defaultName }
-    // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
-    const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
-    instance = await read($, instanceRef)
-    if (!instance) {
-      instance = crypto.randomUUID()
-      await update($, instanceRef, () => instance)
-    }
-    const ownRaw = await readOwnStatus($, id)
-    const clash = isCollision(ownRaw, instance, await $.clock.now())
-    if (clash) warnCollision($)
-    const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
-    const saved = mergeProfile(stored, own)
-    if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
-    if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
-    const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
-    if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
-    if (saved?.auto === true) me = { ...me, auto: true }
-    const savedTeam = (saved as { team?: unknown } | undefined)?.team
-    if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
-    const savedTitle = (saved as { title?: unknown } | undefined)?.title
-    if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
-    await publish($, false).catch(() => undefined)
-    await refresh($).catch(() => undefined)
-    await loadButtons($).catch(() => undefined)
+    // 讀設定、寫心跳、讀名單、讀按鈕都放到計時器裡做，不擋第一輪（原本 session.start 要等約 3 秒）
+    $.clock.after(0, () => {
+      void (async () => {
+          const id = await $.session.id()
+          defaultName = plateName(await $.session.cwd(), id)
+          me = { ...me, id, name: defaultName }
+          // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
+          const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
+          instance = await read($, instanceRef)
+          if (!instance) {
+            instance = crypto.randomUUID()
+            await update($, instanceRef, () => instance)
+          }
+          const ownRaw = await readOwnStatus($, id)
+          const clash = isCollision(ownRaw, instance, await $.clock.now())
+          if (clash) warnCollision($)
+          const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
+          const saved = mergeProfile(stored, own)
+          if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
+          if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
+          const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
+          if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
+          if (saved?.auto === true) me = { ...me, auto: true }
+          const savedTeam = (saved as { team?: unknown } | undefined)?.team
+          if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
+          const savedTitle = (saved as { title?: unknown } | undefined)?.title
+          if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
+          await publish($, false).catch(() => undefined)
+          await refresh($).catch(() => undefined)
+          await loadButtons($).catch(() => undefined)
+      })().catch(() => undefined)
+    })
 
     $.clock.every(250, () => {
       frame += 1
@@ -570,9 +596,8 @@ export const register: Register = on => {
     const sent = await next(e)
     try {
       if (sent.isDelivered) {
-        me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
-        await showCrew($)
-        await publish($, false)
+        me = { ...me, sentTo: e.to, sentAt: Date.now() }
+        flushSoon($)
       }
     } catch {}
     return sent
@@ -582,9 +607,8 @@ export const register: Register = on => {
   on('session.receive', async ($, e, next) => {
     try {
       if (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message') {
-        me = { ...me, gotAt: await $.clock.now() }
-        await showCrew($)
-        await publish($, false)
+        me = { ...me, gotAt: Date.now() }
+        flushSoon($)
       }
     } catch {}
     return next(e)
@@ -602,7 +626,7 @@ export const register: Register = on => {
     const verdict = await next(e)
     try {
       // 自己宣告 auto 的 session 不舉手；classic.PreToolUse 在這版沒有觸發，permissionMode 只當備用
-      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) await setMode($, 'waiting', String(e.tool))
+      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) setModeSoon($, 'waiting', String(e.tool))
     } catch {}
     return verdict
   })
@@ -661,7 +685,7 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     try {
       me = { ...me, blocked: undefined } // 使用者在這個視窗輸入了（例如說放行），紅牌放下
-      await setMode($, 'thinking')
+      setModeSoon($, 'thinking')
     } catch {}
 
     return next(e)
@@ -670,21 +694,21 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const name = String(e.tool)
     try {
-      await setMode($, READING.has(name) ? 'reading' : 'typing', name)
+      setModeSoon($, READING.has(name) ? 'reading' : 'typing', name)
     } catch {}
     const ran = await next(e)
     try {
       if (classifierBlocked(ran as { deny?: string; isError?: boolean; text?: string })) {
-        me = { ...me, blocked: { tool: name, at: await $.clock.now() } }
-        await setMode($, 'error', name)
+        me = { ...me, blocked: { tool: name, at: Date.now() } }
+        setModeSoon($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else if (ran.deny !== undefined || ran.isError === true) {
-        await setMode($, 'error', name)
+        setModeSoon($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else {
         const kind = detectErrand(name, e)
-        if (kind) me = { ...me, errand: { kind, at: await $.clock.now() } }
-        await setMode($, 'thinking')
+        if (kind) me = { ...me, errand: { kind, at: Date.now() } }
+        setModeSoon($, 'thinking')
       }
     } catch {}
 
@@ -693,7 +717,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     try {
-      await setMode($, 'done')
+      setModeSoon($, 'done')
       revertLater($, 5000, 'idle')
     } catch {}
 
