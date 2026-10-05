@@ -252,7 +252,7 @@ test('a promotion walks from the desk, along the hall, through the office door, 
 
 // ---------- 按鈕、夜間模式、餵貓、系統提示 ----------
 
-import { catMoveFrame } from './scene'
+import { TREAT_FRAMES, catMoveFrame } from './scene'
 
 const PANE_PROPS = {
   plugin: 'pixel-office',
@@ -292,11 +292,11 @@ test('night mode darkens the room but keeps screens lit', () => {
 test('a fed cat sits with a heart, then walks on from where it ate (no teleport)', () => {
   const fed = drawScene([], 50, 60, 40, [], undefined, { treatFrame: 45 })
   expect([...fed.px].some(c => c === 0xff4081)).toBe(true)
-  const after = drawScene([], 80, 60, 40, [], undefined, { treatFrame: 45 })
+  const after = drawScene([], 45 + TREAT_FRAMES + 5, 60, 40, [], undefined, { treatFrame: 45 })
   expect([...after.px].some(c => c === 0xff4081)).toBe(false)
   // 吃完的那一格，位置和吃飯開始時一樣
-  expect(catMoveFrame(45 + 20, 45, 0)).toBe(catMoveFrame(45, 45, 0))
-  expect(catMoveFrame(45 + 21, 45, 0)).toBe(catMoveFrame(45, 45, 0) + 1)
+  expect(catMoveFrame(45 + TREAT_FRAMES, 45, 0)).toBe(catMoveFrame(45, 45, 0))
+  expect(catMoveFrame(45 + TREAT_FRAMES + 1, 45, 0)).toBe(catMoveFrame(45, 45, 0) + 1)
 })
 
 test('the system prompt gets one short pixel-office section', async ($, on) => {
@@ -321,12 +321,13 @@ test('a paper plane flies from sender to recipient along an arc, then lands', ()
   const pl = { from: { x: 10, y: 40 }, to: { x: 40, y: 30 }, start: 100 }
   expect(planePos(pl, 99)).toBeNull()
   expect(planePos(pl, 100)).toMatchObject({ x: 10, y: 40 })
-  const mid = planePos(pl, 100 + PLANE_FRAMES / 2)!
-  expect(mid.x).toBe(25)
+  const half = Math.floor(PLANE_FRAMES / 2)
+  const mid = planePos(pl, 100 + half)!
+  expect(mid.x).toBe(Math.round(10 + 30 * (half / PLANE_FRAMES)))
   expect(mid.y).toBeLessThan(35) // 拋物線：中途比直線高
   expect(planePos(pl, 100 + PLANE_FRAMES)).toMatchObject({ x: 40, y: 30 })
   expect(planePos(pl, 101 + PLANE_FRAMES)).toBeNull()
-  const s = drawScene([], 100 + PLANE_FRAMES / 2, 60, 40, [], undefined, { planes: [pl] })
+  const s = drawScene([], 100 + half, 60, 40, [], undefined, { planes: [pl] })
   expect([...s.px].some(c => c === 0xf1f8ff)).toBe(true)
 })
 

@@ -537,13 +537,21 @@ export const register: Register = on => {
       })().catch(() => undefined)
     })
 
-    $.clock.every(250, () => {
+    // 動畫每秒 2 格（原 4 格；使用者回報整個畫面更新變慢，實測本 session 的 claude 程序約 50% CPU）
+    $.clock.every(500, () => {
       frame += 1
-      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
+      if (rasterOpen && width > 0) {
+        void $.ui
+          .blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
+          .then(r => {
+            if (r?.deny) rasterOpen = false // 面板沒在畫（關掉了）→ 停止重畫，下次打開面板時 render 會再打開
+          })
+          .catch(() => undefined)
+      }
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
-    // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
-    $.clock.every(500, () => {
+    // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 1 秒一次（原 0.5 秒；實測 Desktop 畫面程序約 17% CPU）
+    $.clock.every(1000, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
     $.clock.every(5000, () => void publish($, false).catch(() => undefined))

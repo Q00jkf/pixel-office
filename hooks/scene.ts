@@ -22,7 +22,7 @@ const CAT_START = 13 // 貓從 WALL+13 起走，避開盆栽與檔案櫃
 const mailboxX = (width: number) => Math.floor(width / 2) - 7
 export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
 export const OFFICE_DOOR_W = 7
-const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
+const WALK_SPEED = 4 // 走路：每格動畫走幾個像素（動畫每秒 2 格；原 4 格／秒×2 像素，總時間不變）
 
 const C = {
   tileA: 0xd5dde1, tileB: 0xccd5d9,
@@ -637,7 +637,7 @@ export function catRange(width: number): number {
   return width - 2 * WALL - CAT_START - 17 - CAT_W // 從檔案櫃右邊走到影印機左邊
 }
 
-export const TREAT_FRAMES = 20 // 餵貓後坐著吃約 5 秒
+export const TREAT_FRAMES = 10 // 餵貓後坐著吃約 5 秒（每秒 2 格）
 
 /** catOffset＝之前每次餵食停下來的總格數；扣掉後貓會從吃完的地方接著走，不會瞬移 */
 export function catMoveFrame(frame: number, treatFrame: number | undefined, catOffset: number): number {
@@ -691,8 +691,8 @@ export type Plane = { from: Seat; to: Seat; start: number }
 /** 收件者頭上的信封：在 [start, end) 期間顯示 */
 export type Notice = { id: string; start: number; end: number }
 
-export const PLANE_FRAMES = 10 // 約 2.5 秒飛到
-export const NOTICE_FRAMES = 10
+export const PLANE_FRAMES = 5 // 約 2.5 秒飛到（每秒 2 格）
+export const NOTICE_FRAMES = 5
 
 export function planePos(pl: Plane, frame: number): (Seat & { dx: number }) | null {
   const t = (frame - pl.start) / PLANE_FRAMES
