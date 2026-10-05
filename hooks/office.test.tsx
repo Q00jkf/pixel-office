@@ -38,9 +38,9 @@ test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 co
   expect(layout(48, 32).seats).toHaveLength(4)
   expect(layout(60, 32).seats).toHaveLength(8)
   expect(layout(60, 47).seats).toHaveLength(8) // 47 列只排得下一排座位群
-  expect(layout(60, 58).seats).toHaveLength(16)
-  expect(sceneRows(undefined)).toBe(40)
-  expect(sceneRows(20)).toBe(40)
+  expect(layout(60, 62).seats).toHaveLength(16) // 底部走廊 18 像素（貓走家具上方）後，兩排座位群要 62 列
+  expect(sceneRows(undefined)).toBe(44)
+  expect(sceneRows(20)).toBe(44)
   expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
   expect(sceneWidth(20)).toBe(48)
   // 名牌要對齊終端列：每個座位的 y 都是偶數
@@ -437,9 +437,9 @@ test('the scene fills the pane height and leaves one reserved row above the butt
 })
 
 test('at the minimum height the first cluster still clears the corridor (cat and copier)', () => {
-  const L = layout(48, 40)
+  const L = layout(48, 44) // MIN_ROWS
   const lowest = Math.max(...L.seats.map(s => s.y + 12))
-  expect(lowest).toBeLessThanOrEqual(L.h - 10) // 底部走廊 10 像素
+  expect(lowest).toBeLessThanOrEqual(L.h - 18) // 底部走廊 18 像素（家具＋貓走的道）
 })
 
 test('door signs: MANAGER beside the office door, MEETING beside the meeting room', () => {
@@ -842,5 +842,16 @@ test('bottom-corridor furniture never overlaps (cabinet, mailbox, copier) at any
     const door = [Math.floor(w / 2) - 3, Math.floor(w / 2) + 2]
     const overlap = (a: number[], b: number[]) => a[0] <= b[1] && b[0] <= a[1]
     expect(overlap(cab, mb) || overlap(mb, cp) || overlap(cab, cp) || overlap(cab, door) || overlap(cp, door)).toBe(false)
+  }
+})
+
+test('the cat walks above the furniture row, not over the cabinet, mailbox or copier', () => {
+  for (const [w, r] of [[48, 44], [60, 44], [112, 60]] as const) {
+    const h = r * 2
+    const cat = new Set([0xffa726, 0xe65100, 0xffcc80, 0xfff3e0, 0xf48fb1])
+    for (let f = 0; f < 120; f += 7) {
+      const s = drawScene([], f, w, r)
+      for (let x = 0; x < w; x++) for (let y = h - 2 - 8; y < h - 2; y++) expect(cat.has(s.px[y * w + x]) && s.px[y * w + x] !== 0xfff3e0).toBe(false)
+    }
   }
 })
