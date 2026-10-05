@@ -38,9 +38,9 @@ test('floor plan: one cluster of 4 at the narrowest, two side by side from 56 co
   expect(layout(48, 32).seats).toHaveLength(4)
   expect(layout(60, 32).seats).toHaveLength(8)
   expect(layout(60, 47).seats).toHaveLength(8) // 47 列只排得下一排座位群
-  expect(layout(60, 62).seats).toHaveLength(16) // 底部走廊 18 像素（貓走家具上方）後，兩排座位群要 62 列
-  expect(sceneRows(undefined)).toBe(44)
-  expect(sceneRows(20)).toBe(44)
+  expect(layout(60, 58).seats).toHaveLength(16)
+  expect(sceneRows(undefined)).toBe(40)
+  expect(sceneRows(20)).toBe(40)
   expect(sceneRows(60)).toBe(58) // 撐滿面板：60 列扣掉預留空白＋按鈕
   expect(sceneWidth(20)).toBe(48)
   // 名牌要對齊終端列：每個座位的 y 都是偶數
@@ -109,7 +109,6 @@ test('/office reads the other sessions: fresh ones sit down, stale and left ones
     'd.json': JSON.stringify({ id: 'd', name: 'gone', mode: 'idle', tool: '', updatedAt: NOW - 1000, left: true }),
   }
   const writes: string[] = []
-  on('clock.after', () => ({ value: undefined }))
   on('env.get', () => ({ value: 'C:/Users/tester' }))
   on('clock.now', () => ({ value: NOW }))
   on('fs.list', () => ({ value: Object.keys(files).map(name => ({ name, kind: 'file', size: 1, mtimeMs: NOW, isLink: false })) }) as any)
@@ -173,14 +172,7 @@ test('desktop keeps a text line for the head count (old behaviour)', async $ => 
   await ui.unmount()
 })
 
-// 背景寫入是非同步的：等條件成立（最多約 1 秒）再檢查
-const waitFor = async (cond: () => boolean) => {
-  for (let i = 0; i < 100 && !cond(); i++) await new Promise(r => setTimeout(r, 10))
-}
-const lastWrite = (writes: string[]) => JSON.parse(writes[writes.length - 1])
-
 const MOCKS = (on: any, writes: string[]) => {
-  on('clock.after', () => ({ value: undefined })) // 背景寫入排在 clock.after：測試裡立刻執行
   on('env.get', () => ({ value: 'C:/Users/tester' }))
   on('clock.now', () => ({ value: 1_000_000 }))
   on('fs.list', () => ({ value: [] }))
@@ -252,7 +244,7 @@ test('a promotion walks from the desk, along the hall, through the office door, 
 
 // ---------- 按鈕、夜間模式、餵貓、系統提示 ----------
 
-import { TREAT_FRAMES, catMoveFrame } from './scene'
+import { catMoveFrame } from './scene'
 
 const PANE_PROPS = {
   plugin: 'pixel-office',
@@ -292,11 +284,11 @@ test('night mode darkens the room but keeps screens lit', () => {
 test('a fed cat sits with a heart, then walks on from where it ate (no teleport)', () => {
   const fed = drawScene([], 50, 60, 40, [], undefined, { treatFrame: 45 })
   expect([...fed.px].some(c => c === 0xff4081)).toBe(true)
-  const after = drawScene([], 45 + TREAT_FRAMES + 5, 60, 40, [], undefined, { treatFrame: 45 })
+  const after = drawScene([], 80, 60, 40, [], undefined, { treatFrame: 45 })
   expect([...after.px].some(c => c === 0xff4081)).toBe(false)
   // 吃完的那一格，位置和吃飯開始時一樣
-  expect(catMoveFrame(45 + TREAT_FRAMES, 45, 0)).toBe(catMoveFrame(45, 45, 0))
-  expect(catMoveFrame(45 + TREAT_FRAMES + 1, 45, 0)).toBe(catMoveFrame(45, 45, 0) + 1)
+  expect(catMoveFrame(45 + 20, 45, 0)).toBe(catMoveFrame(45, 45, 0))
+  expect(catMoveFrame(45 + 21, 45, 0)).toBe(catMoveFrame(45, 45, 0) + 1)
 })
 
 test('the system prompt gets one short pixel-office section', async ($, on) => {
@@ -321,13 +313,12 @@ test('a paper plane flies from sender to recipient along an arc, then lands', ()
   const pl = { from: { x: 10, y: 40 }, to: { x: 40, y: 30 }, start: 100 }
   expect(planePos(pl, 99)).toBeNull()
   expect(planePos(pl, 100)).toMatchObject({ x: 10, y: 40 })
-  const half = Math.floor(PLANE_FRAMES / 2)
-  const mid = planePos(pl, 100 + half)!
-  expect(mid.x).toBe(Math.round(10 + 30 * (half / PLANE_FRAMES)))
+  const mid = planePos(pl, 100 + PLANE_FRAMES / 2)!
+  expect(mid.x).toBe(25)
   expect(mid.y).toBeLessThan(35) // 拋物線：中途比直線高
   expect(planePos(pl, 100 + PLANE_FRAMES)).toMatchObject({ x: 40, y: 30 })
   expect(planePos(pl, 101 + PLANE_FRAMES)).toBeNull()
-  const s = drawScene([], 100 + half, 60, 40, [], undefined, { planes: [pl] })
+  const s = drawScene([], 100 + PLANE_FRAMES / 2, 60, 40, [], undefined, { planes: [pl] })
   expect([...s.px].some(c => c === 0xf1f8ff)).toBe(true)
 })
 
@@ -343,8 +334,7 @@ test('sending a message records who it went to', async ($, on) => {
   MOCKS(on, writes)
   on('session.send', () => ({ isDelivered: true }) as any)
   await ($ as any).session.send({ to: 'user-30', text: 'hi' })
-  await waitFor(() => writes.length > 0 && lastWrite(writes).sentTo === 'user-30')
-  const last = lastWrite(writes)
+  const last = JSON.parse(writes[writes.length - 1])
   expect(last.sentTo).toBe('user-30')
   expect(typeof last.sentAt).toBe('number')
 })
@@ -447,9 +437,9 @@ test('the scene fills the pane height and leaves one reserved row above the butt
 })
 
 test('at the minimum height the first cluster still clears the corridor (cat and copier)', () => {
-  const L = layout(48, 44) // MIN_ROWS
+  const L = layout(48, 40)
   const lowest = Math.max(...L.seats.map(s => s.y + 12))
-  expect(lowest).toBeLessThanOrEqual(L.h - 18) // 底部走廊 18 像素（家具＋貓走的道）
+  expect(lowest).toBeLessThanOrEqual(L.h - 10) // 底部走廊 10 像素
 })
 
 test('door signs: MANAGER beside the office door, MEETING beside the meeting room', () => {
@@ -558,8 +548,7 @@ test('a classifier denial marks me blocked in the status file', async ($, on) =>
   MOCKS(on, writes)
   on('tool.call', (_$, e) => (String(e.tool) === 'Write' ? ({ deny: CLASSIFIER_MSG } as any) : undefined))
   await $.tool.call({ tool: 'Write', file_path: 'x', content: 'y' } as any).catch(() => undefined)
-  await waitFor(() => writes.length > 0 && !!lastWrite(writes).blocked)
-  const last = lastWrite(writes)
+  const last = JSON.parse(writes[writes.length - 1])
   expect(last.blocked.tool).toBe('Write')
 })
 
@@ -787,105 +776,4 @@ test('desktop: a promotion walks and a message flies a paper plane (layout is sh
   const src = String((await ui2.find({ type: 'Svg' }))!.props.source)
   expect(src).toContain('#f1f8ff') // 紙飛機的顏色出現在 Desktop 的 SVG 裡
   await ui2.unmount()
-})
-
-// ---------- 0.7.0：對外動作的跑腿動畫 ----------
-
-import { detectErrand } from './register'
-import { errandRoute, errandSpot } from './scene'
-
-test('outgoing actions are recognised: mail, file upload, git push', () => {
-  expect(detectErrand('mcp__claude_ai_Gmail__send_message', {})).toBe('mail')
-  expect(detectErrand('mcp__claude_ai_Gmail__create_draft', {})).toBe('mail')
-  expect(detectErrand('mcp__claude_ai_Gmail__search_threads', {})).toBeUndefined()
-  expect(detectErrand('mcp__claude_ai_Google_Drive__create_file', {})).toBe('file')
-  expect(detectErrand('mcp__claude_ai_Notion__notion-update-page', {})).toBe('file')
-  expect(detectErrand('mcp__claude_ai_Notion__notion-fetch', {})).toBeUndefined()
-  expect(detectErrand('Bash', { command: 'cd repo && git push origin main' })).toBe('push')
-  expect(detectErrand('PowerShell', { command: 'git -C x push' })).toBe('push')
-  expect(detectErrand('Bash', { command: 'git status' })).toBeUndefined()
-  expect(detectErrand('Read', { file_path: 'push.md' })).toBeUndefined()
-})
-
-test('errand routes go seat → furniture → seat along aisles, never into a wall', () => {
-  for (const [w, r] of [[48, 40], [60, 44], [112, 60]] as const) {
-    const crew = [{ ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }, ...layout(w, r).seats.slice(0, 6).map((_, i) => P(`s${i}`, `s${i}`))]
-    for (const pl of assignSeats(crew, w, r).values()) {
-      for (const kind of ['mail', 'file', 'push'] as const) {
-        const path = errandRoute(pl, kind, w, r)
-        expect(path[0]).toEqual(pl.stand)
-        expect(path[path.length - 1]).toEqual(pl.stand)
-        expect(path).toContainEqual(errandSpot(kind, w, r))
-        for (let i = 0; i < path.length - 1; i++) {
-          expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
-          for (const p of [path[i], path[i + 1]]) expect(p.x >= 5 && p.x <= w - 6 && p.y >= 2 && p.y < r * 2 - 2).toBe(true)
-        }
-      }
-    }
-  }
-})
-
-test('a successful Gmail send records a mail errand; a failed one does not', async ($, on) => {
-  const writes: string[] = []
-  MOCKS(on, writes)
-  on('tool.call', (_$, e) => {
-    if (String(e.tool) === 'mcp__claude_ai_Gmail__send_message') return { result: 'sent' } as any
-    if (String(e.tool) === 'mcp__claude_ai_Gmail__reply') return { result: 'boom', isError: true } as any
-    return undefined
-  })
-  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__reply' } as any).catch(() => undefined)
-  await waitFor(() => writes.length > 0 && lastWrite(writes).mode === 'error')
-  expect(lastWrite(writes).errand).toBeUndefined()
-  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message' } as any).catch(() => undefined)
-  await waitFor(() => writes.length > 0 && !!lastWrite(writes).errand)
-  expect(lastWrite(writes).errand.kind).toBe('mail')
-})
-
-test('the office now has a filing cabinet and a mailbox', () => {
-  const s = drawScene([], 0, 60, 44)
-  expect([...s.px].some(c => c === 0x8d6e63)).toBe(true) // 檔案櫃
-  expect([...s.px].some(c => c === 0xc62828)).toBe(true) // 郵筒
-})
-
-test('bottom-corridor furniture never overlaps (cabinet, mailbox, copier) at any width', () => {
-  for (const w of [48, 60, 80, 112]) {
-    const cab = [2 + 5, 2 + 5 + 5] // CABINET_X..+5
-    const mb = [Math.floor(w / 2) - 7, Math.floor(w / 2) - 5]
-    const cp = [w - 2 - 16, w - 2 - 16 + 7]
-    const door = [Math.floor(w / 2) - 3, Math.floor(w / 2) + 2]
-    const overlap = (a: number[], b: number[]) => a[0] <= b[1] && b[0] <= a[1]
-    expect(overlap(cab, mb) || overlap(mb, cp) || overlap(cab, cp) || overlap(cab, door) || overlap(cp, door)).toBe(false)
-  }
-})
-
-test('the cat walks above the furniture row, not over the cabinet, mailbox or copier', () => {
-  for (const [w, r] of [[48, 44], [60, 44], [112, 60]] as const) {
-    const h = r * 2
-    const cat = new Set([0xffa726, 0xe65100, 0xffcc80, 0xfff3e0, 0xf48fb1])
-    for (let f = 0; f < 120; f += 7) {
-      const s = drawScene([], f, w, r)
-      for (let x = 0; x < w; x++) for (let y = h - 2 - 8; y < h - 2; y++) expect(cat.has(s.px[y * w + x]) && s.px[y * w + x] !== 0xfff3e0).toBe(false)
-    }
-  }
-})
-
-// ---------- 0.7.3：撞號偵測 ----------
-
-import { isCollision } from './register'
-
-test('a status file freshly written by another instance of the same session id is a collision', () => {
-  const now = 1_000_000
-  expect(isCollision({ instance: 'B', updatedAt: now - 2000 }, 'A', now)).toBe(true)
-  expect(isCollision({ instance: 'A', updatedAt: now - 2000 }, 'A', now)).toBe(false) // 自己寫的（含熱重載後）
-  expect(isCollision({ instance: 'B', updatedAt: now - 60000 }, 'A', now)).toBe(false) // 舊檔
-  expect(isCollision({ instance: 'B', updatedAt: now - 2000, left: true }, 'A', now)).toBe(false) // 已離開
-  expect(isCollision({ updatedAt: now - 2000 }, 'A', now)).toBe(false) // 舊版沒有 instance
-  expect(isCollision(undefined, 'A', now)).toBe(false)
-})
-
-test('every status file now carries this window\'s instance id', async ($, on) => {
-  const writes: string[] = []
-  MOCKS(on, writes)
-  await $.command.run({ command: 'office', args: 'title x' } as any)
-  expect(typeof JSON.parse(writes[writes.length - 1]).instance).toBe('string')
 })

@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Coworker, CustomButton, ErrandKind, OfficeMode, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import type { Coworker, CustomButton, OfficeMode, Role } from '../types'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, drawScene, encode, encodeSvg, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -12,7 +12,6 @@ const dead = new Map<string, number>() // 檔名 → 上次確認已關的時間
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
 const night = atom({ plugin: 'pixel-office', key: 'night' } as const, false)
 const buttons = atom({ plugin: 'pixel-office', key: 'buttons' } as const, [] as CustomButton[])
-const instanceRef = atom({ plugin: 'pixel-office', key: 'instance' } as const, '')
 const READING = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead'])
 
 // 模組變數只給動畫與心跳用；熱重載會重跑 session.start 補回
@@ -32,9 +31,6 @@ let treatFrame: number | undefined
 let catOffset = 0
 let planes: Plane[] = []
 let permissionMode = ''
-let instance = '' // 這個視窗（程序）的實例代碼：撞號偵測用
-let lastWriteAt = 0
-let collisionWarned = false
 let defaultName = 'me' // 預設名牌（初始值同 me.name，session.start 改成資料夾推出的值）；名牌仍是它時才自動改
 let notices: Notice[] = []
 // 每位同事上一次看到的送信／收信時間與狀態；第一次看到只記錄、不觸發（避免開面板時重播舊事件）
@@ -42,7 +38,6 @@ const seenSent = new Map<string, number | undefined>()
 const seenGot = new Map<string, number | undefined>()
 const seenMode = new Map<string, OfficeMode>()
 const seenBlocked = new Map<string, number | undefined>()
-const seenErrand = new Map<string, number | undefined>()
 
 const sceneOpts = (): SceneOptions => {
   planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
@@ -88,37 +83,10 @@ async function sharedDir($: EngineInterface): Promise<string> {
   return dir
 }
 
-/** 這次成功的工具呼叫算不算對外動作：寄信、上傳文件、推 git */
-export function detectErrand(tool: string, input: unknown): ErrandKind | undefined {
-  const t = tool.toLowerCase()
-  if (/gmail|mail/.test(t) && /(send|reply|forward|draft)/.test(t)) return 'mail'
-  if (/(google_?drive|notion)/.test(t) && /(create|update|upload|copy|move|duplicate)/.test(t)) return 'file'
-  if (t === 'bash' || t === 'powershell') {
-    const cmd = String((input as { command?: unknown })?.command ?? '')
-    if (/\bgit\b[^\n|;&]*\bpush\b/.test(cmd)) return 'push'
-  }
-  return undefined
-}
-
 /** 工具結果是不是被 auto 模式分類器擋下（訊息含「auto mode classifier」） */
 export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?: string }): boolean {
   const msg = ran.deny ?? (ran.isError ? ran.text ?? '' : '')
   return /auto mode classifier/i.test(msg)
-}
-
-/**
- * 撞號：自己的狀態檔最近被「另一個實例」寫過（兩個視窗共用同一個 session 編號，常見於 --resume 接到同一段對話）。
- * 不算撞號：檔案沒有 instance（舊版寫的）、已標記離開、太久沒更新、或就是自己寫的。
- */
-function warnCollision($: EngineInterface) {
-  if (collisionWarned) return
-  collisionWarned = true
-  $.ui.toast(`⚠ 另一個視窗和這個視窗共用同一個 session 編號（${me.id.slice(0, 8)}），辦公室資料會互相覆蓋：請關掉其中一個，用 claude --resume 選不同的對話重開`)
-}
-
-export function isCollision(own: { instance?: string; updatedAt?: number; left?: boolean } | undefined, mine: string, now: number, staleMs = 20000): boolean {
-  if (!own || !own.instance || own.instance === mine || own.left) return false
-  return typeof own.updatedAt === 'number' && now - own.updatedAt < staleMs
 }
 
 /** 從 ListAgents 名稱推名牌：取最後一段（llm-wiki-aegiverse-55 → 55），只留英數字；推不出來回 undefined */
@@ -201,12 +169,12 @@ export function mergeProfile(saved: Profile | undefined, own: Profile | undefine
   return out as Profile
 }
 
-async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean }) | undefined> {
+async function readOwnStatus($: EngineInterface, id: string): Promise<Profile | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team) }
   } catch {
     return undefined
   }
@@ -216,8 +184,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
-  lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -299,14 +266,6 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
     }
     seenGot.set(c.id, c.gotAt)
 
-    // 對外動作：從座位走去影印機／檔案櫃／郵筒再走回來（正在走路的不疊加）
-    const errandAt = c.errand?.at
-    if (seenErrand.has(c.id) && errandAt !== undefined && errandAt !== seenErrand.get(c.id) && !walkers.some(w => w.id === c.id)) {
-      const pl = lastPlaced?.get(c.id)
-      if (pl && width > 0 && rows > 0) walkers.push({ id: c.id, path: errandRoute(pl, c.errand!.kind, width, rows), start: frame, kind: c.errand!.kind })
-    }
-    seenErrand.set(c.id, errandAt)
-
     const blockedAt = c.blocked?.at
     if (seenBlocked.has(c.id) && blockedAt !== undefined && blockedAt !== seenBlocked.get(c.id) && !c.isMe) {
       $.ui.toast(`${c.name} 被權限擋下（${c.blocked!.tool}），要你在它的視窗說「放行」`)
@@ -325,11 +284,6 @@ async function refresh($: EngineInterface) {
   const d = await sharedDir($)
   const now = await $.clock.now()
   const entries = await $.fs.list(d).catch(() => [])
-  if (!collisionWarned && me.id !== 'me' && instance) {
-    const ownNow = await readOwnStatus($, me.id)
-    // 別人在我上次寫入之後又寫了一次 → 有另一個視窗在用同一個編號
-    if (ownNow && typeof ownNow.updatedAt === 'number' && ownNow.updatedAt > lastWriteAt && isCollision(ownNow, instance, now)) warnCollision($)
-  }
   const found: Coworker[] = []
   for (const entry of entries) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name === `${me.id}.json`) continue
@@ -358,7 +312,6 @@ async function refresh($: EngineInterface) {
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
-          errand: s.errand && ['mail', 'file', 'push'].includes(s.errand.kind) && typeof s.errand.at === 'number' ? { kind: s.errand.kind, at: s.errand.at } : undefined,
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
           gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
@@ -375,27 +328,6 @@ async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
   me = { ...me, mode: next, tool: name ?? me.tool }
   await showCrew($)
   await publish($, false).catch(() => undefined)
-}
-
-// 熱路徑（送出訊息、每次工具呼叫）不等寫檔：只改記憶體，寫檔交給計時器在背景做，短時間內多次更新合併成一次
-// 為什麼：每次 $.fs.write／state 更新都要跨程序一趟（實測 prompt.submit 原本多等約 0.4 秒、session.start 約 3 秒）
-let flushPending = false
-function flushSoon($: EngineInterface) {
-  if (flushPending) return
-  flushPending = true
-  $.clock.after(0, () => {
-    flushPending = false
-    void (async () => {
-      await showCrew($).catch(() => undefined)
-      await publish($, false).catch(() => undefined)
-    })()
-  })
-}
-
-function setModeSoon($: EngineInterface, next: OfficeMode, name?: string) {
-  seq += 1
-  me = { ...me, mode: next, tool: name ?? me.tool }
-  flushSoon($)
 }
 
 const TOOL = 'mcp__pixel-office__office_profile'
@@ -475,7 +407,7 @@ async function applyProfile(
 function revertLater($: EngineInterface, ms: number, to: OfficeMode) {
   const mine = seq
   $.clock.after(ms, () => {
-    if (seq === mine) void setMode($, to).catch(() => undefined)
+    if (seq === mine) void setMode($, to)
   })
 }
 
@@ -504,54 +436,33 @@ export const register: Register = on => {
         '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。只讀，不改任何東西。',
       inputSchema: { type: 'object', properties: {} },
     })
-    // 讀設定、寫心跳、讀名單、讀按鈕都放到計時器裡做，不擋第一輪（原本 session.start 要等約 3 秒）
-    $.clock.after(0, () => {
-      void (async () => {
-          const id = await $.session.id()
-          defaultName = plateName(await $.session.cwd(), id)
-          me = { ...me, id, name: defaultName }
-          // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
-          const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
-          instance = await read($, instanceRef)
-          if (!instance) {
-            instance = crypto.randomUUID()
-            await update($, instanceRef, () => instance)
-          }
-          const ownRaw = await readOwnStatus($, id)
-          const clash = isCollision(ownRaw, instance, await $.clock.now())
-          if (clash) warnCollision($)
-          const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
-          const saved = mergeProfile(stored, own)
-          if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
-          if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
-          const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
-          if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
-          if (saved?.auto === true) me = { ...me, auto: true }
-          const savedTeam = (saved as { team?: unknown } | undefined)?.team
-          if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
-          const savedTitle = (saved as { title?: unknown } | undefined)?.title
-          if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
-          await publish($, false).catch(() => undefined)
-          await refresh($).catch(() => undefined)
-          await loadButtons($).catch(() => undefined)
-      })().catch(() => undefined)
-    })
+    const id = await $.session.id()
+    defaultName = plateName(await $.session.cwd(), id)
+    me = { ...me, id, name: defaultName }
+    // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
+    const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
+    const own = await readOwnStatus($, id)
+    const saved = mergeProfile(stored, own)
+    if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
+    if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
+    const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
+    if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
+    if (saved?.auto === true) me = { ...me, auto: true }
+    const savedTeam = (saved as { team?: unknown } | undefined)?.team
+    if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
+    const savedTitle = (saved as { title?: unknown } | undefined)?.title
+    if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
+    await publish($, false).catch(() => undefined)
+    await refresh($).catch(() => undefined)
+    await loadButtons($).catch(() => undefined)
 
-    // 動畫每秒 2 格（原 4 格；使用者回報整個畫面更新變慢，實測本 session 的 claude 程序約 50% CPU）
-    $.clock.every(500, () => {
+    $.clock.every(250, () => {
       frame += 1
-      if (rasterOpen && width > 0) {
-        void $.ui
-          .blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
-          .then(r => {
-            if (r?.deny) rasterOpen = false // 面板沒在畫（關掉了）→ 停止重畫，下次打開面板時 render 會再打開
-          })
-          .catch(() => undefined)
-      }
+      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) })
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
-    // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 1 秒一次（原 0.5 秒；實測 Desktop 畫面程序約 17% CPU）
-    $.clock.every(1000, () => {
+    // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
+    $.clock.every(500, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
     $.clock.every(5000, () => void publish($, false).catch(() => undefined))
@@ -604,8 +515,9 @@ export const register: Register = on => {
     const sent = await next(e)
     try {
       if (sent.isDelivered) {
-        me = { ...me, sentTo: e.to, sentAt: Date.now() }
-        flushSoon($)
+        me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
+        await showCrew($)
+        await publish($, false)
       }
     } catch {}
     return sent
@@ -615,8 +527,9 @@ export const register: Register = on => {
   on('session.receive', async ($, e, next) => {
     try {
       if (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message') {
-        me = { ...me, gotAt: Date.now() }
-        flushSoon($)
+        me = { ...me, gotAt: await $.clock.now() }
+        await showCrew($)
+        await publish($, false)
       }
     } catch {}
     return next(e)
@@ -634,14 +547,13 @@ export const register: Register = on => {
     const verdict = await next(e)
     try {
       // 自己宣告 auto 的 session 不舉手；classic.PreToolUse 在這版沒有觸發，permissionMode 只當備用
-      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) setModeSoon($, 'waiting', String(e.tool))
+      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) await setMode($, 'waiting', String(e.tool))
     } catch {}
     return verdict
   })
 
   on('session.end', async ($, e, next) => {
-    // session.start 沒跑完就結束時還沒有 session 編號（仍是預設的 'me'）：不寫，免得留下 me.json 垃圾檔
-    if (me.id !== 'me') await publish($, true).catch(() => undefined)
+    await publish($, true).catch(() => undefined)
 
     return next(e)
   })
@@ -687,13 +599,13 @@ export const register: Register = on => {
     const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto, team: input.team })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
-    return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}，session ${me.id.slice(0, 8)}）` }
+    return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}）` }
   })
 
   on('prompt.submit', async ($, e, next) => {
     try {
       me = { ...me, blocked: undefined } // 使用者在這個視窗輸入了（例如說放行），紅牌放下
-      setModeSoon($, 'thinking')
+      await setMode($, 'thinking')
     } catch {}
 
     return next(e)
@@ -702,21 +614,19 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const name = String(e.tool)
     try {
-      setModeSoon($, READING.has(name) ? 'reading' : 'typing', name)
+      await setMode($, READING.has(name) ? 'reading' : 'typing', name)
     } catch {}
     const ran = await next(e)
     try {
       if (classifierBlocked(ran as { deny?: string; isError?: boolean; text?: string })) {
-        me = { ...me, blocked: { tool: name, at: Date.now() } }
-        setModeSoon($, 'error', name)
+        me = { ...me, blocked: { tool: name, at: await $.clock.now() } }
+        await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else if (ran.deny !== undefined || ran.isError === true) {
-        setModeSoon($, 'error', name)
+        await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else {
-        const kind = detectErrand(name, e)
-        if (kind) me = { ...me, errand: { kind, at: Date.now() } }
-        setModeSoon($, 'thinking')
+        await setMode($, 'thinking')
       }
     } catch {}
 
@@ -725,7 +635,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     try {
-      setModeSoon($, 'done')
+      await setMode($, 'done')
       revertLater($, 5000, 'idle')
     } catch {}
 
