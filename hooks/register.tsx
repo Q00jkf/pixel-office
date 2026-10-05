@@ -575,7 +575,8 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
-    await publish($, true).catch(() => undefined)
+    // session.start 沒跑完就結束時還沒有 session 編號（仍是預設的 'me'）：不寫，免得留下 me.json 垃圾檔
+    if (me.id !== 'me') await publish($, true).catch(() => undefined)
 
     return next(e)
   })
