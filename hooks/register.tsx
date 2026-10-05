@@ -212,6 +212,37 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
   }
 }
 
+/** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
+async function adopt($: EngineInterface, id: string) {
+  defaultName = plateName(await $.session.cwd(), id)
+  me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff' }
+  // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
+  const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
+  const ownRaw = await readOwnStatus($, id)
+  const clash = isCollision(ownRaw, instance, await $.clock.now())
+  if (clash) warnCollision($)
+  const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
+  const saved = mergeProfile(stored, own)
+  if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
+  if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
+  const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
+  if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
+  if (saved?.auto === true) me = { ...me, auto: true }
+  const savedTeam = (saved as { team?: unknown } | undefined)?.team
+  if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
+  const savedTitle = (saved as { title?: unknown } | undefined)?.title
+  if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
+}
+
+/** /resume、/clear 後 process 換到新的 session 編號，但不會再跑 session.start：舊檔標離開，改用新編號的身分 */
+async function followSession($: EngineInterface) {
+  if (me.id === 'me') return
+  const id = await $.session.id()
+  if (id === me.id) return
+  await publish($, true).catch(() => undefined)
+  await adopt($, id)
+}
+
 // 把自己的狀態寫到共用資料夾：一個 session 一個檔，不會互相覆蓋
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
@@ -483,30 +514,12 @@ export const register: Register = on => {
         '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。只讀，不改任何東西。',
       inputSchema: { type: 'object', properties: {} },
     })
-    const id = await $.session.id()
-    defaultName = plateName(await $.session.cwd(), id)
-    me = { ...me, id, name: defaultName }
-    // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
-    const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
     instance = await read($, instanceRef)
     if (!instance) {
       instance = crypto.randomUUID()
       await update($, instanceRef, () => instance)
     }
-    const ownRaw = await readOwnStatus($, id)
-    const clash = isCollision(ownRaw, instance, await $.clock.now())
-    if (clash) warnCollision($)
-    const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
-    const saved = mergeProfile(stored, own)
-    if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
-    if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
-    const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
-    if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
-    if (saved?.auto === true) me = { ...me, auto: true }
-    const savedTeam = (saved as { team?: unknown } | undefined)?.team
-    if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
-    const savedTitle = (saved as { title?: unknown } | undefined)?.title
-    if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
+    await adopt($, await $.session.id())
     await publish($, false).catch(() => undefined)
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -520,7 +533,7 @@ export const register: Register = on => {
     $.clock.every(500, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
-    $.clock.every(5000, () => void publish($, false).catch(() => undefined))
+    $.clock.every(5000, () => void followSession($).then(() => publish($, false)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
 

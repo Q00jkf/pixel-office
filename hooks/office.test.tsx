@@ -904,3 +904,34 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
   expect(new Set(blits).size).toBeGreaterThan(1) // 畫格真的在變（貓在走、時鐘在轉）
   await ui.unmount()
 })
+
+test('after /resume the window follows the new session id: old file marked left, new identity loaded', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  let sid = 'aaaa1111'
+  const files: Record<string, string> = {
+    'bbbb2222.json': JSON.stringify({ id: 'bbbb2222', name: 'boss', role: 'manager', title: 'lead', updatedAt: 0, left: true }),
+  }
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).pop() ?? ''] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.split(/[\\/]/).pop() ?? ''] = e.text
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: sid }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['aaaa1111.json']).left).toBe(false)
+
+  sid = 'bbbb2222' // /resume：同一個程序換到另一段對話
+  await clock.advance(5000)
+  expect(JSON.parse(files['aaaa1111.json']).left).toBe(true)
+  const now = JSON.parse(files['bbbb2222.json'])
+  expect(now.left).toBe(false)
+  expect(now.name).toBe('boss')
+  expect(now.role).toBe('manager')
+})
