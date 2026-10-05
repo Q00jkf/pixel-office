@@ -778,6 +778,105 @@ test('desktop: a promotion walks and a message flies a paper plane (layout is sh
   await ui2.unmount()
 })
 
+// ---------- 0.7.0：對外動作的跑腿動畫 ----------
+
+import { detectErrand } from './register'
+import { errandRoute, errandSpot } from './scene'
+
+test('outgoing actions are recognised: mail, file upload, git push', () => {
+  expect(detectErrand('mcp__claude_ai_Gmail__send_message', {})).toBe('mail')
+  expect(detectErrand('mcp__claude_ai_Gmail__create_draft', {})).toBe('mail')
+  expect(detectErrand('mcp__claude_ai_Gmail__search_threads', {})).toBeUndefined()
+  expect(detectErrand('mcp__claude_ai_Google_Drive__create_file', {})).toBe('file')
+  expect(detectErrand('mcp__claude_ai_Notion__notion-update-page', {})).toBe('file')
+  expect(detectErrand('mcp__claude_ai_Notion__notion-fetch', {})).toBeUndefined()
+  expect(detectErrand('Bash', { command: 'cd repo && git push origin main' })).toBe('push')
+  expect(detectErrand('PowerShell', { command: 'git -C x push' })).toBe('push')
+  expect(detectErrand('Bash', { command: 'git status' })).toBeUndefined()
+  expect(detectErrand('Read', { file_path: 'push.md' })).toBeUndefined()
+})
+
+test('errand routes go seat → furniture → seat along aisles, never into a wall', () => {
+  for (const [w, r] of [[48, 40], [60, 44], [112, 60]] as const) {
+    const crew = [{ ...P('m', '30', 'idle', false, 'manager'), agent: 'user-30' }, ...layout(w, r).seats.slice(0, 6).map((_, i) => P(`s${i}`, `s${i}`))]
+    for (const pl of assignSeats(crew, w, r).values()) {
+      for (const kind of ['mail', 'file', 'push'] as const) {
+        const path = errandRoute(pl, kind, w, r)
+        expect(path[0]).toEqual(pl.stand)
+        expect(path[path.length - 1]).toEqual(pl.stand)
+        expect(path).toContainEqual(errandSpot(kind, w, r))
+        for (let i = 0; i < path.length - 1; i++) {
+          expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
+          for (const p of [path[i], path[i + 1]]) expect(p.x >= 5 && p.x <= w - 6 && p.y >= 2 && p.y < r * 2 - 2).toBe(true)
+        }
+      }
+    }
+  }
+})
+
+test('a successful Gmail send records a mail errand; a failed one does not', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('tool.call', (_$, e) => {
+    if (String(e.tool) === 'mcp__claude_ai_Gmail__send_message') return { result: 'sent' } as any
+    if (String(e.tool) === 'mcp__claude_ai_Gmail__reply') return { result: 'boom', isError: true } as any
+    return undefined
+  })
+  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__reply' } as any).catch(() => undefined)
+  expect(JSON.parse(writes[writes.length - 1]).errand).toBeUndefined()
+  await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message' } as any).catch(() => undefined)
+  expect(JSON.parse(writes[writes.length - 1]).errand.kind).toBe('mail')
+})
+
+test('the office now has a filing cabinet and a mailbox', () => {
+  const s = drawScene([], 0, 60, 44)
+  expect([...s.px].some(c => c === 0x8d6e63)).toBe(true) // 檔案櫃
+  expect([...s.px].some(c => c === 0xc62828)).toBe(true) // 郵筒
+})
+
+test('bottom-corridor furniture never overlaps (cabinet, mailbox, copier) at any width', () => {
+  for (const w of [48, 60, 80, 112]) {
+    const cab = [2 + 5, 2 + 5 + 5] // CABINET_X..+5
+    const mb = [Math.floor(w / 2) - 7, Math.floor(w / 2) - 5]
+    const cp = [w - 2 - 16, w - 2 - 16 + 7]
+    const door = [Math.floor(w / 2) - 3, Math.floor(w / 2) + 2]
+    const overlap = (a: number[], b: number[]) => a[0] <= b[1] && b[0] <= a[1]
+    expect(overlap(cab, mb) || overlap(mb, cp) || overlap(cab, cp) || overlap(cab, door) || overlap(cp, door)).toBe(false)
+  }
+})
+
+test('the cat walks above the furniture row, not over the cabinet, mailbox or copier', () => {
+  for (const [w, r] of [[48, 44], [60, 44], [112, 60]] as const) {
+    const h = r * 2
+    const cat = new Set([0xffa726, 0xe65100, 0xffcc80, 0xfff3e0, 0xf48fb1])
+    for (let f = 0; f < 120; f += 7) {
+      const s = drawScene([], f, w, r)
+      for (let x = 0; x < w; x++) for (let y = h - 2 - 8; y < h - 2; y++) expect(cat.has(s.px[y * w + x]) && s.px[y * w + x] !== 0xfff3e0).toBe(false)
+    }
+  }
+})
+
+// ---------- 0.7.3：撞號偵測 ----------
+
+import { isCollision } from './register'
+
+test('a status file freshly written by another instance of the same session id is a collision', () => {
+  const now = 1_000_000
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000 }, 'A', now)).toBe(true)
+  expect(isCollision({ instance: 'A', updatedAt: now - 2000 }, 'A', now)).toBe(false) // 自己寫的（含熱重載後）
+  expect(isCollision({ instance: 'B', updatedAt: now - 60000 }, 'A', now)).toBe(false) // 舊檔
+  expect(isCollision({ instance: 'B', updatedAt: now - 2000, left: true }, 'A', now)).toBe(false) // 已離開
+  expect(isCollision({ updatedAt: now - 2000 }, 'A', now)).toBe(false) // 舊版沒有 instance
+  expect(isCollision(undefined, 'A', now)).toBe(false)
+})
+
+test('every status file now carries this window\'s instance id', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  await $.command.run({ command: 'office', args: 'title x' } as any)
+  expect(typeof JSON.parse(writes[writes.length - 1]).instance).toBe('string')
+})
+
 import { mock } from 'claude-code/testing'
 
 test('the terminal pane animates: the 250 ms timer blits new frames while it is open', async ($, on) => {
@@ -804,36 +903,4 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
   expect(blits.length).toBeGreaterThanOrEqual(3)
   expect(new Set(blits).size).toBeGreaterThan(1) // 畫格真的在變（貓在走、時鐘在轉）
   await ui.unmount()
-})
-
-// ---------- 0.7.3：撞號偵測 ----------
-
-import { isCollision } from './register'
-
-test('a status file freshly written by another instance of the same session id is a collision', () => {
-  const now = 1_000_000
-  expect(isCollision({ instance: 'B', updatedAt: now - 2000 }, 'A', now)).toBe(true)
-  expect(isCollision({ instance: 'A', updatedAt: now - 2000 }, 'A', now)).toBe(false) // 自己寫的（含熱重載後）
-  expect(isCollision({ instance: 'B', updatedAt: now - 60000 }, 'A', now)).toBe(false) // 舊檔
-  expect(isCollision({ instance: 'B', updatedAt: now - 2000, left: true }, 'A', now)).toBe(false) // 已離開
-  expect(isCollision({ updatedAt: now - 2000 }, 'A', now)).toBe(false) // 舊版沒有 instance
-  expect(isCollision(undefined, 'A', now)).toBe(false)
-})
-
-test('every status file now carries this window\'s instance id', async ($, on) => {
-  const writes: string[] = []
-  MOCKS(on, writes)
-  await $.command.run({ command: 'office', args: 'title x' } as any)
-  expect(typeof JSON.parse(writes[writes.length - 1]).instance).toBe('string')
-})
-
-test('the cat walks above the furniture row, not over the cabinet, mailbox or copier', () => {
-  for (const [w, r] of [[48, 44], [60, 44], [112, 60]] as const) {
-    const h = r * 2
-    const cat = new Set([0xffa726, 0xe65100, 0xffcc80, 0xfff3e0, 0xf48fb1])
-    for (let f = 0; f < 120; f += 7) {
-      const s = drawScene([], f, w, r)
-      for (let x = 0; x < w; x++) for (let y = h - 2 - 8; y < h - 2; y++) expect(cat.has(s.px[y * w + x]) && s.px[y * w + x] !== 0xfff3e0).toBe(false)
-    }
-  }
 })
