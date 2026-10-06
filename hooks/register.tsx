@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, isMeetingTime, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -28,6 +28,7 @@ let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
 let pet: Pet = 'cat'
+let meeting = false // 每日站會時段（scene.ts 的 MEETING_START～END）
 let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
 let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
@@ -55,7 +56,7 @@ const sceneOpts = (): SceneOptions => {
     catOffset += raidEnd - raid.start
     raid = undefined
   }
-  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet }
+  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet, meeting }
 }
 
 // 餵貓（寶寶是餵奶）：把上一次吃飯停下的時間併進位移，再開始新的一次
@@ -102,7 +103,7 @@ function releaseCat(name?: string): string {
 // 角色變了（員工↔主管）就排一段走路動畫：從舊座位沿走道走到新座位
 function trackMoves(list: Coworker[]) {
   if (width === 0 || rows === 0) return
-  const now = assignSeats(list, width, rows, lastPlaced ?? undefined)
+  const now = assignSeats(list, width, rows, lastPlaced ?? undefined, meeting)
   if (lastPlaced) {
     for (const [id, pl] of now) {
       const old = lastPlaced.get(id)
@@ -440,6 +441,18 @@ async function refresh($: EngineInterface) {
     } catch {}
   }
   others = found
+  // 進入／離開開會時段：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
+  // 臨時會議：~/.claude/pixel-office/meeting.json 的 {"until": <ms>} 在期限前算開會（主管寫檔，各視窗都看得到）
+  let until = 0
+  try {
+    const raw = await $.fs.read(`${d.replace(/\/sessions$/, '')}/meeting.json`)
+    until = Number(JSON.parse(typeof raw === 'string' ? raw : '{}').until) || 0
+  } catch {}
+  const m = isMeetingTime(new Date(now)) || now < until
+  if (m !== meeting) {
+    meeting = m
+    trackMoves(everyone())
+  }
   await showCrew($)
 }
 
@@ -807,7 +820,7 @@ export const register: Register = on => {
           width = sw
           rows = sr
         }
-        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined)
+        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting)
         svg = encodeSvg(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
@@ -848,7 +861,7 @@ export const register: Register = on => {
     const mine = await read($, buttons)
     width = sceneWidth(e.props.bodyColumns)
     rows = sceneRows(e.props.scroll?.bodyRows) // 撐滿面板，扣掉預留空白與按鈕列
-    lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined)
+    lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting)
 
     return (
       <Box flexDirection="column">

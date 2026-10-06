@@ -242,6 +242,37 @@ test('a promotion walks from the desk, along the hall, through the office door, 
   expect([...dirs].some(d => d.startsWith('0,') && d !== '0,0')).toBe(true)
 })
 
+import { isMeetingTime } from './scene'
+
+test('daily meeting 16:00-16:30: idle peers walk into the meeting room, busy ones stay until done, everyone returns after', () => {
+  const boss = { ...P('boss', 'Jay', 'idle', false, 'manager'), agent: 'Office' }
+  const idle = { ...P('alpha', 'a'), team: 'Office' }
+  const busy = { ...P('bravo', 'b', 'typing'), team: 'Office' }
+  const other = P('charlie', 'c') // 不屬於 Team，不進會議室
+  const crew = [boss, idle, busy, other]
+  const before = assignSeats(crew, 112, 50)
+  const m1 = assignSeats(crew, 112, 50, before, true)
+  expect(m1.get('alpha')!.kind).toBe('meet')
+  expect(m1.get('bravo')!.kind).toBe('staff')
+  expect(m1.get('charlie')!.kind).toBe('staff')
+  expect(m1.get('boss')!.kind).toBe('boss')
+  // bravo 做完進來；alpha 開會中被叫去回話（變忙）也不起身、不換位
+  const m2 = assignSeats([boss, { ...idle, mode: 'thinking' as const }, { ...busy, mode: 'idle' as const }, other], 112, 50, m1, true)
+  expect(m2.get('alpha')).toEqual(m1.get('alpha'))
+  expect(m2.get('bravo')!.kind).toBe('meet')
+  expect(m2.get('bravo')!.slot).not.toBe(m2.get('alpha')!.slot)
+  // 散會：回到原本的位子，路線從會議室走出來
+  const after = assignSeats(crew, 112, 50, m2)
+  expect(after.get('alpha')!.seat).toEqual(before.get('alpha')!.seat)
+  const path = route(m2.get('alpha')!, after.get('alpha')!, 112, 50)
+  expect(path[0]).toEqual(m2.get('alpha')!.stand)
+  for (let i = 0; i < path.length - 1; i++) expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
+  expect(encode(drawScene(crew, 1, 112, 50, [], m2, { meeting: true }))).toBeTruthy()
+  expect(isMeetingTime(new Date(2026, 9, 6, 15, 59))).toBe(false)
+  expect(isMeetingTime(new Date(2026, 9, 6, 16, 0))).toBe(true)
+  expect(isMeetingTime(new Date(2026, 9, 6, 16, 30))).toBe(false)
+})
+
 // ---------- 按鈕、夜間模式、餵貓、系統提示 ----------
 
 import { catMoveFrame } from './scene'

@@ -22,6 +22,15 @@ const CAT_START = 13 // 貓從 WALL+13 起走，避開盆栽與檔案櫃
 const mailboxX = (width: number) => Math.floor(width / 2) - 7
 export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
 export const OFFICE_DOOR_W = 7
+const MEET_DOOR_W = 7 // 會議室門洞同主管室：人寬 7 才不穿牆
+// 每日站會：16:00～16:30（本機時間）主管的 peer 閒著就走進會議室
+// ponytail: 時段寫死，要每人／每團隊不同再搬進設定檔
+export const MEETING_START = 16 * 60
+export const MEETING_END = 16 * 60 + 30
+export const isMeetingTime = (d: Date) => {
+  const m = d.getHours() * 60 + d.getMinutes()
+  return m >= MEETING_START && m < MEETING_END
+}
 const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
 
 const C = {
@@ -114,14 +123,34 @@ export function layout(width: number, rows: number) {
   const officeW = Math.max(22, Math.floor((width - 2 * WALL) * 0.45))
   const officeX = width - WALL - officeW
   const manager: Seat = { x: officeX + officeW - BOSS_W - 1, y: WALL + 2 }
-  return { seats, clusters, manager, officeX, officeW, h, cols }
+  const meetDoor = Math.floor(officeX / 2) - 2
+  return { seats, clusters, manager, officeX, officeW, h, cols, meetDoor, meet: meetingSeats(officeX) }
+}
+
+/** 會議桌兩側的位子（頭頂座標）：偶數號在桌子上方面向下、奇數號在下方面向上；隔兩張椅子坐一人，人寬 7 才不重疊 */
+export function meetingSeats(officeX: number): Seat[] {
+  const { cx, a } = meetTable(officeX)
+  const out: Seat[] = []
+  for (let x = Math.ceil(cx - a) + 1, i = 0; x < cx + a - 1; x += 3, i++) {
+    if (i % 3 !== 0) continue
+    out.push({ x: x + 1, y: WALL + 2 }, { x: x + 1, y: WALL + 14 })
+  }
+  return out
+}
+
+function meetTable(officeX: number) {
+  const mx0 = WALL + 2
+  const mx1 = officeX - WALL - 1
+  return { cx: (mx0 + mx1) / 2, cy: WALL + TOP_H / 2, a: Math.max(4, (mx1 - mx0) / 2 - 5), b: 3.2 }
 }
 
 // ---------- 座位分配：先坐回上次的位子，新來的人才依編號挑預設座位 ----------
 
-export type Placement = { kind: 'boss' | 'staff'; slot: number; seat: Seat; stand: Seat; cluster: Seat }
+export type Placement = { kind: 'boss' | 'staff' | 'meet'; slot: number; seat: Seat; stand: Seat; cluster: Seat }
 
-export function assignSeats(crew: Coworker[], width: number, rows: number, previous?: Map<string, Placement>): Map<string, Placement> {
+const BUSY = new Set<Coworker['mode']>(['thinking', 'typing', 'reading', 'waiting'])
+
+export function assignSeats(crew: Coworker[], width: number, rows: number, previous?: Map<string, Placement>, meeting = false): Map<string, Placement> {
   const L = layout(width, rows)
   const out = new Map<string, Placement>()
   const boss = crew.find(c => c.role === 'manager')
@@ -133,10 +162,32 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
     const seat = L.seats[slot]
     out.set(c.id, { kind: 'staff', slot, seat, stand: { x: seat.x + 5, y: seat.y + 1 }, cluster: L.clusters[Math.floor(slot / 4)] })
   }
-  const staff = crew.filter(c => c !== boss)
   // 分區：最右邊那一欄的座位群給主管的 peer，其餘給其他 session；只有一欄時不分區
   const managers = new Set(crew.filter(c => c.role === 'manager').flatMap(c => [c.agent, c.name].filter(Boolean) as string[]))
   const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
+  // 開會時段：peer 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
+  const inMeeting = new Set<string>()
+  if (meeting) {
+    const busySlots = new Set<number>()
+    const join = (c: Coworker, slot: number) => {
+      busySlots.add(slot)
+      inMeeting.add(c.id)
+      const seat = L.meet[slot]
+      out.set(c.id, { kind: 'meet', slot, seat, stand: seat, cluster: seat })
+    }
+    const peers = crew.filter(c => c !== boss && isPeer(c))
+    const later: Coworker[] = []
+    for (const c of peers) {
+      const prev = previous?.get(c.id)
+      if (prev?.kind === 'meet' && prev.slot < L.meet.length && !busySlots.has(prev.slot)) join(c, prev.slot)
+      else if (!BUSY.has(c.mode)) later.push(c)
+    }
+    for (const c of later) {
+      const slot = L.meet.findIndex((_, i) => !busySlots.has(i))
+      if (slot >= 0) join(c, slot) // 會議桌坐滿就留在座位
+    }
+  }
+  const staff = crew.filter(c => c !== boss && !inMeeting.has(c.id))
   const zoneOf = (slot: number) => (L.cols < 2 ? 'any' : Math.floor(slot / 4) % L.cols === L.cols - 1 ? 'peer' : 'other')
   const fits = (c: Coworker, slot: number) => zoneOf(slot) === 'any' || zoneOf(slot) === (isPeer(c) ? 'peer' : 'other')
   const rest: Coworker[] = []
@@ -175,6 +226,12 @@ export function route(from: Placement, to: Placement, width: number, rows: numbe
   const door = L.officeX + OFFICE_DOOR_X + Math.floor(OFFICE_DOOR_W / 2) // 門洞正中央：人寬 7，身體整個落在門洞裡
   const inside = WALL + TOP_H - 5 // 進房後的橫向走道，不貼地毯金邊
   const exit = (pl: Placement): Seat[] => {
+    if (pl.kind === 'meet') {
+      // 會議室：繞到桌子下方那排人的後面（貼門那條）→ 門洞正中央 → 大走道
+      const md = L.meetDoor + Math.floor(MEET_DOOR_W / 2)
+      const lane = WALL + TOP_H - 3 // ponytail: 房間只有 20 像素高，上排的人會直直穿過桌子走出來
+      return [pl.stand, { x: pl.stand.x, y: lane }, { x: md, y: lane }, { x: md, y: hall }]
+    }
     if (pl.kind === 'boss') return [pl.stand, { x: pl.stand.x, y: inside }, { x: door, y: inside }, { x: door, y: hall }]
     // 上排：椅子後面就是空地，直接往上到大走道
     if (pl.seat.y === pl.cluster.y) return [pl.stand, { x: pl.stand.x, y: hall }]
@@ -309,8 +366,8 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   }
 
   // 門：會議室、主管室（含開門弧線）、大門
-  const meetDoor = Math.floor(officeX / 2) - 2
-  p.rect(meetDoor, WALL + TOP_H, 4, WALL, C.tileA)
+  const meetDoor = L.meetDoor
+  p.rect(meetDoor, WALL + TOP_H, MEET_DOOR_W, WALL, C.tileA)
   p.rect(officeX + OFFICE_DOOR_X, WALL + TOP_H, OFFICE_DOOR_W, WALL, C.tileA)
   for (let i = 0; i < OFFICE_DOOR_W; i += 2) p.set(officeX + OFFICE_DOOR_X + i, WALL + TOP_H - 1 - Math.floor(i / 2), C.ink) // 開門弧線
   const front = Math.floor(w / 2) - 3
@@ -325,12 +382,7 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   p.rect(WALL, WALL + 6, 1, 8, C.board)
   p.set(WALL, WALL + 8, C.marker)
   p.set(WALL, WALL + 10, C.err)
-  const mx0 = WALL + 2
-  const mx1 = officeX - WALL - 1
-  const cx = (mx0 + mx1) / 2
-  const cy = WALL + TOP_H / 2
-  const a = Math.max(4, (mx1 - mx0) / 2 - 5)
-  const b = 3.2
+  const { cx, cy, a, b } = meetTable(officeX)
   for (let y = Math.floor(cy - b); y <= Math.ceil(cy + b); y++) {
     for (let x = Math.floor(cx - a); x <= Math.ceil(cx + a); x++) {
       const d = ((x - cx) / a) ** 2 + ((y - cy) / b) ** 2
@@ -843,7 +895,7 @@ function envelope(p: Px, x: number, y: number) {
   p.set(x + 1, y, C.envelopeLine)
 }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet }
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet; meeting?: boolean }
 
 export function drawScene(
   crew: Coworker[],
@@ -885,7 +937,7 @@ export function drawScene(
     moving.set(w.id, at)
     if (w.kind && (frame - w.start) * WALK_SPEED < pathLength(w.path) / 2) errandOut.set(w.id, w.kind)
   }
-  const placed = assignSeats(crew, width, rows, seating)
+  const placed = assignSeats(crew, width, rows, seating, opts.meeting)
   // 放貓：被咬的人坐在位子上才算數；咬的那幾格他會抖、頭上冒紅色驚嘆號（借用 error 的樣子）
   const prey = opts.raid ? placed.get(opts.raid.targetId) : undefined
   const raid = opts.raid && prey?.kind === 'staff' && !moving.has(opts.raid.targetId)
@@ -903,6 +955,16 @@ export function drawScene(
   const sitting = new Map<string, Coworker>()
   for (const [id, pl] of placed) if (pl.kind === 'staff' && !moving.has(id)) sitting.set(`${pl.seat.x},${pl.seat.y}`, byId.get(id)!)
   for (const s of L.seats) unit(p, s.x, s.y, sitting.get(`${s.x},${s.y}`) ?? null, frame)
+
+  // 會議室：上排面向下、下排面向上；名牌貼在人的外側（上排在上、下排在下）
+  for (const [id, pl] of placed) {
+    const who = byId.get(id)
+    if (pl.kind !== 'meet' || moving.has(id) || !who) continue
+    const top = pl.slot % 2 === 0
+    person(p, pl.seat.x, pl.seat.y, who, frame, top ? 1 : -1)
+    const tag = `${who.isMe ? '>' : ''}${who.name}`.slice(0, 8)
+    p.labels.push({ row: top ? (pl.seat.y - 2) / 2 : (pl.seat.y + 4) / 2, col: pl.seat.x - 3, text: tag, fg: who.isMe ? C.me : C.text, bg: C.meetFloor })
+  }
 
   for (const [id, at] of moving) {
     const who = byId.get(id)
