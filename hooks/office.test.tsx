@@ -1085,3 +1085,44 @@ test('/office pet switches cat and baby, relabels the buttons and remembers the 
   expect(String((bad as any).text)).toContain('用法')
   await ui2.unmount()
 })
+
+// ---------- 會議：參與者名單（不限 team） ----------
+
+test('with a participant list, exactly those people go in, team or not; refs and case are ignored', () => {
+  const boss = { ...P('boss', 'Jay', 'idle', false, 'manager'), agent: 'Office' }
+  const peer = { ...P('alpha', 'a'), team: 'Office', agent: 'llm-a' }
+  const outsider = { ...P('charlie', 'c'), agent: 'finance-c' } // 不是 team
+  const other = { ...P('delta', 'd'), team: 'Office', agent: 'llm-d' } // team 但沒被點名
+  const crew = [boss, peer, outsider, other]
+  const m = assignSeats(crew, 112, 50, undefined, true, ['LLM-A', 'finance-c [3fa9c1]'])
+  expect(m.get('alpha')!.kind).toBe('meet')
+  expect(m.get('charlie')!.kind).toBe('meet')
+  expect(m.get('delta')!.kind).toBe('staff')
+  expect(m.get('boss')!.kind).toBe('boss')
+  // 沒給名單：維持原本的行為（主管的 peer）
+  const old = assignSeats(crew, 112, 50, undefined, true)
+  expect(old.get('delta')!.kind).toBe('meet')
+  expect(old.get('charlie')!.kind).toBe('staff')
+})
+
+test('office_meeting writes meeting.json with topic and participants, and end clears it', async ($, on) => {
+  const files: Record<string, string> = {}
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).pop() ?? ''] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.split(/[\\/]/).pop() ?? ''] = e.text
+    return { value: undefined }
+  })
+  const started: any = await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'start', topic: '請購流程', participants: ['llm-a', 'finance-c'], minutes: 30 } as any)
+  const m = JSON.parse(files['meeting.json'])
+  expect(m.participants).toEqual(['llm-a', 'finance-c'])
+  expect(m.topic).toBe('請購流程')
+  expect(m.until).toBe(1_000_000 + 30 * 60000)
+  expect(JSON.stringify(started)).toContain('走進會議室')
+  const none: any = await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'start', participants: [] } as any)
+  expect(JSON.stringify(none)).toContain('participants')
+  await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'end' } as any)
+  expect(JSON.parse(files['meeting.json']).until).toBe(0)
+})

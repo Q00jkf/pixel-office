@@ -32,6 +32,7 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
 | `/office bite [名牌]` | 放貓咬人（小寶寶是爬過去抱大腿）；不指定就隨機挑一位員工，主管在主管室不會被咬 |
 | `/office pet [cat｜baby]` | 辦公室裡的貓與小寶寶切換（不帶參數就切換）；只影響自己看到的畫面，重開後仍記得 |
+| `/office meeting [off]` | 看目前的會議（題目、參與者）；`off` 提早散會 |
 | 面板按鈕「升為主管／設為員工」(`r`)、「餵貓／餵奶」(`c`)、「放貓／放寶寶」(`b`)、「換寶寶／換貓」(`p`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。
@@ -66,7 +67,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 每個 session 的狀態即時反映在小人與螢幕：打字、讀檔、思考、出錯、完成
 - 第一位主管坐主管室；登記為他 peer 的人（`/office team`）坐最右邊那一區，其他人坐左邊；換區時會起身走過去。peer 區鋪金邊地毯、上方掛「TEAM <主管名牌>」（有主管在線且排得出兩欄才顯示）
 - 每人有固定座位，別人進出不會讓他換位
-- **開會**：沒有固定時段。主管寫 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>}`，在那之前主管的 peer（Team 成員）閒著就走進會議室坐下，忙的做完再進；進去後待到散會才走回原座位。只是畫面，實際開會由主管 session 發問
+- **開會**：llm-wiki 的 `/wiki-meet` 開會時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；只是畫面，討論本身由 `wiki-meet` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
 - **對外動作會跑腿**：寄信（Gmail 寄送／回覆／轉寄／草稿）拿著紙走去影印機；上傳文件（Google Drive、Notion 建立／更新）拿資料夾走去檔案櫃；`git push` 拿包裹走去大門口的郵筒；成功才算，走完回座位
 - 坐不下時左上角顯示 `+N`
 - 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 用 SVG 畫，每 0.5 秒更新一次（約每秒 2 格），按鈕相同

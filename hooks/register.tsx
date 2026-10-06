@@ -29,6 +29,8 @@ let walkers: Walker[] = []
 let nightMode = false
 let pet: Pet = 'cat'
 let meeting = false // 開會中（~/.claude/pixel-office/meeting.json 的 until 之前）
+let attendees: string[] = [] // 開會的參與者（meeting.json 的 participants）；空的就是主管的 peer
+let meetingTopic = ''
 let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
 let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
@@ -56,7 +58,7 @@ const sceneOpts = (): SceneOptions => {
     catOffset += raidEnd - raid.start
     raid = undefined
   }
-  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet, meeting }
+  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet, meeting, attendees }
 }
 
 // 餵貓（寶寶是餵奶）：把上一次吃飯停下的時間併進位移，再開始新的一次
@@ -103,7 +105,7 @@ function releaseCat(name?: string): string {
 // 角色變了（員工↔主管）就排一段走路動畫：從舊座位沿走道走到新座位
 function trackMoves(list: Coworker[]) {
   if (width === 0 || rows === 0) return
-  const now = assignSeats(list, width, rows, lastPlaced ?? undefined, meeting)
+  const now = assignSeats(list, width, rows, lastPlaced ?? undefined, meeting, attendees)
   if (lastPlaced) {
     for (const [id, pl] of now) {
       const old = lastPlaced.get(id)
@@ -286,6 +288,23 @@ async function followSession($: EngineInterface) {
   await adopt($, id)
 }
 
+const meetingFile = (sessionsDir: string) => `${sessionsDir.replace(/\/sessions$/, '')}/meeting.json`
+
+/** 開會／散會：寫 meeting.json，各視窗每秒讀一次，參與者走進會議室、散會走回座位（只是畫面） */
+async function setMeeting($: EngineInterface, input: { action?: unknown; topic?: unknown; participants?: unknown; minutes?: unknown }): Promise<string> {
+  const file = meetingFile(await sharedDir($))
+  if (input.action === 'end') {
+    await $.fs.write(file, JSON.stringify({ until: 0 }))
+    return '散會：參與者走回座位。'
+  }
+  const people = Array.isArray(input.participants) ? input.participants.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : []
+  if (people.length === 0) return '要列出 participants（參與者的 ListAgents 名稱或名牌）。'
+  const minutes = typeof input.minutes === 'number' && input.minutes > 0 ? Math.min(input.minutes, 480) : 60
+  const topic = typeof input.topic === 'string' ? input.topic.slice(0, 60) : ''
+  await $.fs.write(file, JSON.stringify({ until: (await $.clock.now()) + minutes * 60000, topic, participants: people }))
+  return `開會：${people.join('、')} 走進會議室，${minutes} 分鐘後自動散會（提早散會用 action=end）。`
+}
+
 // 把自己的狀態寫到共用資料夾：一個 session 一個檔，不會互相覆蓋
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
@@ -444,13 +463,18 @@ async function refresh($: EngineInterface) {
   // 進入／離開開會：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
   // 臨時會議：~/.claude/pixel-office/meeting.json 的 {"until": <ms>} 在期限前算開會（主管寫檔，各視窗都看得到）
   let until = 0
+  let who: string[] = []
   try {
-    const raw = await $.fs.read(`${d.replace(/\/sessions$/, '')}/meeting.json`)
-    until = Number(JSON.parse(typeof raw === 'string' ? raw : '{}').until) || 0
+    const raw = await $.fs.read(meetingFile(d))
+    const j = JSON.parse(typeof raw === 'string' ? raw : '{}')
+    until = Number(j.until) || 0
+    who = Array.isArray(j.participants) ? j.participants.filter((x: unknown): x is string => typeof x === 'string') : []
+    meetingTopic = typeof j.topic === 'string' ? j.topic : ''
   } catch {}
   const m = now < until
-  if (m !== meeting) {
+  if (m !== meeting || who.join('|') !== attendees.join('|')) {
     meeting = m
+    attendees = who
     trackMoves(everyone())
   }
   await showCrew($)
@@ -569,6 +593,21 @@ export const register: Register = on => {
         '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。只讀，不改任何東西。',
       inputSchema: { type: 'object', properties: {} },
     })
+    await $.tool.register({
+      name: 'office_meeting',
+      description:
+        '像素辦公室的會議室：action=start 讓參與者走進會議室（participants 填 ListAgents 名稱或名牌，不限 team），minutes 後自動散會；action=end 提早散會。只是畫面，不會替你開會或傳訊息。llm-wiki 的 wiki-meet 開會與散會時呼叫。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['start', 'end'], description: 'start 開會、end 散會' },
+          topic: { type: 'string', description: '題目，60 字內' },
+          participants: { type: 'array', items: { type: 'string' }, description: '參與者的 ListAgents 名稱或名牌' },
+          minutes: { type: 'number', description: '幾分鐘後自動散會，預設 60' },
+        },
+        required: ['action'],
+      },
+    })
     instance = await read($, instanceRef)
     if (!instance) {
       instance = crypto.randomUUID()
@@ -626,6 +665,12 @@ export const register: Register = on => {
   on('tool.describe', { tool: ROSTER }, async ($, e, next) => {
     const described = await next(e)
     return { ...described, isDeferred: false }
+  })
+
+  on('tool.call', { tool: 'mcp__pixel-office__office_meeting' }, async ($, e) => {
+    const text = await setMeeting($, e as unknown as Record<string, unknown>).catch(() => '寫不進 meeting.json，會議室畫面沒有更新。')
+    await refresh($).catch(() => undefined)
+    return { result: text }
   })
 
   on('tool.call', { tool: ROSTER }, async $ => {
@@ -692,6 +737,10 @@ export const register: Register = on => {
     const [sub, ...rest] = e.args.trim().split(/\s+/)
     const value = rest.join(' ')
     if (sub === 'role') return { text: await applyProfile($, { role: value }) }
+    if (sub === 'meeting') {
+      if (value === 'off') return { text: await setMeeting($, { action: 'end' }) }
+      return { text: meeting ? `開會中：${meetingTopic || '（沒有題目）'}；參與者 ${attendees.length > 0 ? attendees.join('、') : '主管的 peer'}。散會用 /office meeting off` : '目前沒有開會。開會由 llm-wiki 的 /wiki-meet 發起（或模型呼叫 office_meeting）。' }
+    }
     if (sub === 'pet') {
       const text = await setPet($, value)
       $.ui.invalidate('ui.render')
@@ -722,7 +771,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby]（貓與小寶寶切換）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby]（貓與小寶寶切換）｜/office meeting [off]（會議狀態／散會）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -820,7 +869,7 @@ export const register: Register = on => {
           width = sw
           rows = sr
         }
-        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting)
+        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
         svg = encodeSvg(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
@@ -861,7 +910,7 @@ export const register: Register = on => {
     const mine = await read($, buttons)
     width = sceneWidth(e.props.bodyColumns)
     rows = sceneRows(e.props.scroll?.bodyRows) // 撐滿面板，扣掉預留空白與按鈕列
-    lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting)
+    lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
 
     return (
       <Box flexDirection="column">

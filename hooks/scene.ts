@@ -142,7 +142,7 @@ export type Placement = { kind: 'boss' | 'staff' | 'meet'; slot: number; seat: S
 
 const BUSY = new Set<Coworker['mode']>(['thinking', 'typing', 'reading', 'waiting'])
 
-export function assignSeats(crew: Coworker[], width: number, rows: number, previous?: Map<string, Placement>, meeting = false): Map<string, Placement> {
+export function assignSeats(crew: Coworker[], width: number, rows: number, previous?: Map<string, Placement>, meeting = false, attendees?: string[]): Map<string, Placement> {
   const L = layout(width, rows)
   const out = new Map<string, Placement>()
   const boss = crew.find(c => c.role === 'manager')
@@ -157,7 +157,10 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
   // 分區：最右邊那一欄的座位群給主管的 peer，其餘給其他 session；只有一欄時不分區
   const managers = new Set(crew.filter(c => c.role === 'manager').flatMap(c => [c.agent, c.name].filter(Boolean) as string[]))
   const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
-  // 開會時段：peer 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
+  // 開會：有參與者名單（ListAgents 名稱或名牌，不限 team）就照名單，沒有就是主管的 peer。
+  // 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
+  const want = attendees && attendees.length > 0 ? new Set(attendees.map(a => a.replace(/\s*\[[^\]]*\]$/, '').toLowerCase())) : undefined
+  const invited = (c: Coworker) => (want ? [c.agent, c.name].some(v => v !== undefined && want.has(v.toLowerCase())) : isPeer(c))
   const inMeeting = new Set<string>()
   if (meeting) {
     const busySlots = new Set<number>()
@@ -167,7 +170,7 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
       const seat = L.meet[slot]
       out.set(c.id, { kind: 'meet', slot, seat, stand: seat, cluster: seat })
     }
-    const peers = crew.filter(c => c !== boss && isPeer(c))
+    const peers = crew.filter(c => c !== boss && invited(c))
     const later: Coworker[] = []
     for (const c of peers) {
       const prev = previous?.get(c.id)
@@ -887,7 +890,7 @@ function envelope(p: Px, x: number, y: number) {
   p.set(x + 1, y, C.envelopeLine)
 }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet; meeting?: boolean }
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet; meeting?: boolean; attendees?: string[] }
 
 export function drawScene(
   crew: Coworker[],
@@ -929,7 +932,7 @@ export function drawScene(
     moving.set(w.id, at)
     if (w.kind && (frame - w.start) * WALK_SPEED < pathLength(w.path) / 2) errandOut.set(w.id, w.kind)
   }
-  const placed = assignSeats(crew, width, rows, seating, opts.meeting)
+  const placed = assignSeats(crew, width, rows, seating, opts.meeting, opts.attendees)
   // 放貓：被咬的人坐在位子上才算數；咬的那幾格他會抖、頭上冒紅色驚嘆號（借用 error 的樣子）
   const prey = opts.raid ? placed.get(opts.raid.targetId) : undefined
   const raid = opts.raid && prey?.kind === 'staff' && !moving.has(opts.raid.targetId)
