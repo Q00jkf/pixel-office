@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, isMeetingTime, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -28,7 +28,7 @@ let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
 let pet: Pet = 'cat'
-let meeting = false // 每日站會時段（scene.ts 的 MEETING_START～END）
+let meeting = false // 開會中（~/.claude/pixel-office/meeting.json 的 until 之前）
 let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
 let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
@@ -441,14 +441,14 @@ async function refresh($: EngineInterface) {
     } catch {}
   }
   others = found
-  // 進入／離開開會時段：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
+  // 進入／離開開會：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
   // 臨時會議：~/.claude/pixel-office/meeting.json 的 {"until": <ms>} 在期限前算開會（主管寫檔，各視窗都看得到）
   let until = 0
   try {
     const raw = await $.fs.read(`${d.replace(/\/sessions$/, '')}/meeting.json`)
     until = Number(JSON.parse(typeof raw === 'string' ? raw : '{}').until) || 0
   } catch {}
-  const m = isMeetingTime(new Date(now)) || now < until
+  const m = now < until
   if (m !== meeting) {
     meeting = m
     trackMoves(everyone())

@@ -23,14 +23,6 @@ const mailboxX = (width: number) => Math.floor(width / 2) - 7
 export const OFFICE_DOOR_X = 1 // 主管室門洞：從 officeX 往右 1 起，寬 7（＝人寬，原本 4 會穿牆）
 export const OFFICE_DOOR_W = 7
 const MEET_DOOR_W = 7 // 會議室門洞同主管室：人寬 7 才不穿牆
-// 每日站會：16:00～16:30（本機時間）主管的 peer 閒著就走進會議室
-// ponytail: 時段寫死，要每人／每團隊不同再搬進設定檔
-export const MEETING_START = 16 * 60
-export const MEETING_END = 16 * 60 + 30
-export const isMeetingTime = (d: Date) => {
-  const m = d.getHours() * 60 + d.getMinutes()
-  return m >= MEETING_START && m < MEETING_END
-}
 const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
 
 const C = {

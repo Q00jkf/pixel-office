@@ -66,7 +66,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 每個 session 的狀態即時反映在小人與螢幕：打字、讀檔、思考、出錯、完成
 - 第一位主管坐主管室；登記為他 peer 的人（`/office team`）坐最右邊那一區，其他人坐左邊；換區時會起身走過去。peer 區鋪金邊地毯、上方掛「TEAM <主管名牌>」（有主管在線且排得出兩欄才顯示）
 - 每人有固定座位，別人進出不會讓他換位
-- **每日站會**：本機時間 16:00～16:30，主管的 peer（Team 成員）閒著就走進會議室坐下，忙的做完再進；進去後待到散會才走回原座位（時段在 `hooks/scene.ts` 的 `MEETING_START`／`MEETING_END`）。只是畫面，實際收集明日工作由主管 session 排程發問
+- **開會**：沒有固定時段。主管寫 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>}`，在那之前主管的 peer（Team 成員）閒著就走進會議室坐下，忙的做完再進；進去後待到散會才走回原座位。只是畫面，實際開會由主管 session 發問
 - **對外動作會跑腿**：寄信（Gmail 寄送／回覆／轉寄／草稿）拿著紙走去影印機；上傳文件（Google Drive、Notion 建立／更新）拿資料夾走去檔案櫃；`git push` 拿包裹走去大門口的郵筒；成功才算，走完回座位
 - 坐不下時左上角顯示 `+N`
 - 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 用 SVG 畫，每 0.5 秒更新一次（約每秒 2 格），按鈕相同

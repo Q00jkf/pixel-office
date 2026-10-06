@@ -242,9 +242,8 @@ test('a promotion walks from the desk, along the hall, through the office door, 
   expect([...dirs].some(d => d.startsWith('0,') && d !== '0,0')).toBe(true)
 })
 
-import { isMeetingTime } from './scene'
 
-test('daily meeting 16:00-16:30: idle peers walk into the meeting room, busy ones stay until done, everyone returns after', () => {
+test('meeting: idle peers walk into the meeting room, busy ones stay until done, everyone returns after', () => {
   const boss = { ...P('boss', 'Jay', 'idle', false, 'manager'), agent: 'Office' }
   const idle = { ...P('alpha', 'a'), team: 'Office' }
   const busy = { ...P('bravo', 'b', 'typing'), team: 'Office' }
@@ -268,9 +267,6 @@ test('daily meeting 16:00-16:30: idle peers walk into the meeting room, busy one
   expect(path[0]).toEqual(m2.get('alpha')!.stand)
   for (let i = 0; i < path.length - 1; i++) expect(path[i].x === path[i + 1].x || path[i].y === path[i + 1].y).toBe(true)
   expect(encode(drawScene(crew, 1, 112, 50, [], m2, { meeting: true }))).toBeTruthy()
-  expect(isMeetingTime(new Date(2026, 9, 6, 15, 59))).toBe(false)
-  expect(isMeetingTime(new Date(2026, 9, 6, 16, 0))).toBe(true)
-  expect(isMeetingTime(new Date(2026, 9, 6, 16, 30))).toBe(false)
 })
 
 // ---------- 按鈕、夜間模式、餵貓、系統提示 ----------
