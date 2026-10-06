@@ -1123,6 +1123,27 @@ test('office_meeting writes meeting.json with topic and participants, and end cl
   expect(JSON.stringify(started)).toContain('走進會議室')
   const none: any = await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'start', participants: [] } as any)
   expect(JSON.stringify(none)).toContain('participants')
+  // 不帶 minutes：不設期限
+  await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'start', participants: ['llm-a'] } as any)
+  expect(JSON.parse(files['meeting.json']).until).toBe(Number.MAX_SAFE_INTEGER)
   await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'end' } as any)
   expect(JSON.parse(files['meeting.json']).until).toBe(0)
+})
+
+test('an open-ended meeting ends by itself when none of the participants is online', async ($, on) => {
+  const files: Record<string, string> = { 'meeting.json': JSON.stringify({ until: Number.MAX_SAFE_INTEGER, topic: 't', participants: ['ghost'] }) }
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).pop() ?? ''] ?? '{}' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  await $.command.run({ command: 'office', args: '' } as any) // 開面板時會 refresh 一次，讀到 meeting.json
+  const r: any = await $.command.run({ command: 'office', args: 'meeting' } as any)
+  expect(String(r.text)).toContain('目前沒有開會')
+  // 對照：參與者有人在線（自己，名牌預設 me）→ 開會中
+  files['meeting.json'] = JSON.stringify({ until: Number.MAX_SAFE_INTEGER, topic: 't', participants: ['ghost', 'me'] })
+  await $.command.run({ command: 'office', args: '' } as any)
+  const on2: any = await $.command.run({ command: 'office', args: 'meeting' } as any)
+  expect(String(on2.text)).toContain('開會中')
 })

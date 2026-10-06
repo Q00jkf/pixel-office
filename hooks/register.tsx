@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -299,10 +299,11 @@ async function setMeeting($: EngineInterface, input: { action?: unknown; topic?:
   }
   const people = Array.isArray(input.participants) ? input.participants.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : []
   if (people.length === 0) return '要列出 participants（參與者的 ListAgents 名稱或名牌）。'
-  const minutes = typeof input.minutes === 'number' && input.minutes > 0 ? Math.min(input.minutes, 480) : 60
+  // 預設不設期限：散會靠 action=end，或參與者全都離線
+  const minutes = typeof input.minutes === 'number' && input.minutes > 0 ? input.minutes : undefined
   const topic = typeof input.topic === 'string' ? input.topic.slice(0, 60) : ''
-  await $.fs.write(file, JSON.stringify({ until: (await $.clock.now()) + minutes * 60000, topic, participants: people }))
-  return `開會：${people.join('、')} 走進會議室，${minutes} 分鐘後自動散會（提早散會用 action=end）。`
+  await $.fs.write(file, JSON.stringify({ until: minutes ? (await $.clock.now()) + minutes * 60000 : Number.MAX_SAFE_INTEGER, topic, participants: people }))
+  return `開會：${people.join('、')} 走進會議室；${minutes ? `${minutes} 分鐘後自動散會，` : ''}散會用 action=end（參與者全都離線也會散會）。`
 }
 
 // 把自己的狀態寫到共用資料夾：一個 session 一個檔，不會互相覆蓋
@@ -471,7 +472,8 @@ async function refresh($: EngineInterface) {
     who = Array.isArray(j.participants) ? j.participants.filter((x: unknown): x is string => typeof x === 'string') : []
     meetingTopic = typeof j.topic === 'string' ? j.topic : ''
   } catch {}
-  const m = now < until
+  // 不設期限的會議：參與者全都離線（主持人沒散會就關了視窗）也算散會，會議室不會一直掛著
+  const m = now < until && (who.length === 0 || everyone().some(isAttendee(who)))
   if (m !== meeting || who.join('|') !== attendees.join('|')) {
     meeting = m
     attendees = who
@@ -596,14 +598,14 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'office_meeting',
       description:
-        '像素辦公室的會議室：action=start 讓參與者走進會議室（participants 填 ListAgents 名稱或名牌，不限 team），minutes 後自動散會；action=end 提早散會。只是畫面，不會替你開會或傳訊息。llm-wiki 的 wiki-meet 開會與散會時呼叫。',
+        '像素辦公室的會議室：action=start 讓參與者走進會議室（participants 填 ListAgents 名稱或名牌，不限 team），不設期限；action=end 散會（參與者全都離線也會自動散會）。只是畫面，不會替你開會或傳訊息。llm-wiki 的 wiki-meet 開會與散會時呼叫。',
       inputSchema: {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['start', 'end'], description: 'start 開會、end 散會' },
           topic: { type: 'string', description: '題目，60 字內' },
           participants: { type: 'array', items: { type: 'string' }, description: '參與者的 ListAgents 名稱或名牌' },
-          minutes: { type: 'number', description: '幾分鐘後自動散會，預設 60' },
+          minutes: { type: 'number', description: '可選：幾分鐘後自動散會；不填就不設期限' },
         },
         required: ['action'],
       },

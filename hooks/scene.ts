@@ -136,6 +136,12 @@ function meetTable(officeX: number) {
   return { cx: (mx0 + mx1) / 2, cy: WALL + TOP_H / 2, a: Math.max(4, (mx1 - mx0) / 2 - 5), b: 3.2 }
 }
 
+/** 參與者名單（ListAgents 名稱或名牌）→ 判斷某人是否被點名；忽略結尾的 [ref] 與大小寫 */
+export function isAttendee(attendees: string[]): (c: Coworker) => boolean {
+  const want = new Set(attendees.map(a => a.replace(/\s*\[[^\]]*\]$/, '').toLowerCase()))
+  return c => [c.agent, c.name].some(v => v !== undefined && want.has(v.toLowerCase()))
+}
+
 // ---------- 座位分配：先坐回上次的位子，新來的人才依編號挑預設座位 ----------
 
 export type Placement = { kind: 'boss' | 'staff' | 'meet'; slot: number; seat: Seat; stand: Seat; cluster: Seat }
@@ -159,8 +165,8 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
   const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
   // 開會：有參與者名單（ListAgents 名稱或名牌，不限 team）就照名單，沒有就是主管的 peer。
   // 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
-  const want = attendees && attendees.length > 0 ? new Set(attendees.map(a => a.replace(/\s*\[[^\]]*\]$/, '').toLowerCase())) : undefined
-  const invited = (c: Coworker) => (want ? [c.agent, c.name].some(v => v !== undefined && want.has(v.toLowerCase())) : isPeer(c))
+  const onList = attendees && attendees.length > 0 ? isAttendee(attendees) : undefined
+  const invited = (c: Coworker) => (onList ? onList(c) : isPeer(c))
   const inMeeting = new Set<string>()
   if (meeting) {
     const busySlots = new Set<number>()
