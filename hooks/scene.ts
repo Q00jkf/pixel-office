@@ -1,4 +1,4 @@
-import type { Coworker, ErrandKind, OfficeMode } from '../types'
+import type { Coworker, ErrandKind, OfficeMode, Pet } from '../types'
 
 // 俯視平面圖：上排會議室＋主管室，下方員工區（四人一組、隔板），底部走廊
 const MIN_W = 48
@@ -41,6 +41,7 @@ const C = {
   copier: 0xbdbdbd, copierTop: 0x757575, led: 0x76ff03,
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
+  babySkin: 0xffd3b0, babyShade: 0xe8a87c, babyHair: 0x6d4c41, babySuit: 0x81d4fa, babySuitDark: 0x4fa3d1, babyDiaper: 0xfafafa, bottle: 0xeceff1,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
   cabinet: 0x8d6e63, cabinetDark: 0x6d4c41, handle: 0xd7ccc8, mailbox: 0xc62828, mailboxDark: 0x8e0000, folder: 0xa1887f, parcel: 0xbcaaa4,
   teamRug: 0xeadfc8, teamRugEdge: 0xc9a227, teamText: 0x5d4037,
@@ -606,6 +607,80 @@ const CAT_LIFT = 8 // 貓往上抬 8 像素：腳底在家具頂端（檔案櫃�
 const CAT_H = 8
 const CAT_REST = 12
 
+// ---------- 小寶寶（側面爬行，同樣 12×8、面向右）：H 頭髮、S 皮膚、s 陰影、K 眼、P 腮紅、B 連身衣、b 連身衣深、W 尿布 ----------
+const BABY_BODY = [
+  '.......HHH..',
+  '......HSSSS.',
+  '......SSSKS.',
+  '.WWBBBBSPSS.',
+  '.WWBBBBBBs..',
+]
+// 四格爬行：b 膝蓋（後）、S 手（前）落地的位置；0、2 格身體抬起
+const BABY_LIMBS: { knees: number[]; hands: number[] }[] = [
+  { knees: [2], hands: [8] },
+  { knees: [1, 3], hands: [7, 9] },
+  { knees: [3], hands: [9] },
+  { knees: [2, 4], hands: [8, 10] },
+]
+const BABY_SIT = [
+  [
+    '....HHH.....',
+    '...HSSSS....',
+    '...SSSKS....',
+    '...sSSPS....',
+    '...BBBBBS...',
+    '...BBBBB....',
+    '..WWWWBBB...',
+    '..WWWW.SS...',
+  ],
+  [
+    '....HHH.....',
+    '...HSSSS.S..',
+    '...SSSKS.B..',
+    '...sSSPSBB..',
+    '...BBBBB....',
+    '...BBBBB....',
+    '..WWWWBBB...',
+    '..WWWW.SS...',
+  ],
+]
+
+/** 寶寶爬行第 step 格的 8 列（最下面一列永遠是手和膝蓋落地的那一列） */
+export function babyCrawlRows(step: number): string[] {
+  const { knees, hands } = BABY_LIMBS[step % 4]
+  const limb = [...'.'.repeat(CAT_W)]
+  const ground = [...'.'.repeat(CAT_W)]
+  for (const x of knees) {
+    limb[x] = 'B'
+    ground[x] = 'b'
+  }
+  for (const x of hands) {
+    limb[x] = 'B'
+    ground[x] = 'S'
+  }
+  const blank = '.'.repeat(CAT_W)
+  return step % 2 === 0 ? [blank, ...BABY_BODY, limb.join(''), ground.join('')] : [blank, blank, ...BABY_BODY, ground.join('')]
+}
+
+const PET_COLORS: Record<Pet, () => Record<string, number>> = {
+  cat: () => ({ O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }),
+  baby: () => ({ H: C.babyHair, S: C.babySkin, s: C.babyShade, K: C.catEye, P: C.catNose, B: C.babySuit, b: C.babySuitDark, W: C.babyDiaper }),
+}
+const petWalk = (pet: Pet, step: number) => (pet === 'baby' ? babyCrawlRows(step) : catWalkRows(step))
+const petSit = (pet: Pet, frame: number) => (pet === 'baby' ? BABY_SIT : CAT_SIT)[frame % 2]
+
+function sprite(p: Px, pet: Pet, rows: string[], x0: number, y0: number, facingRight: boolean) {
+  const color = PET_COLORS[pet]()
+  rows.forEach((row, j) => {
+    const line = facingRight ? row : [...row].reverse().join('')
+    for (let i = 0; i < CAT_W; i++) if (line[i] !== '.') p.set(x0 + i, y0 + j, color[line[i]])
+  })
+}
+
+function hearts(p: Px, x: number, y: number) {
+  for (const [dx, dy] of [[-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1], [0, 2]]) p.set(x + dx, y + dy, C.heart)
+}
+
 /** 走路第 step 格的 8 列（第 0 列可能是空的：身體抬起時往上一格） */
 export function catWalkRows(step: number): string[] {
   const legs = CAT_LEGS[step % 4]
@@ -688,41 +763,36 @@ export function raidPose(path: Seat[], start: number, frame: number): RaidPose |
   return { at: step, dx: step.dx || 1, biting: false }
 }
 
-function raidingCat(p: Px, pose: RaidPose, frame: number) {
-  const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
-  // 咬：坐姿往左撲（每兩格往前 2 像素），嘴邊冒紅色咬痕
-  const lunge = pose.biting && frame % 2 ? -2 : 0
-  const rows = pose.biting ? CAT_SIT[frame % 2] : catWalkRows(frame)
+function raidingCat(p: Px, pose: RaidPose, frame: number, pet: Pet = 'cat') {
+  // 貓咬：坐姿往左撲（每兩格往前 2 像素），嘴邊冒紅色咬痕；寶寶抱：坐著貼過去抱大腿，頭上冒愛心
+  const lunge = pose.biting && frame % 2 ? (pet === 'baby' ? -1 : -2) : 0
+  const rows = pose.biting ? petSit(pet, frame) : petWalk(pet, frame)
   const x0 = pose.at.x - CAT_W / 2 + lunge
   const y0 = pose.at.y - CAT_H + 1
-  const facingRight = pose.dx > 0
-  rows.forEach((row, j) => {
-    const line = facingRight ? row : [...row].reverse().join('')
-    for (let i = 0; i < CAT_W; i++) if (line[i] !== '.') p.set(x0 + i, y0 + j, color[line[i]])
-  })
-  if (pose.biting && frame % 2) for (const [dx, dy] of [[-2, 2], [-3, 3], [-2, 4], [-4, 1]]) p.set(x0 + dx, y0 + dy, C.err)
+  sprite(p, pet, rows, x0, y0, pose.dx > 0)
+  if (!pose.biting) return
+  if (pet === 'baby') hearts(p, x0 + 5, y0 - 4 - (Math.floor(frame / 2) % 3))
+  else if (frame % 2) for (const [dx, dy] of [[-2, 2], [-3, 3], [-2, 4], [-4, 1]]) p.set(x0 + dx, y0 + dy, C.err)
 }
 
-function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOffset = 0) {
+function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOffset = 0, pet: Pet = 'cat') {
   const fed = treatFrame !== undefined && frame >= treatFrame && frame - treatFrame < TREAT_FRAMES
   const pose = catPose(catMoveFrame(frame, treatFrame, catOffset), catRange(p.w))
   const { x, facingRight } = pose
   const sitting = fed || pose.sitting
-  const rows = sitting ? CAT_SIT[frame % 2] : catWalkRows(frame)
+  const rows = sitting ? petSit(pet, frame) : petWalk(pet, frame)
   const x0 = WALL + CAT_START + x
   const y0 = p.h - WALL - CAT_H - CAT_LIFT - (startled && !fed && frame % 2 ? 2 : 0) // 走在家具那一排上方，不擋到檔案櫃／郵筒／影印機
-  const color: Record<string, number> = { O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }
-  rows.forEach((row, j) => {
-    const line = facingRight ? row : [...row].reverse().join('')
-    for (let i = 0; i < CAT_W; i++) if (line[i] !== '.') p.set(x0 + i, y0 + j, color[line[i]])
-  })
+  sprite(p, pet, rows, x0, y0, facingRight)
   if (fed) {
-    // 飼料碗在臉前面，愛心從頭上往上飄
-    const bowlX = facingRight ? x0 + CAT_W : x0 - 3
-    p.rect(bowlX, y0 + CAT_H - 2, 3, 2, C.heartBowl)
-    const headX = facingRight ? x0 + 9 : x0 + 2
-    const hy = y0 - 4 - (Math.floor((frame - treatFrame!) / 2) % 3)
-    for (const [dx, dy] of [[-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1], [0, 2]]) p.set(headX + dx, hy + dy, C.heart)
+    // 貓：飼料碗在臉前面；寶寶：奶瓶（粉紅奶嘴朝上）。愛心從頭上往上飄
+    if (pet === 'baby') {
+      const bx = facingRight ? x0 + CAT_W - 2 : x0 + 1
+      p.rect(bx, y0 + 2, 2, 3, C.bottle)
+      p.set(bx, y0 + 1, C.catNose)
+    } else p.rect(facingRight ? x0 + CAT_W : x0 - 3, y0 + CAT_H - 2, 3, 2, C.heartBowl)
+    const headX = pet === 'baby' ? (facingRight ? x0 + 5 : x0 + 6) : facingRight ? x0 + 9 : x0 + 2
+    hearts(p, headX, y0 - 4 - (Math.floor((frame - treatFrame!) / 2) % 3))
   }
 }
 
@@ -773,7 +843,7 @@ function envelope(p: Px, x: number, y: number) {
   p.set(x + 1, y, C.envelopeLine)
 }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid }
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet }
 
 export function drawScene(
   crew: Coworker[],
@@ -821,7 +891,9 @@ export function drawScene(
   const raid = opts.raid && prey?.kind === 'staff' && !moving.has(opts.raid.targetId)
     ? raidPose(raidPath(prey, width, rows, opts.raid.start, opts.treatFrame, opts.catOffset), opts.raid.start, frame)
     : null
-  if (raid?.biting) crew = crew.map(c => (c.id === opts.raid!.targetId ? { ...c, mode: 'error' as const } : c))
+  // 貓咬：被咬的人像出錯一樣抖、冒紅；寶寶抱大腿：被抱的人停下手邊的事（閒置）
+  const hugged: OfficeMode = opts.pet === 'baby' ? 'idle' : 'error'
+  if (raid?.biting) crew = crew.map(c => (c.id === opts.raid!.targetId ? { ...c, mode: hugged } : c))
   const byId = new Map(crew.map(c => [c.id, c]))
 
   // 主管室：有主管且沒在走路才坐在位子上
@@ -848,8 +920,9 @@ export function drawScene(
     if (at) plane(p, at)
   }
 
-  if (raid) raidingCat(p, raid, frame)
-  else cat(p, crew.some(c => c.mode === 'error'), frame, opts.treatFrame, opts.catOffset)
+  const pet = opts.pet ?? 'cat'
+  if (raid) raidingCat(p, raid, frame, pet)
+  else cat(p, crew.some(c => c.mode === 'error'), frame, opts.treatFrame, opts.catOffset, pet)
 
   const extra = crew.length - placed.size
   if (extra > 0) p.labels.push({ row: 0, col: WALL, text: `+${extra}`, fg: C.white, bg: C.wall })

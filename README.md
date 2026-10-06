@@ -30,7 +30,9 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | `/office buttons` | 重讀個人按鈕設定（`~/.claude/pixel-office/buttons.json`，見下方「個人按鈕」） |
 | `/office team <主管名稱>｜off` | 登記你是哪位主管的 peer（填主管的 ListAgents 名稱）；peer 坐最右邊那一區，其他人坐左邊 |
 | `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
-| 面板按鈕「升為主管／設為員工」(`r`)、「餵貓」(`c`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
+| `/office bite [名牌]` | 放貓咬人（小寶寶是爬過去抱大腿）；不指定就隨機挑一位員工，主管在主管室不會被咬 |
+| `/office pet [cat｜baby]` | 辦公室裡的貓與小寶寶切換（不帶參數就切換）；只影響自己看到的畫面，重開後仍記得 |
+| 面板按鈕「升為主管／設為員工」(`r`)、「餵貓／餵奶」(`c`)、「放貓／放寶寶」(`b`)、「換寶寶／換貓」(`p`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。
 

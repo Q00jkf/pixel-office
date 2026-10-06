@@ -1006,3 +1006,55 @@ test('the released cat takes the nearest aisle: never above the target row, at m
     void id
   }
 })
+
+// ---------- 小寶寶 ----------
+
+test('the baby replaces the cat in the drawing: baby colours instead of orange, hugs with hearts instead of red bites', () => {
+  const crew = [P('boss', 'K', 'idle', true, 'manager'), P('a', 'aa', 'typing')]
+  const w = 60
+  const r = 46
+  const placed = assignSeats(crew, w, r)
+  const count = (px: Uint32Array, c: number) => [...px].filter(x => x === c).length
+  const ORANGE = 0xffa726
+  const SUIT = 0x81d4fa
+  const cat = drawScene(crew, 1, w, r, [], placed).px
+  const baby = drawScene(crew, 1, w, r, [], placed, { pet: 'baby' }).px
+  expect(count(cat, ORANGE)).toBeGreaterThan(0)
+  expect(count(baby, ORANGE)).toBe(0)
+  expect(count(baby, SUIT)).toBeGreaterThan(count(cat, SUIT))
+  // 抱大腿：沒有紅色咬痕，有愛心
+  const path = raidPath(placed.get('a')!, w, r, 0)
+  const run = (raidFrames(path) - BITE_FRAMES) / 2
+  const f = run % 2 ? run : run + 1
+  const hug = drawScene(crew, f, w, r, [], placed, { pet: 'baby', raid: { targetId: 'a', start: 0 } }).px
+  const bite = drawScene(crew, f, w, r, [], placed, { raid: { targetId: 'a', start: 0 } }).px
+  expect(count(hug, 0xe53935)).toBeLessThan(count(bite, 0xe53935))
+  expect(count(hug, 0xff4081)).toBeGreaterThan(0)
+})
+
+test('/office pet switches cat and baby, relabels the buttons and remembers the choice', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const kept: Record<string, unknown> = {}
+  on('store.get', (_$: any, e: any) => ({ value: kept[e.key] }) as any)
+  on('store.set', (_$: any, e: any) => {
+    kept[e.key] = e.value
+    return { value: undefined } as any
+  })
+  const ui = await $.ui.mount(PANE_PROPS)
+  expect((await ui.find({ key: 'cat' }))?.text).toBe('餵貓')
+  expect((await ui.find({ key: 'pet' }))?.text).toBe('換寶寶')
+  const r1 = await $.command.run({ command: 'office', args: 'pet' } as any)
+  expect(String((r1 as any).text)).toContain('小寶寶')
+  expect(kept.pet).toBe('baby')
+  await ui.unmount()
+  const ui2 = await $.ui.mount(PANE_PROPS)
+  expect((await ui2.find({ key: 'cat' }))?.text).toBe('餵奶')
+  expect((await ui2.find({ key: 'bite' }))?.text).toBe('放寶寶')
+  expect((await ui2.find({ key: 'pet' }))?.text).toBe('換貓')
+  await $.command.run({ command: 'office', args: 'pet cat' } as any)
+  expect(kept.pet).toBe('cat')
+  const bad = await $.command.run({ command: 'office', args: 'pet dog' } as any)
+  expect(String((bad as any).text)).toContain('用法')
+  await ui2.unmount()
+})

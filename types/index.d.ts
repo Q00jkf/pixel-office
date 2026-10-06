@@ -5,6 +5,9 @@ export type Role = 'manager' | 'staff'
 /** 對外動作的種類：mail＝寄信（影印機）、file＝上傳文件（檔案櫃）、push＝推 git（郵筒） */
 export type ErrandKind = 'mail' | 'file' | 'push'
 
+/** 辦公室裡走來走去的那一隻：貓或小寶寶（/office pet 切換，存在 $.store） */
+export type Pet = 'cat' | 'baby'
+
 /** 辦公室裡的一位同事 = 一個 Claude Code session */
 export type Coworker = {
   id: string
@@ -37,6 +40,6 @@ export type CustomButton = { label: string; prompt?: string; url?: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'pixel-office': { crew: Coworker[]; night: boolean; buttons: CustomButton[]; instance: string }
+    'pixel-office': { crew: Coworker[]; night: boolean; buttons: CustomButton[]; instance: string; pet: Pet }
   }
 }

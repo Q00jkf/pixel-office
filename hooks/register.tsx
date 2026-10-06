@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Coworker, CustomButton, ErrandKind, OfficeMode, Role } from '../types'
+import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
 import { NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
@@ -13,6 +13,7 @@ const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Cowork
 const night = atom({ plugin: 'pixel-office', key: 'night' } as const, false)
 const buttons = atom({ plugin: 'pixel-office', key: 'buttons' } as const, [] as CustomButton[])
 const instanceRef = atom({ plugin: 'pixel-office', key: 'instance' } as const, '')
+const petRef = atom({ plugin: 'pixel-office', key: 'pet' } as const, 'cat' as Pet)
 const READING = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'ToolSearch', 'NotebookRead'])
 
 // 模組變數只給動畫與心跳用；熱重載會重跑 session.start 補回
@@ -26,6 +27,7 @@ let me: Coworker = { id: 'me', name: 'me', mode: 'idle', tool: '', isMe: true, r
 let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
+let pet: Pet = 'cat'
 let svgOpen = false // Desktop 等用 Svg 畫的面板開著時，計時器要定期請它重畫
 let rasterOpen = false // 終端 Raster 面板開著時才 blit；width／rows 是兩種介面共用的版面，不再拿來當開關
 let treatFrame: number | undefined
@@ -53,30 +55,48 @@ const sceneOpts = (): SceneOptions => {
     catOffset += raidEnd - raid.start
     raid = undefined
   }
-  return { night: nightMode, treatFrame, catOffset, planes, notices, raid }
+  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet }
 }
 
-// 餵貓：把上一次吃飯停下的時間併進位移，再開始新的一次
+// 餵貓（寶寶是餵奶）：把上一次吃飯停下的時間併進位移，再開始新的一次
 function feedCat() {
-  if (raid) return // 貓出去咬人了，不在碗旁邊
+  if (raid) return // 出去咬人／抱大腿了，不在碗旁邊
   if (treatFrame !== undefined) catOffset += Math.min(TREAT_FRAMES, frame - treatFrame)
   treatFrame = frame
 }
 let lastPlaced: Map<string, Placement> | null = null
 
+const PET_WORDS: Record<Pet, { name: string; feed: string; release: string; other: string; go: string; act: string }> = {
+  cat: { name: '貓', feed: '餵貓', release: '放貓', other: '換寶寶', go: '🐈 放貓了，目標：', act: '咬' },
+  baby: { name: '寶寶', feed: '餵奶', release: '放寶寶', other: '換貓', go: '👶 寶寶爬出去抱大腿了，目標：', act: '抱' },
+}
+
+// 換寵物：貓 ↔ 小寶寶。存在 $.store（跨 session、跨重開都記得），只影響自己這台看到的畫面
+async function setPet($: EngineInterface, value?: string): Promise<string> {
+  const v = value?.trim().toLowerCase()
+  const next: Pet | undefined = !v ? (pet === 'cat' ? 'baby' : 'cat') : v === 'cat' || v === '貓' ? 'cat' : v === 'baby' || v === '寶寶' || v === '小寶寶' ? 'baby' : undefined
+  if (!next) return '用法：/office pet [cat|baby]（不帶參數就切換）'
+  if (raid) return `${PET_WORDS[pet].name}還在外面，等${PET_WORDS[pet].name === '貓' ? '牠' : '他'}回來再換。`
+  pet = next
+  await update($, petRef, () => next)
+  await $.store.set('pet', next).catch(() => undefined) // 存不了只是重開後回到貓
+  return next === 'baby' ? '👶 辦公室裡現在是小寶寶。' : '🐈 辦公室裡現在是貓。'
+}
+
 // 放貓咬人：name 指定名牌，沒指定就隨機挑一位坐在員工座位的人（先挑別人，只剩自己才咬自己）；回傳給使用者看的一句話
 function releaseCat(name?: string): string {
-  if (raid) return '貓還在外面，等牠回來再放。'
-  if (!lastPlaced || width === 0) return '先輸入 /office 打開辦公室面板，貓才知道大家坐哪。'
+  const w = PET_WORDS[pet]
+  if (raid) return pet === 'cat' ? '貓還在外面，等牠回來再放。' : '寶寶還在外面，等他爬回來再放。'
+  if (!lastPlaced || width === 0) return `先輸入 /office 打開辦公室面板，${w.name}才知道大家坐哪。`
   const staff = everyone().filter(c => lastPlaced!.get(c.id)?.kind === 'staff')
   const want = name?.trim().toLowerCase()
   const pool = want ? staff.filter(c => c.name.toLowerCase() === want) : staff.filter(c => !c.isMe).length > 0 ? staff.filter(c => !c.isMe) : staff
-  if (pool.length === 0) return want ? `員工座位上沒有叫 ${name!.trim()} 的人（主管在主管室，貓進不去）。` : '員工座位上沒有人可以咬。'
+  if (pool.length === 0) return want ? `員工座位上沒有叫 ${name!.trim()} 的人（主管在主管室，${w.name}進不去）。` : `員工座位上沒有人可以${w.act}。`
   const prey = pool[Math.floor(Math.random() * pool.length)]
   const start = frame + 1
   raid = { targetId: prey.id, start }
   raidEnd = start + raidFrames(raidPath(lastPlaced.get(prey.id)!, width, rows, start, treatFrame, catOffset))
-  return `🐈 放貓了，目標：${prey.name}`
+  return `${w.go}${prey.name}`
 }
 
 // 角色變了（員工↔主管）就排一段走路動畫：從舊座位沿走道走到新座位
@@ -542,6 +562,11 @@ export const register: Register = on => {
       await update($, instanceRef, () => instance)
     }
     await adopt($, await $.session.id())
+    const savedPet = await $.store.get('pet').catch(() => undefined)
+    if (savedPet === 'baby' || savedPet === 'cat') {
+      pet = savedPet
+      await update($, petRef, () => savedPet)
+    }
     await publish($, false).catch(() => undefined)
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -654,6 +679,11 @@ export const register: Register = on => {
     const [sub, ...rest] = e.args.trim().split(/\s+/)
     const value = rest.join(' ')
     if (sub === 'role') return { text: await applyProfile($, { role: value }) }
+    if (sub === 'pet') {
+      const text = await setPet($, value)
+      $.ui.invalidate('ui.render')
+      return { text }
+    }
     if (sub === 'bite') {
       const text = releaseCat(value)
       $.ui.invalidate('ui.render')
@@ -679,7 +709,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby]（貓與小寶寶切換）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -744,6 +774,9 @@ export const register: Register = on => {
     const list = await read($, crew)
     const shown = list.length > 0 ? list : everyone()
     nightMode = await read($, night)
+    pet = await read($, petRef)
+    const words = PET_WORDS[pet]
+    const togglePet = () => setPet($).then(t => $.ui.toast(t))
     const isBoss = me.role === 'manager'
     const toggleRole = () => applyProfile($, { role: isBoss ? '員工' : '主管' })
     const toggleNight = () => update($, night, v => !v)
@@ -800,8 +833,9 @@ export const register: Register = on => {
           )}
           <Box flexDirection="row">
             <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
-            <Button key="cat" label="餵貓" onPress={() => feedCat()} />
-            <Button key="bite" label="放貓" onPress={() => $.ui.toast(releaseCat())} />
+            <Button key="cat" label={words.feed} onPress={() => feedCat()} />
+            <Button key="bite" label={words.release} onPress={() => $.ui.toast(releaseCat())} />
+            <Button key="pet" label={words.other} onPress={togglePet} />
             <Button key="night" label={nightMode ? '開燈' : '夜間模式'} onPress={toggleNight} />
           </Box>
         </Box>
@@ -838,9 +872,11 @@ export const register: Register = on => {
         <Box flexDirection="row">
           <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />
           <Text> </Text>
-          <Button key="cat" label="餵貓" hotkey="c" onPress={() => feedCat()} />
+          <Button key="cat" label={words.feed} hotkey="c" onPress={() => feedCat()} />
           <Text> </Text>
-          <Button key="bite" label="放貓" hotkey="b" onPress={() => $.ui.toast(releaseCat())} />
+          <Button key="bite" label={words.release} hotkey="b" onPress={() => $.ui.toast(releaseCat())} />
+          <Text> </Text>
+          <Button key="pet" label={words.other} hotkey="p" onPress={togglePet} />
           <Text> </Text>
           <Button key="night" label={nightMode ? '開燈' : '夜間模式'} hotkey="n" onPress={toggleNight} />
         </Box>
