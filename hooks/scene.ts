@@ -43,6 +43,7 @@ const C = {
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
   babySkin: 0xffd3b0, babyShade: 0xe8a87c, babyHair: 0x6d4c41, babySuit: 0x81d4fa, babySuitDark: 0x4fa3d1, babyDiaper: 0xfafafa, bottle: 0xeceff1,
+  birdWhite: 0xf7f7f5, birdGrey: 0xa7a3ad, birdDark: 0x55525c, birdPink: 0xe6b3b5, birdThroat: 0x77737f, seed: 0xf2b134, note: 0x3949ab,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
   cabinet: 0x8d6e63, cabinetDark: 0x6d4c41, handle: 0xd7ccc8, mailbox: 0xc62828, mailboxDark: 0x8e0000, folder: 0xa1887f, parcel: 0xbcaaa4,
   teamRug: 0xeadfc8, teamRugEdge: 0xc9a227, teamText: 0x5d4037,
@@ -715,12 +716,54 @@ export function babyCrawlRows(step: number): string[] {
   return step % 2 === 0 ? [blank, ...BABY_BODY, limb.join(''), ground.join('')] : [blank, blank, ...BABY_BODY, ground.join('')]
 }
 
+// ---------- 銀喉長尾山雀（側面，12×8、面向右）：W 白臉與頭頂、K 黑眉紋／眼／嘴／腳、T 銀灰喉斑、G 灰背、g 深灰翅與長尾、P 粉肚 ----------
+const BIRD = [
+  '............',
+  '.......WWW..',
+  '......KKKKW.',
+  '......WWWKWK',
+  'gg...GGWTTW.',
+  '..gggGGPPPP.',
+  '.....gGPPP..',
+  '.......K.K..',
+]
+const BIRD_SING = BIRD.map((r, i) => (i === 4 ? 'gg...GGWTTWK' : r)) // 張嘴
+const BIRD_SIT = [BIRD, BIRD_SING]
+const setAt = (row: string, i: number, ch: string) => row.slice(0, i) + ch + row.slice(i + 1)
+
+/** 地上跳著走：第 step 格往上跳 0／1／2／1 像素，離地時收腳 */
+export function birdHopRows(step: number): string[] {
+  const k = [0, 1, 2, 1][step % 4]
+  if (k === 0) return BIRD
+  const blank = '.'.repeat(CAT_W)
+  return [...BIRD.slice(k, 7), ...Array(k + 1).fill(blank)]
+}
+
+/** 飛：收腳，翅膀一格舉起、一格壓下 */
+export function birdFlyRows(frame: number): string[] {
+  const rows = [...BIRD.slice(0, 7), '.'.repeat(CAT_W)]
+  if (frame % 2 === 0) {
+    rows[2] = setAt(rows[2], 4, 'g')
+    rows[3] = setAt(setAt(rows[3], 4, 'g'), 5, 'g')
+  } else {
+    rows[6] = setAt(setAt(rows[6], 4, 'g'), 3, 'g')
+    rows[7] = setAt(rows[7], 4, 'g')
+  }
+  return rows
+}
+
+function notes(p: Px, x: number, y: number) {
+  // ♪：符桿＋符頭＋符尾
+  for (const [dx, dy] of [[1, 0], [2, 0], [1, 1], [1, 2], [0, 3], [1, 3]]) p.set(x + dx, y + dy, C.note)
+}
+
 const PET_COLORS: Record<Pet, () => Record<string, number>> = {
   cat: () => ({ O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }),
   baby: () => ({ H: C.babyHair, S: C.babySkin, s: C.babyShade, K: C.catEye, P: C.catNose, B: C.babySuit, b: C.babySuitDark, W: C.babyDiaper }),
+  bird: () => ({ W: C.birdWhite, K: C.catEye, T: C.birdThroat, G: C.birdGrey, g: C.birdDark, P: C.birdPink }),
 }
-const petWalk = (pet: Pet, step: number) => (pet === 'baby' ? babyCrawlRows(step) : catWalkRows(step))
-const petSit = (pet: Pet, frame: number) => (pet === 'baby' ? BABY_SIT : CAT_SIT)[frame % 2]
+const petWalk = (pet: Pet, step: number) => (pet === 'baby' ? babyCrawlRows(step) : pet === 'bird' ? birdHopRows(step) : catWalkRows(step))
+const petSit = (pet: Pet, frame: number) => (pet === 'baby' ? BABY_SIT : pet === 'bird' ? BIRD_SIT : CAT_SIT)[frame % 2]
 
 function sprite(p: Px, pet: Pet, rows: string[], x0: number, y0: number, facingRight: boolean) {
   const color = PET_COLORS[pet]()
@@ -781,11 +824,13 @@ export type CatRaid = { targetId: string; start: number }
 export const CAT_RUN = 4 // 跑步：每格動畫跑幾個像素（人走路是 2；再快就一格一格跳）
 export const BITE_FRAMES = 12 // 咬約 3 秒
 
-/** 貓的去程：走廊上貓當下的位置 → 座位群旁最近的直走道 → 那一排旁邊的橫走道 → 被咬的人右手邊；不繞到上方大走道 */
-export function raidPath(target: Placement, width: number, rows: number, start: number, treatFrame?: number, catOffset = 0): Seat[] {
+/** 貓（寶寶）的去程：走廊上貓當下的位置 → 座位群旁最近的直走道 → 那一排旁邊的橫走道 → 被咬的人右手邊；不繞到上方大走道。
+ *  山雀會飛：從同一個起點直線飛到人的右手邊 */
+export function raidPath(target: Placement, width: number, rows: number, start: number, treatFrame?: number, catOffset = 0, pet: Pet = 'cat'): Seat[] {
   const pose = catPose(catMoveFrame(start, treatFrame, catOffset), catRange(width))
   // 跟平常散步同一個位置出發（raidingCat 以腳底中央定位），不會先瞬移
   const home = { x: WALL + CAT_START + pose.x + CAT_W / 2, y: rows * 2 - WALL - CAT_LIFT - 1 }
+  if (pet === 'bird') return [home, { x: target.stand.x + 6, y: target.stand.y + 4 }]
   const k = target.cluster
   const top = target.seat.y === k.y
   const laneY = top ? k.y - Math.ceil(CLUSTER_GAP / 2) : k.y + UNIT_H + 2 + ROW_SPLIT / 2 - 1 // 上排走座位群上方，下排走上下兩排之間
@@ -817,14 +862,15 @@ export function raidPose(path: Seat[], start: number, frame: number): RaidPose |
 }
 
 function raidingCat(p: Px, pose: RaidPose, frame: number, pet: Pet = 'cat') {
-  // 貓咬：坐姿往左撲（每兩格往前 2 像素），嘴邊冒紅色咬痕；寶寶抱：坐著貼過去抱大腿，頭上冒愛心
-  const lunge = pose.biting && frame % 2 ? (pet === 'baby' ? -1 : -2) : 0
-  const rows = pose.biting ? petSit(pet, frame) : petWalk(pet, frame)
+  // 貓咬：坐姿往左撲（每兩格往前 2 像素），嘴邊冒紅色咬痕；寶寶抱：坐著貼過去抱大腿，頭上冒愛心；山雀：停在旁邊唱歌，頭上冒音符
+  const lunge = pose.biting && frame % 2 ? (pet === 'baby' ? -1 : pet === 'bird' ? 0 : -2) : 0
+  const rows = pose.biting ? petSit(pet, frame) : pet === 'bird' ? birdFlyRows(frame) : petWalk(pet, frame)
   const x0 = pose.at.x - CAT_W / 2 + lunge
   const y0 = pose.at.y - CAT_H + 1
   sprite(p, pet, rows, x0, y0, pose.dx > 0)
   if (!pose.biting) return
   if (pet === 'baby') hearts(p, x0 + 5, y0 - 4 - (Math.floor(frame / 2) % 3))
+  else if (pet === 'bird') notes(p, x0 + (pose.dx > 0 ? 9 : 1), y0 - 2 - (Math.floor(frame / 2) % 3))
   else if (frame % 2) for (const [dx, dy] of [[-2, 2], [-3, 3], [-2, 4], [-4, 1]]) p.set(x0 + dx, y0 + dy, C.err)
 }
 
@@ -843,8 +889,12 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
       const bx = facingRight ? x0 + CAT_W - 2 : x0 + 1
       p.rect(bx, y0 + 2, 2, 3, C.bottle)
       p.set(bx, y0 + 1, C.catNose)
+    } else if (pet === 'bird') {
+      // 山雀：嘴前一小撮小米
+      const sx = facingRight ? x0 + CAT_W : x0 - 3
+      for (const [dx, dy] of [[0, 1], [1, 0], [2, 1], [1, 1]]) p.set(sx + dx, y0 + CAT_H - 2 + dy, C.seed)
     } else p.rect(facingRight ? x0 + CAT_W : x0 - 3, y0 + CAT_H - 2, 3, 2, C.heartBowl)
-    const headX = pet === 'baby' ? (facingRight ? x0 + 5 : x0 + 6) : facingRight ? x0 + 9 : x0 + 2
+    const headX = pet === 'baby' ? (facingRight ? x0 + 5 : x0 + 6) : pet === 'bird' ? (facingRight ? x0 + 8 : x0 + 3) : facingRight ? x0 + 9 : x0 + 2
     hearts(p, headX, y0 - 4 - (Math.floor((frame - treatFrame!) / 2) % 3))
   }
 }
@@ -852,7 +902,7 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
 // ---------- 夜間模式：整體變暗，只留螢幕、指示燈、檯燈；窗外是夜空 ----------
 
 function nightify(p: Px, frame: number) {
-  const glow = new Set([C.screen, C.screenDim, C.code, C.codeDim, C.err, C.errDark, C.ok, C.led, C.gold, C.spark, C.heart, C.wait, C.waitDark])
+  const glow = new Set([C.screen, C.screenDim, C.code, C.codeDim, C.err, C.errDark, C.ok, C.led, C.gold, C.spark, C.heart, C.note, C.wait, C.waitDark])
   for (let i = 0; i < p.px.length; i++) {
     const c = p.px[i]
     if (c === C.glass || c === C.glassHi) p.px[i] = C.nightSky
@@ -942,10 +992,10 @@ export function drawScene(
   // 放貓：被咬的人坐在位子上才算數；咬的那幾格他會抖、頭上冒紅色驚嘆號（借用 error 的樣子）
   const prey = opts.raid ? placed.get(opts.raid.targetId) : undefined
   const raid = opts.raid && prey?.kind === 'staff' && !moving.has(opts.raid.targetId)
-    ? raidPose(raidPath(prey, width, rows, opts.raid.start, opts.treatFrame, opts.catOffset), opts.raid.start, frame)
+    ? raidPose(raidPath(prey, width, rows, opts.raid.start, opts.treatFrame, opts.catOffset, opts.pet), opts.raid.start, frame)
     : null
   // 貓咬：被咬的人像出錯一樣抖、冒紅；寶寶抱大腿：被抱的人停下手邊的事（閒置）
-  const hugged: OfficeMode = opts.pet === 'baby' ? 'idle' : 'error'
+  const hugged: OfficeMode = opts.pet === 'baby' || opts.pet === 'bird' ? 'idle' : 'error'
   if (raid?.biting) crew = crew.map(c => (c.id === opts.raid!.targetId ? { ...c, mode: hugged } : c))
   const byId = new Map(crew.map(c => [c.id, c]))
 

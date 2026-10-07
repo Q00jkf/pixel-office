@@ -921,7 +921,7 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
   const blits: string[] = []
   on('ui.blit', (_$: any, e: any) => {
     blits.push(e.cells)
-    return {} as any
+    return { value: undefined } as any
   })
   await ($ as any).session.start({ cwd: 'C:/work/hub', surface: 'terminal', isInteractive: true })
   await $.command.run({ command: 'office', args: '' } as any)
@@ -965,7 +965,7 @@ test('after /resume the window follows the new session id: old file marked left,
 
 // ---------- 放貓咬人 ----------
 
-import { BITE_FRAMES, raidFrames, raidPath, raidPose } from './scene'
+import { BITE_FRAMES, birdHopRows, raidFrames, raidPath, raidPose } from './scene'
 
 test('a released cat runs along the aisles to the prey, bites, then runs back home', () => {
   const crew = [P('boss', 'K', 'idle', true, 'manager'), P('a', 'aa'), P('b', 'bb')]
@@ -1078,12 +1078,24 @@ test('/office pet switches cat and baby, relabels the buttons and remembers the 
   const ui2 = await $.ui.mount(PANE_PROPS)
   expect((await ui2.find({ key: 'cat' }))?.text).toBe('餵奶')
   expect((await ui2.find({ key: 'bite' }))?.text).toBe('放寶寶')
-  expect((await ui2.find({ key: 'pet' }))?.text).toBe('換貓')
+  expect((await ui2.find({ key: 'pet' }))?.text).toBe('換山雀') // 依序：貓 → 寶寶 → 山雀 → 貓
+  await ui2.unmount()
+  const r2 = await $.command.run({ command: 'office', args: 'pet' } as any)
+  expect(String((r2 as any).text)).toContain('山雀')
+  expect(kept.pet).toBe('bird')
+  const ui3 = await $.ui.mount(PANE_PROPS)
+  expect((await ui3.find({ key: 'cat' }))?.text).toBe('餵小米')
+  expect((await ui3.find({ key: 'bite' }))?.text).toBe('放山雀')
+  expect((await ui3.find({ key: 'pet' }))?.text).toBe('換貓')
+  await ui3.unmount()
+  await $.command.run({ command: 'office', args: 'pet 銀喉長尾山雀' } as any)
+  expect(kept.pet).toBe('bird')
+  const ui2b = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: 'pet cat' } as any)
   expect(kept.pet).toBe('cat')
   const bad = await $.command.run({ command: 'office', args: 'pet dog' } as any)
   expect(String((bad as any).text)).toContain('用法')
-  await ui2.unmount()
+  await ui2b.unmount()
 })
 
 // ---------- 會議：參與者名單（不限 team） ----------
@@ -1146,4 +1158,34 @@ test('an open-ended meeting ends by itself when none of the participants is onli
   await $.command.run({ command: 'office', args: '' } as any)
   const on2: any = await $.command.run({ command: 'office', args: 'meeting' } as any)
   expect(String(on2.text)).toContain('開會中')
+})
+
+test('the silver-throated bushtit: its own colours, hops on the ground, flies straight to the person and sings with notes', () => {
+  const crew = [P('boss', 'K', 'idle', true, 'manager'), P('a', 'aa', 'typing')]
+  const w = 60
+  const r = 46
+  const placed = assignSeats(crew, w, r)
+  const count = (px: Uint32Array, c: number) => [...px].filter(x => x === c).length
+  const PINK = 0xe6b3b5
+  const NOTE = 0x3949ab
+  const ORANGE = 0xffa726
+  const bird = drawScene(crew, 1, w, r, [], placed, { pet: 'bird' }).px
+  expect(count(bird, PINK)).toBeGreaterThan(0)
+  expect(count(bird, ORANGE)).toBe(0)
+  // 跳著走：四格裡有離地的格（腳那一列是空的）
+  expect(birdHopRows(0)[7]).toContain('K')
+  expect(birdHopRows(2)[7]).toBe('.'.repeat(12))
+  // 會飛：去程只有起點與終點兩點（直線），終點一樣在人的右手邊
+  const pl = placed.get('a')!
+  const path = raidPath(pl, w, r, 0, undefined, 0, 'bird')
+  expect(path).toHaveLength(2)
+  expect(path[1].x - pl.stand.x).toBe(6)
+  // 停下來唱歌：有音符、沒有紅色咬痕，被找的人不會冒紅
+  const run = (raidFrames(path) - BITE_FRAMES) / 2
+  const f = run % 2 ? run : run + 1
+  const sing = drawScene(crew, f, w, r, [], placed, { pet: 'bird', raid: { targetId: 'a', start: 0 } }).px
+  const calm = drawScene(crew, f, w, r, [], placed, { pet: 'bird' }).px
+  expect(count(sing, NOTE)).toBeGreaterThan(0)
+  expect(count(calm, NOTE)).toBe(0)
+  expect(count(sing, 0xe53935)).toBe(count(calm, 0xe53935)) // 沒有咬痕、被找的人不冒紅
 })

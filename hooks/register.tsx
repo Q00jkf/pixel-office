@@ -69,27 +69,31 @@ function feedCat() {
 }
 let lastPlaced: Map<string, Placement> | null = null
 
-const PET_WORDS: Record<Pet, { name: string; feed: string; release: string; other: string; go: string; act: string }> = {
-  cat: { name: '貓', feed: '餵貓', release: '放貓', other: '換寶寶', go: '🐈 放貓了，目標：', act: '咬' },
-  baby: { name: '寶寶', feed: '餵奶', release: '放寶寶', other: '換貓', go: '👶 寶寶爬出去抱大腿了，目標：', act: '抱' },
+const PET_WORDS: Record<Pet, { name: string; feed: string; release: string; go: string; act: string; back: string; now: string; aliases: string[] }> = {
+  cat: { name: '貓', feed: '餵貓', release: '放貓', go: '🐈 放貓了，目標：', act: '咬', back: '貓還在外面，等牠回來再放。', now: '🐈 辦公室裡現在是貓。', aliases: ['cat', '貓'] },
+  baby: { name: '寶寶', feed: '餵奶', release: '放寶寶', go: '👶 寶寶爬出去抱大腿了，目標：', act: '抱', back: '寶寶還在外面，等他爬回來再放。', now: '👶 辦公室裡現在是小寶寶。', aliases: ['baby', '寶寶', '小寶寶'] },
+  bird: { name: '山雀', feed: '餵小米', release: '放山雀', go: '🐦 山雀飛過去唱歌了，目標：', act: '唱歌給他聽', back: '山雀還在外面，等牠飛回來再放。', now: '🐦 辦公室裡現在是銀喉長尾山雀。', aliases: ['bird', 'tit', '山雀', '長尾山雀', '銀喉長尾山雀'] },
 }
+const PET_ORDER: Pet[] = ['cat', 'baby', 'bird'] // 不帶參數的切換順序
+const nextPet = (p: Pet) => PET_ORDER[(PET_ORDER.indexOf(p) + 1) % PET_ORDER.length]
+const isPet = (v: unknown): v is Pet => typeof v === 'string' && (PET_ORDER as string[]).includes(v)
 
-// 換寵物：貓 ↔ 小寶寶。存在 $.store（跨 session、跨重開都記得），只影響自己這台看到的畫面
+// 換寵物：貓 → 小寶寶 → 山雀 → 貓。存在 $.store（跨 session、跨重開都記得），只影響自己這台看到的畫面
 async function setPet($: EngineInterface, value?: string): Promise<string> {
   const v = value?.trim().toLowerCase()
-  const next: Pet | undefined = !v ? (pet === 'cat' ? 'baby' : 'cat') : v === 'cat' || v === '貓' ? 'cat' : v === 'baby' || v === '寶寶' || v === '小寶寶' ? 'baby' : undefined
-  if (!next) return '用法：/office pet [cat|baby]（不帶參數就切換）'
-  if (raid) return `${PET_WORDS[pet].name}還在外面，等${PET_WORDS[pet].name === '貓' ? '牠' : '他'}回來再換。`
+  const next: Pet | undefined = !v ? nextPet(pet) : PET_ORDER.find(k => PET_WORDS[k].aliases.includes(v))
+  if (!next) return '用法：/office pet [cat|baby|bird]（不帶參數就依序切換：貓 → 寶寶 → 山雀）'
+  if (raid) return PET_WORDS[pet].back.replace('再放', '再換')
   pet = next
   await update($, petRef, () => next)
   await $.store.set('pet', next).catch(() => undefined) // 存不了只是重開後回到貓
-  return next === 'baby' ? '👶 辦公室裡現在是小寶寶。' : '🐈 辦公室裡現在是貓。'
+  return PET_WORDS[next].now
 }
 
 // 放貓咬人：name 指定名牌，沒指定就隨機挑一位坐在員工座位的人（先挑別人，只剩自己才咬自己）；回傳給使用者看的一句話
 function releaseCat(name?: string): string {
   const w = PET_WORDS[pet]
-  if (raid) return pet === 'cat' ? '貓還在外面，等牠回來再放。' : '寶寶還在外面，等他爬回來再放。'
+  if (raid) return w.back
   if (!lastPlaced || width === 0) return `先輸入 /office 打開辦公室面板，${w.name}才知道大家坐哪。`
   const staff = everyone().filter(c => lastPlaced!.get(c.id)?.kind === 'staff')
   const want = name?.trim().toLowerCase()
@@ -98,7 +102,7 @@ function releaseCat(name?: string): string {
   const prey = pool[Math.floor(Math.random() * pool.length)]
   const start = frame + 1
   raid = { targetId: prey.id, start }
-  raidEnd = start + raidFrames(raidPath(lastPlaced.get(prey.id)!, width, rows, start, treatFrame, catOffset))
+  raidEnd = start + raidFrames(raidPath(lastPlaced.get(prey.id)!, width, rows, start, treatFrame, catOffset, pet))
   return `${w.go}${prey.name}`
 }
 
@@ -617,7 +621,7 @@ export const register: Register = on => {
     }
     await adopt($, await $.session.id())
     const savedPet = await $.store.get('pet').catch(() => undefined)
-    if (savedPet === 'baby' || savedPet === 'cat') {
+    if (isPet(savedPet)) {
       pet = savedPet
       await update($, petRef, () => savedPet)
     }
@@ -773,7 +777,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby]（貓與小寶寶切換）｜/office meeting [off]（會議狀態／散會）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -839,7 +843,7 @@ export const register: Register = on => {
     const shown = list.length > 0 ? list : everyone()
     nightMode = await read($, night)
     pet = await read($, petRef)
-    const words = PET_WORDS[pet]
+    const words = { ...PET_WORDS[pet], other: `換${PET_WORDS[nextPet(pet)].name}` }
     const togglePet = () => setPet($).then(t => $.ui.toast(t))
     const isBoss = me.role === 'manager'
     const toggleRole = () => applyProfile($, { role: isBoss ? '員工' : '主管' })
