@@ -43,7 +43,7 @@ const C = {
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
   cat: 0xffa726, catDark: 0xe65100, catLight: 0xffcc80, catCream: 0xfff3e0, catEye: 0x212121, catNose: 0xf48fb1, heart: 0xff4081, heartBowl: 0x90a4ae,
   babySkin: 0xffd3b0, babyShade: 0xe8a87c, babyHair: 0x6d4c41, babySuit: 0x81d4fa, babySuitDark: 0x4fa3d1, babyDiaper: 0xfafafa, bottle: 0xeceff1,
-  birdWhite: 0xf7f7f5, birdGrey: 0xa7a3ad, birdDark: 0x55525c, birdPink: 0xe6b3b5, birdThroat: 0x77737f, seed: 0xf2b134, note: 0x3949ab,
+  birdWhite: 0xfdfdfd, birdShade: 0xcfd3da, birdWing: 0x2e2c33, birdTail: 0x1f1e24, birdShoulder: 0xd9a8a0, seed: 0xf2b134, note: 0x3949ab,
   nightSky: 0x0d1b3e, star: 0xfff9c4,
   cabinet: 0x8d6e63, cabinetDark: 0x6d4c41, handle: 0xd7ccc8, mailbox: 0xc62828, mailboxDark: 0x8e0000, folder: 0xa1887f, parcel: 0xbcaaa4,
   teamRug: 0xeadfc8, teamRugEdge: 0xc9a227, teamText: 0x5d4037,
@@ -716,18 +716,19 @@ export function babyCrawlRows(step: number): string[] {
   return step % 2 === 0 ? [blank, ...BABY_BODY, limb.join(''), ground.join('')] : [blank, blank, ...BABY_BODY, ground.join('')]
 }
 
-// ---------- 銀喉長尾山雀（側面，12×8、面向右）：W 白臉與頭頂、K 黑眉紋／眼／嘴／腳、T 銀灰喉斑、G 灰背、g 深灰翅與長尾、P 粉肚 ----------
+// ---------- 銀喉長尾山雀（側面，12×8、面向右）：雪球般全白的頭與身體、黑眼黑嘴、黑翅帶、肩上淡粉褐、黑長尾 ----------
+// W 白、s 淡灰陰影（白色在淺色地板上才看得出輪廓）、K 眼／嘴／腳、D 黑翅、p 肩羽淡粉褐、k 黑長尾
 const BIRD = [
   '............',
-  '.......WWW..',
-  '......KKKKW.',
-  '......WWWKWK',
-  'gg...GGWTTW.',
-  '..gggGGPPPP.',
-  '.....gGPPP..',
+  '......sWWs..',
+  '.....WWWWWW.',
+  '.....WWWKWWK',
+  'kk..WWWWWWW.',
+  '..kkDDpWWWWs',
+  '....DDsWWWs.',
   '.......K.K..',
 ]
-const BIRD_SING = BIRD.map((r, i) => (i === 4 ? 'gg...GGWTTWK' : r)) // 張嘴
+const BIRD_SING = BIRD.map((r, i) => (i === 4 ? 'kk..WWWWWWWK' : r)) // 張嘴
 const BIRD_SIT = [BIRD, BIRD_SING]
 const setAt = (row: string, i: number, ch: string) => row.slice(0, i) + ch + row.slice(i + 1)
 
@@ -743,11 +744,11 @@ export function birdHopRows(step: number): string[] {
 export function birdFlyRows(frame: number): string[] {
   const rows = [...BIRD.slice(0, 7), '.'.repeat(CAT_W)]
   if (frame % 2 === 0) {
-    rows[2] = setAt(rows[2], 4, 'g')
-    rows[3] = setAt(setAt(rows[3], 4, 'g'), 5, 'g')
+    rows[3] = setAt(rows[3], 4, 'D')
+    rows[4] = setAt(setAt(rows[4], 4, 'D'), 5, 'D')
   } else {
-    rows[6] = setAt(setAt(rows[6], 4, 'g'), 3, 'g')
-    rows[7] = setAt(rows[7], 4, 'g')
+    rows[6] = setAt(rows[6], 3, 'D')
+    rows[7] = setAt(setAt(rows[7], 4, 'D'), 5, 'D')
   }
   return rows
 }
@@ -760,7 +761,7 @@ function notes(p: Px, x: number, y: number) {
 const PET_COLORS: Record<Pet, () => Record<string, number>> = {
   cat: () => ({ O: C.cat, D: C.catDark, L: C.catLight, W: C.catCream, K: C.catEye, P: C.catNose }),
   baby: () => ({ H: C.babyHair, S: C.babySkin, s: C.babyShade, K: C.catEye, P: C.catNose, B: C.babySuit, b: C.babySuitDark, W: C.babyDiaper }),
-  bird: () => ({ W: C.birdWhite, K: C.catEye, T: C.birdThroat, G: C.birdGrey, g: C.birdDark, P: C.birdPink }),
+  bird: () => ({ W: C.birdWhite, s: C.birdShade, K: C.catEye, D: C.birdWing, p: C.birdShoulder, k: C.birdTail }),
 }
 const petWalk = (pet: Pet, step: number) => (pet === 'baby' ? babyCrawlRows(step) : pet === 'bird' ? birdHopRows(step) : catWalkRows(step))
 const petSit = (pet: Pet, frame: number) => (pet === 'baby' ? BABY_SIT : pet === 'bird' ? BIRD_SIT : CAT_SIT)[frame % 2]

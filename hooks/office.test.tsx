@@ -1166,11 +1166,11 @@ test('the silver-throated bushtit: its own colours, hops on the ground, flies st
   const r = 46
   const placed = assignSeats(crew, w, r)
   const count = (px: Uint32Array, c: number) => [...px].filter(x => x === c).length
-  const PINK = 0xe6b3b5
+  const WHITE = 0xfdfdfd
   const NOTE = 0x3949ab
   const ORANGE = 0xffa726
   const bird = drawScene(crew, 1, w, r, [], placed, { pet: 'bird' }).px
-  expect(count(bird, PINK)).toBeGreaterThan(0)
+  expect(count(bird, WHITE)).toBeGreaterThan(20) // 雪球般全白
   expect(count(bird, ORANGE)).toBe(0)
   // 跳著走：四格裡有離地的格（腳那一列是空的）
   expect(birdHopRows(0)[7]).toContain('K')
