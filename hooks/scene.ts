@@ -137,10 +137,26 @@ function meetTable(officeX: number) {
   return { cx: (mx0 + mx1) / 2, cy: WALL + TOP_H / 2, a: Math.max(4, (mx1 - mx0) / 2 - 5), b: 3.2 }
 }
 
-/** 參與者名單（ListAgents 名稱或名牌）→ 判斷某人是否被點名；忽略結尾的 [ref] 與大小寫 */
+/**
+ * 參與者名單（ListAgents 名稱、名牌或 ref）→ 判斷某人是否被點名。大小寫與前後空白都不計。
+ * 名稱後面帶 `[ref]` 時只認那一個 session —— agent 與名牌都可能重複（2026-10-08 實測：
+ * 兩個 session 的 agent 同為 llm-wiki-aegiverse-e4、兩個名牌同為 IT、四個沒登記 agent 的名牌同為 user），
+ * 撞名時點名會抓到錯的人。對方還沒登記 ref 就不能用 ref 把它排除掉，否則舊 session 一律進不來。
+ */
 export function isAttendee(attendees: string[]): (c: Coworker) => boolean {
-  const want = new Set(attendees.map(a => a.replace(/\s*\[[^\]]*\]$/, '').toLowerCase()))
-  return c => [c.agent, c.name].some(v => v !== undefined && want.has(v.toLowerCase()))
+  const want = new Set<string>()
+  const pinned: { name: string; ref: string }[] = []
+  for (const raw of attendees) {
+    const s = raw.trim()
+    const m = s.match(/^(.*?)\s*\[([^\]]*)\]$/)
+    if (m) pinned.push({ name: m[1].trim().toLowerCase(), ref: m[2].trim().toLowerCase() })
+    else if (s.length > 0) want.add(s.toLowerCase())
+  }
+  return c => {
+    const keys = [c.agent, c.name, c.ref].filter(v => v !== undefined).map(v => v.trim().toLowerCase())
+    if (keys.some(k => want.has(k))) return true
+    return pinned.some(p => keys.includes(p.name) && (c.ref === undefined || c.ref.toLowerCase() === p.ref))
+  }
 }
 
 // ---------- 座位分配：先坐回上次的位子，新來的人才依編號挑預設座位 ----------
@@ -730,20 +746,26 @@ const BIRD = [
   '........K.K.',
 ]
 const BIRD_SING = BIRD.map((r, i) => (i === 3 ? 'kkkkkDaaWWWK' : r)) // 張嘴
-const BIRD_SIT = [BIRD, BIRD_SING]
 const setAt = (row: string, i: number, ch: string) => row.slice(0, i) + ch + row.slice(i + 1)
 
-/** 地上跳著走：第 step 格往上跳 0／1／2／1 像素，離地時收腳 */
+/**
+ * 鳥一律畫成 8＋BIRD_LIFT 列：上面留 BIRD_LIFT 列空白當跳躍的空間，畫的時候 y0 相對減掉同樣高度。
+ * 往上跳 k 像素＝把空白從上面搬到下面，**整隻鳥完整往上移**。
+ * （2026-10-08 修：原本用 BIRD.slice(k, 7) 裁掉頂端 k 列來假裝上移，跳最高時頭被切掉、看起來被壓扁。）
+ */
+export const BIRD_LIFT = 2
+const blankRow = '.'.repeat(CAT_W)
+const lifted = (rows: string[], k: number) => [...Array(BIRD_LIFT - k).fill(blankRow), ...rows, ...Array(k).fill(blankRow)]
+const BIRD_SIT = [lifted(BIRD, 0), lifted(BIRD_SING, 0)]
+
+/** 地上跳著走：第 step 格往上跳 0／1／2／1 像素 */
 export function birdHopRows(step: number): string[] {
-  const k = [0, 1, 2, 1][step % 4]
-  if (k === 0) return BIRD
-  const blank = '.'.repeat(CAT_W)
-  return [...BIRD.slice(k, 7), ...Array(k + 1).fill(blank)]
+  return lifted(BIRD, [0, 1, 2, 1][step % 4])
 }
 
 /** 飛：收腳，翅膀一格舉起、一格壓下 */
 export function birdFlyRows(frame: number): string[] {
-  const rows = [...BIRD.slice(0, 7), '.'.repeat(CAT_W)]
+  const rows = [...BIRD.slice(0, 7), blankRow] // 索引對的是鳥本身，lift 最後才加
   if (frame % 2 === 0) {
     rows[1] = setAt(rows[1], 5, 'D')
     rows[2] = setAt(rows[2], 6, 'D')
@@ -751,7 +773,7 @@ export function birdFlyRows(frame: number): string[] {
     rows[6] = setAt(rows[6], 5, 'D')
     rows[7] = setAt(setAt(rows[7], 5, 'D'), 6, 'w')
   }
-  return rows
+  return lifted(rows, 0)
 }
 
 function notes(p: Px, x: number, y: number) {
@@ -869,7 +891,7 @@ function raidingCat(p: Px, pose: RaidPose, frame: number, pet: Pet = 'cat') {
   const rows = pose.biting ? petSit(pet, frame) : pet === 'bird' ? birdFlyRows(frame) : petWalk(pet, frame)
   const x0 = pose.at.x - CAT_W / 2 + lunge
   const y0 = pose.at.y - CAT_H + 1
-  sprite(p, pet, rows, x0, y0, pose.dx > 0)
+  sprite(p, pet, rows, x0, pet === 'bird' ? y0 - BIRD_LIFT : y0, pose.dx > 0)
   if (!pose.biting) return
   if (pet === 'baby') hearts(p, x0 + 5, y0 - 4 - (Math.floor(frame / 2) % 3))
   else if (pet === 'bird') notes(p, x0 + (pose.dx > 0 ? 9 : 1), y0 - 2 - (Math.floor(frame / 2) % 3))
@@ -884,7 +906,7 @@ function cat(p: Px, startled: boolean, frame: number, treatFrame?: number, catOf
   const rows = sitting ? petSit(pet, frame) : petWalk(pet, frame)
   const x0 = WALL + CAT_START + x
   const y0 = p.h - WALL - CAT_H - CAT_LIFT - (startled && !fed && frame % 2 ? 2 : 0) // 走在家具那一排上方，不擋到檔案櫃／郵筒／影印機
-  sprite(p, pet, rows, x0, y0, facingRight)
+  sprite(p, pet, rows, x0, pet === 'bird' ? y0 - BIRD_LIFT : y0, facingRight)
   if (fed) {
     // 貓：飼料碗在臉前面；寶寶：奶瓶（粉紅奶嘴朝上）。愛心從頭上往上飄
     if (pet === 'baby') {

@@ -303,7 +303,7 @@ async function setMeeting($: EngineInterface, input: { action?: unknown; topic?:
     await $.fs.write(file, JSON.stringify({ until: 0 }))
     return '散會：參與者走回座位。'
   }
-  const people = Array.isArray(input.participants) ? input.participants.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : []
+  const people = Array.isArray(input.participants) ? input.participants.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(x => x.length > 0) : []
   if (people.length === 0) return '要列出 participants（參與者的 ListAgents 名稱或名牌）。'
   // 預設不設期限：散會靠 action=end，或參與者全都離線
   const minutes = typeof input.minutes === 'number' && input.minutes > 0 ? input.minutes : undefined
@@ -638,7 +638,7 @@ export const register: Register = on => {
         properties: {
           action: { type: 'string', enum: ['start', 'end'], description: 'start 開會、end 散會' },
           topic: { type: 'string', description: '題目，60 字內' },
-          participants: { type: 'array', items: { type: 'string' }, description: '參與者的 ListAgents 名稱或名牌' },
+          participants: { type: 'array', items: { type: 'string' }, description: '參與者的 ListAgents 名稱、名牌或 ref。兩個 session 同名時寫成 `名稱 [ref]`（ref 見 office_roster），只有那一個會進會議室' },
           minutes: { type: 'number', description: '可選：幾分鐘後自動散會；不填就不設期限' },
         },
         required: ['action'],

@@ -205,7 +205,7 @@ test('the model can set its own role through the office_profile tool', async ($,
 
 // ---------- 固定座位與升遷走路 ----------
 
-import { assignSeats, route, walkerPos } from './scene'
+import { assignSeats, isAttendee, route, walkerPos } from './scene'
 
 test('seats are sticky: someone leaving does not shuffle everyone else', () => {
   const a = P('alpha', 'a'), b = P('bravo', 'b'), c = P('charlie', 'c')
@@ -1135,6 +1135,21 @@ test('with a participant list, exactly those people go in, team or not; refs and
   expect(old.get('charlie')!.kind).toBe('staff')
 })
 
+// 2026-10-08：實際狀態檔裡有兩個 session 的 agent 都是 llm-wiki-aegiverse-e4、兩個名牌都是 IT、
+// 四個沒登記 agent 的名牌都是 user —— 點名時 agent/name 都不唯一，該進的沒進、不該進的進去。
+test('a participant named with [ref] matches only that session, and stray spaces still match', () => {
+  const a = { ...P('a', 'e4'), agent: 'wiki-e4', ref: '180a9b' }
+  const b = { ...P('b', 'e4b'), agent: 'wiki-e4', ref: '019e4b' }
+  const noRef = { ...P('c', 'c'), agent: 'wiki-e4' } // 還沒登記 ref 的舊 session
+  expect(isAttendee(['wiki-e4 [180a9b]'])(a)).toBe(true)
+  expect(isAttendee(['wiki-e4 [180a9b]'])(b)).toBe(false) // ← 撞名時不再誤抓
+  expect(isAttendee(['wiki-e4 [180a9b]'])(noRef)).toBe(true) // 沒登記 ref 的人不能因此被排除
+  expect(isAttendee(['wiki-e4'])(a) && isAttendee(['wiki-e4'])(b)).toBe(true) // 沒帶 ref：維持舊行為
+  expect(isAttendee(['180a9b'])(a)).toBe(true) // 直接用 ref 點名
+  expect(isAttendee(['  wiki-e4  ', ' E4B '])(a)).toBe(true) // 前後空白不該讓人進不去
+  expect(isAttendee([' E4B '])(b)).toBe(true)
+})
+
 test('office_meeting writes meeting.json with topic and participants, and end clears it', async ($, on) => {
   const files: Record<string, string> = {}
   on('env.get', () => ({ value: 'C:/Users/tester' }))
@@ -1190,9 +1205,17 @@ test('the silver-throated bushtit: its own colours, hops on the ground, flies st
   const bird = drawScene(crew, 1, w, r, [], placed, { pet: 'bird' }).px
   expect(count(bird, WHITE)).toBeGreaterThan(20) // 雪球般全白
   expect(count(bird, ORANGE)).toBe(0)
-  // 跳著走：四格裡有離地的格（腳那一列是空的）
-  expect(birdHopRows(0)[7]).toContain('K')
-  expect(birdHopRows(2)[7]).toBe('.'.repeat(12))
+  // 跳著走：四格裡有離地的格（最底下那一列是空的＝腳離地）
+  const bottom = (step: number) => birdHopRows(step)[birdHopRows(step).length - 1]
+  expect(bottom(0)).toContain('K')
+  expect(bottom(2)).toBe('.'.repeat(12))
+  // 跳起來時整隻鳥往上移，不是把頭裁掉：每一格的身體列數都一樣，頂端只是位置變了
+  const ink = (rows: string[]) => rows.filter(r => r.replace(/\./g, '').length > 0)
+  const base = ink(birdHopRows(0))
+  for (const step of [1, 2, 3]) expect(ink(birdHopRows(step))).toEqual(base)
+  const top = (step: number) => birdHopRows(step).findIndex(r => r.replace(/\./g, '').length > 0)
+  expect(top(2)).toBe(top(0) - 2) // 跳最高那一格，整體上移 2 像素
+  expect(top(1)).toBe(top(0) - 1)
   // 會飛：去程只有起點與終點兩點（直線），終點一樣在人的右手邊
   const pl = placed.get('a')!
   const path = raidPath(pl, w, r, 0, undefined, 0, 'bird')
