@@ -28,6 +28,8 @@ export type Coworker = {
   errand?: { kind: ErrandKind; at: number }
   /** ListAgents 上的名稱（SendMessage 的收件者就是它），不顯示，只用來找人 */
   agent?: string
+  /** ListAgents 名稱後面那組 [ref]（例如 180a9b）：兩個 session 同名時，SendMessage 要靠它分辨 */
+  ref?: string
   /** 最近一次送出訊息：收件者名稱與時間（ms） */
   sentTo?: string
   sentAt?: number

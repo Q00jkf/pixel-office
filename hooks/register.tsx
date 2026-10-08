@@ -177,10 +177,10 @@ export function plateFromAgent(agent: string): string | undefined {
   return validName(last) ? last : undefined
 }
 
-/** 從 ListAgents 的輸出抓自己的名稱（「This session is X [ref]」） */
-export function selfFromListAgents(text: string): string | undefined {
-  const m = text.match(/This session is (.+?) \[[0-9a-f]+\]/)
-  return m ? m[1].trim() : undefined
+/** 從 ListAgents 的輸出抓自己的名稱與 ref（「This session is X [ref]」） */
+export function selfFromListAgents(text: string): { name: string; ref: string } | undefined {
+  const m = text.match(/This session is (.+?) \[([0-9a-f]+)\]/)
+  return m ? { name: m[1].trim(), ref: m[2] } : undefined
 }
 
 const MAX_BUTTONS = 6
@@ -239,8 +239,8 @@ async function runButton($: EngineInterface, b: CustomButton) {
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
 /** 會跨熱重載保存的個人設定；新增欄位只要加在這裡和 PROFILE_KEYS */
-export type Profile = { role?: Role; name?: string; agent?: string; title?: string; auto?: boolean; team?: string }
-const PROFILE_KEYS = ['role', 'name', 'agent', 'title', 'auto', 'team'] as const
+export type Profile = { role?: Role; name?: string; agent?: string; ref?: string; title?: string; auto?: boolean; team?: string }
+const PROFILE_KEYS = ['role', 'name', 'agent', 'ref', 'title', 'auto', 'team'] as const
 
 /** 合併兩份設定：$.store 有值就用它的，沒有才用狀態檔的。逐欄通用處理，新增欄位不會被漏掉 */
 export function mergeProfile(saved: Profile | undefined, own: Profile | undefined): Profile | undefined {
@@ -255,7 +255,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
   } catch {
     return undefined
   }
@@ -276,6 +276,8 @@ async function adopt($: EngineInterface, id: string) {
   if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
   const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
   if (typeof savedAgent === 'string' && savedAgent.length > 0) me = { ...me, agent: savedAgent }
+  const savedRef = (saved as { ref?: unknown } | undefined)?.ref
+  if (typeof savedRef === 'string' && savedRef.length > 0) me = { ...me, ref: savedRef }
   if (saved?.auto === true) me = { ...me, auto: true }
   const savedTeam = (saved as { team?: unknown } | undefined)?.team
   if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
@@ -315,7 +317,7 @@ async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -339,6 +341,19 @@ const MODE_LABEL: Record<OfficeMode, string> = {
   blocked: '被權限擋下',
 }
 
+/** 同一個 ListAgents 名稱有兩個以上 session 時，SendMessage 必須帶 [ref]：直接給可貼的字串，省一次 ListAgents */
+function clashNotes(list: Coworker[]): string[] {
+  const byAgent = new Map<string, Coworker[]>()
+  for (const c of list) if (c.agent !== undefined) byAgent.set(c.agent, [...(byAgent.get(c.agent) ?? []), c])
+  const out: string[] = []
+  for (const [agent, group] of byAgent) {
+    if (group.length < 2) continue
+    const addrs = group.map(c => (c.ref ? `${agent} [${c.ref}]（${c.name}）` : `${c.name}：ref 未登記，要它自己跑一次 ListAgents`))
+    out.push(`🔴 撞名：${group.length} 個 session 都叫 ${agent}，SendMessage 要帶 ref → ${addrs.join('、')}`)
+  }
+  return out
+}
+
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
 export function roster(list: Coworker[], now: number): string {
   if (list.length === 0) return '辦公室目前沒有人。'
@@ -350,14 +365,15 @@ export function roster(list: Coworker[], now: number): string {
         ? `${MODE_LABEL[c.mode]}（${c.tool}）`
         : MODE_LABEL[c.mode] ?? c.mode
     const agent = c.agent ?? '（未登記，傳訊息找不到）'
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const head = [
     `像素辦公室名單（${list.length} 人在線，${new Date(now).toISOString().slice(11, 19)} UTC）`,
     ...(blockedNames.length > 0 ? [`🔴 待放行：${blockedNames.join('、')}（要使用者在各自的視窗說「放行」，別的 session 轉達無效）`] : []),
-    '| 名牌 | 職稱 | 角色 | ListAgents 名稱（SendMessage 用） | 目前 |',
-    '|---|---|---|---|---|',
+    ...clashNotes(sorted),
+    '| 名牌 | 職稱 | 角色 | ListAgents 名稱（SendMessage 用） | ref | 目前 |',
+    '|---|---|---|---|---|---|',
   ]
   return [...head, ...rows].join('\n')
 }
@@ -452,6 +468,7 @@ async function refresh($: EngineInterface) {
           isMe: false,
           role: s.role === 'manager' ? 'manager' : 'staff',
           agent: typeof s.agent === 'string' ? s.agent : undefined,
+          ref: typeof s.ref === 'string' ? s.ref : undefined,
           title: typeof s.title === 'string' ? s.title : undefined,
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
@@ -509,7 +526,7 @@ export function validName(name: string): boolean {
 // 角色與名牌：/office 指令和模型工具共用；依 session 編號記在 $.store
 async function applyProfile(
   $: EngineInterface,
-  input: { role?: string; name?: string; agent?: string; title?: string; auto?: boolean; team?: string },
+  input: { role?: string; name?: string; agent?: string; ref?: string; title?: string; auto?: boolean; team?: string },
 ): Promise<string> {
   const notes: string[] = []
   let team = me.team
@@ -527,6 +544,7 @@ async function applyProfile(
   let role = me.role
   let name = me.name
   let agent = me.agent
+  let ref = me.ref
   let title = me.title
   if (input.title !== undefined) {
     const t = input.title.trim()
@@ -534,7 +552,18 @@ async function applyProfile(
     title = t.length > 0 ? t : undefined
     notes.push(title ? `職稱＝${title}` : '職稱已清除')
   }
+  if (input.ref !== undefined) {
+    const r = input.ref.trim().replace(/^\[|\]$/g, '').toLowerCase()
+    if (!/^[0-9a-f]{0,32}$/.test(r)) return `ref「${input.ref}」不行：ListAgents 名稱後面那組十六進位碼（例如 180a9b）。`
+    ref = r.length > 0 ? r : undefined
+    notes.push(ref ? `ref＝${ref}` : 'ref 已清除')
+  }
   if (input.agent !== undefined) {
+    const withRef = input.agent.trim().match(/^(.*?)\s*\[([0-9a-f]+)\]$/i)
+    if (withRef && withRef[2].toLowerCase() !== ref) {
+      ref = withRef[2].toLowerCase() // 整串 `名稱 [ref]` 貼進來：ref 留著，撞名時才定得了址
+      notes.push(`ref＝${ref}`)
+    }
     const a = input.agent.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
     if (a.length === 0 || a.length > 64) return `agent 名稱「${input.agent}」不行：要 1～64 字（用 ListAgents 顯示的 This session is 後面那個名稱）。`
     agent = a
@@ -559,8 +588,8 @@ async function applyProfile(
     notes.push(`名牌＝${name}`)
   }
   if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）、agent（ListAgents 名稱）、auto（true／false）或 team（主管名稱）。'
-  me = { ...me, role, name, agent, title, auto, team }
-  await $.store.set(`profile:${me.id}`, { role, name, agent, title, auto, team }).catch(() => undefined) // 存不了只是重開後不記得
+  me = { ...me, role, name, agent, ref, title, auto, team }
+  await $.store.set(`profile:${me.id}`, { role, name, agent, ref, title, auto, team }).catch(() => undefined) // 存不了只是重開後不記得
   await showCrew($)
   await publish($, false).catch(() => undefined)
   return `已設定：${notes.join('、')}。`
@@ -586,7 +615,8 @@ export const register: Register = on => {
         properties: {
           role: { type: 'string', enum: ['主管', '員工'], description: '主管 或 員工' },
           name: { type: 'string', description: '名牌，英數字 1～12 字' },
-          agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）' },
+          agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）；整串含 [ref] 貼進來也可以' },
+          ref: { type: 'string', description: 'ListAgents 名稱後面那組碼（例如 180a9b）。和別的 session 同名時，SendMessage 靠它分辨' },
           title: { type: 'string', description: '職稱，自由填寫最多 16 字（例如 IT、查證、ArduPilot），可用中文' },
           team: { type: 'string', description: '你是哪位主管的 peer：填主管的 ListAgents 名稱（例如 user-30）；不再是 peer 時填 off' },
           auto: { type: 'boolean', description: '你的 session 是 auto 權限模式（系統提示寫 auto mode is active）就設 true；否則 false' },
@@ -596,7 +626,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'office_roster',
       description:
-        '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。只讀，不改任何東西。',
+        '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱與 ref（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。兩個 session 同名時表頭會直接給 `名稱 [ref]` 的定址字串，不用再跑一次 ListAgents。只讀，不改任何東西。',
       inputSchema: { type: 'object', properties: {} },
     })
     await $.tool.register({
@@ -662,7 +692,7 @@ export const register: Register = on => {
     const ran = await next(e)
     try {
       const self = ran.deny === undefined ? selfFromListAgents(ran.text ?? '') : undefined
-      if (self && self !== me.agent) await applyProfile($, { agent: self })
+      if (self && (self.name !== me.agent || self.ref !== me.ref)) await applyProfile($, { agent: self.name, ref: self.ref })
     } catch {}
     return ran
   })
@@ -790,7 +820,7 @@ export const register: Register = on => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string; auto?: unknown; team?: string }
     const auto = input.auto === true || input.auto === 'true' ? true : input.auto === false || input.auto === 'false' ? false : undefined
-    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, title: input.title, auto, team: input.team })
+    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, ref: input.ref, title: input.title, auto, team: input.team })
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
     return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}，session ${me.id.slice(0, 8)}）` }

@@ -429,6 +429,23 @@ test('the roster lists manager first, with title, role, ListAgents name and what
   expect(text).toContain('未登記')
 })
 
+test('the roster carries each ref, so two sessions sharing a ListAgents name can still be addressed', () => {
+  const crew: Coworker[] = [
+    { ...P('a', 'IT', 'idle', true), agent: 'wiki-e4', ref: '180a9b' },
+    { ...P('b', 'B'), agent: 'wiki-e4', ref: '019e4b' },
+    { ...P('c', 'C'), agent: 'solo', ref: 'aa11bb' },
+  ]
+  const text = roster(crew, 0)
+  expect(text).toContain('| ref |') // 表頭多一欄
+  expect(text).toContain('180a9b')
+  expect(text).toContain('aa11bb')
+  // 撞名：直接給可貼的定址字串，不用再跑一次 ListAgents
+  expect(text).toContain('🔴 撞名')
+  expect(text).toContain('wiki-e4 [180a9b]')
+  expect(text).toContain('wiki-e4 [019e4b]')
+  expect(text).not.toContain('solo [aa11bb]') // 沒撞名的不唱名
+})
+
 test('/office title sets a free-text title (Chinese ok) and /office who prints the roster', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
@@ -508,11 +525,11 @@ test('plates are derived from the ListAgents name', () => {
   expect(plateFromAgent('規則')).toBeUndefined()
 })
 
-test('the session name is read from ListAgents output', () => {
+test('the session name and its ref are read from ListAgents output', () => {
   const out = 'This session is llm-wiki-aegiverse-ff [957775] — the name other sessions use to message it.\n\nPeer sessions (3):'
-  expect(selfFromListAgents(out)).toBe('llm-wiki-aegiverse-ff')
+  expect(selfFromListAgents(out)).toEqual({ name: 'llm-wiki-aegiverse-ff', ref: '957775' })
   expect(selfFromListAgents('MODS 規則與設定 [16e6c8]')).toBeUndefined()
-  expect(selfFromListAgents('This session is MODS 規則與設定 [16e6c8] — x')).toBe('MODS 規則與設定')
+  expect(selfFromListAgents('This session is MODS 規則與設定 [16e6c8] — x')).toEqual({ name: 'MODS 規則與設定', ref: '16e6c8' })
 })
 
 test('registering an agent also sets a short plate when the plate is still the default', async ($, on) => {
@@ -539,6 +556,7 @@ test('running ListAgents registers the session automatically', async ($, on) => 
   const last = JSON.parse(writes[writes.length - 1])
   expect(last.agent).toBe('llm-wiki-aegiverse-ff')
   expect(last.name).toBe('ff')
+  expect(last.ref).toBe('957775') // 撞名時定址要用，自動抓不用模型配合
 })
 
 // ---------- 0.3.8：被分類器擋下、等使用者說放行 ----------
