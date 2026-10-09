@@ -50,8 +50,8 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 
 ```json
 [
-  { "label": "開工", "prompt": "/llm-wiki:wiki-start" },
-  { "label": "收工", "prompt": "/llm-wiki:wiki-end" },
+  { "label": "開工", "prompt": "/llm-wiki:wiki-day 開工" },
+  { "label": "收工", "prompt": "/llm-wiki:wiki-day 收工" },
   { "label": "文件", "url": "https://example.com" }
 ]
 ```

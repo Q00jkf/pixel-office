@@ -1,6 +1,6 @@
 [
-  { "label": "開工", "prompt": "/llm-wiki:wiki-start" },
-  { "label": "收工", "prompt": "/llm-wiki:wiki-end" },
+  { "label": "開工", "prompt": "/llm-wiki:wiki-day 開工" },
+  { "label": "收工", "prompt": "/llm-wiki:wiki-day 收工" },
   { "label": "健康檢查", "prompt": "/llm-wiki:wiki-doctor" },
   { "label": "說明", "url": "https://github.com/Q00jkf/llm-wiki-plugin" }
 ]
