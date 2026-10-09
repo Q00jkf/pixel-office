@@ -1205,6 +1205,12 @@ test('the silver-throated bushtit: its own colours, hops on the ground, flies st
   const bird = drawScene(crew, 1, w, r, [], placed, { pet: 'bird' }).px
   expect(count(bird, WHITE)).toBeGreaterThan(20) // 雪球般全白
   expect(count(bird, ORANGE)).toBe(0)
+  // 🔴 畫出來的像素才算數：跳躍不該讓鳥少掉任何一個白點。
+  // 2026-10-09 使用者截圖「跳起來頭還是被切掉」—— 結構測試全綠，所以要在渲染層再驗一次。
+  const whiteByFrame = [0, 1, 2, 3, 4, 5, 6, 7].map(f =>
+    count(drawScene(crew, f, w, r, [], placed, { pet: 'bird' }).px, WHITE),
+  )
+  expect(new Set(whiteByFrame).size).toBe(1) // 每一格的白色像素數都一樣＝整隻鳥都在，只是位置不同
   // 跳著走：四格裡有離地的格（最底下那一列是空的＝腳離地）
   const bottom = (step: number) => birdHopRows(step)[birdHopRows(step).length - 1]
   expect(bottom(0)).toContain('K')
