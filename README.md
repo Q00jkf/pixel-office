@@ -67,7 +67,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 每個 session 的狀態即時反映在小人與螢幕：打字、讀檔、思考、出錯、完成
 - 第一位主管坐主管室；登記為他 peer 的人（`/office team`）坐最右邊那一區，其他人坐左邊；換區時會起身走過去。peer 區鋪金邊地毯、上方掛「TEAM <主管名牌>」（有主管在線且排得出兩欄才顯示）
 - 每人有固定座位，別人進出不會讓他換位
-- **開會**：llm-wiki 的 `/wiki-meet` 開會時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；不設期限，主持人散會（`action=end`）或參與者全都離線就清空；只是畫面，討論本身由 `wiki-collabteam` 的 `meet.md` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
+- **開會**：llm-wiki 開會（說「開會」，skill `wiki-collabteam`）時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；不設期限，主持人散會（`action=end`）或參與者全都離線就清空；只是畫面，討論本身由 `wiki-collabteam` 的 `meet.md` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
 - **對外動作會跑腿**：寄信（Gmail 寄送／回覆／轉寄／草稿）拿著紙走去影印機；上傳文件（Google Drive、Notion 建立／更新）拿資料夾走去檔案櫃；`git push` 拿包裹走去大門口的郵筒；成功才算，走完回座位
 - 坐不下時左上角顯示 `+N`
 - 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 用 SVG 畫，每 0.5 秒更新一次（約每秒 2 格），按鈕相同
