@@ -28,8 +28,10 @@ export type Coworker = {
   since?: number
   /** 最後一次出錯：摘要（一行、最多 80 字）與時間（ms） */
   lastError?: { text: string; at: number }
-  /** 這個視窗開著辦公室面板：有人開著，等核准的 session 才把單送來辦公室（沒人開就直接交回終端機） */
+  /** 這個視窗開著辦公室面板 */
   office?: boolean
+  /** 開著面板且核准開啟（/office approve on）：有這樣的視窗在，等核准的 session 才把單送來辦公室 */
+  approve?: boolean
   /** 正在等辦公室裡有人核准：工具名、送單時間與截止時間（ms，過了就交回終端機）；畫面上他拿著紙去櫃台排隊 */
   approval?: { tool: string; at: number; deadline: number }
   /** 回信位址（uds:<CLAUDE_CODE_MESSAGING_SOCKET>）：沒有 ListAgents 名稱時，SendMessage 的 to 填它也送得到 */

@@ -944,6 +944,7 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
     return { value: undefined } as any
   })
   await ($ as any).session.start({ cwd: 'C:/work/hub', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'office', args: 'approve on' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
   const ui = await $.ui.mount(PANE_PROPS)
   await clock.advance(1000)
@@ -1522,7 +1523,7 @@ test('at 60~80 columns two managers each with peers get two zones when nobody is
 
 // ---------- 點人核准（控制塔第 1 期）----------
 
-import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalWindow, approvalText, canon, judgeDecision, textHash, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
+import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalWindow, approvalText, canon, judgeDecision, textHash, matchAsk, officeApproves, parseApproval, waitForDecision } from './register'
 
 const WANT = { session: 's1', toolUseId: 'toolu_1', nonce: 'n-1', textHash: 'h-1' }
 const decided = (over: Record<string, unknown> = {}) => JSON.stringify({ state: 'decided', ...WANT, behavior: 'allow', at: 1, ...over })
@@ -1570,8 +1571,9 @@ test('an approval slip past its deadline, a tombstone or a broken file counts as
   expect(parseApproval(TOMBSTONE, 1000)).toBeUndefined()
   expect(parseApproval('{', 1000)).toBeUndefined()
   expect(parseApproval(JSON.stringify({ ...rec, nonce: 3 }), 1000)).toBeUndefined()
-  expect(officeWatched([P('a', 'a'), { ...P('b', 'b'), office: true }])).toBe(true)
-  expect(officeWatched([P('a', 'a')])).toBe(false) // 辦公室沒開：不送單
+  expect(officeApproves([P('a', 'a'), { ...P('b', 'b'), office: true, approve: true }])).toBe(true)
+  expect(officeApproves([P('a', 'a'), { ...P('b', 'b'), office: true }])).toBe(false) // 開著面板但核准關著（預設）：不送單
+  expect(officeApproves([P('a', 'a')])).toBe(false) // 辦公室沒開：不送單
 })
 
 const fakeIO = (reads: (string | undefined)[], opts: { settledAt?: number; step?: number } = {}) => {
@@ -1719,6 +1721,7 @@ test('office pane: lists the slip, Allow is held for 1 s after opening, then wri
   const writes: { path: string; text: string }[] = []
   officeFs(on, files, writes)
   on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: 'approve on' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: '' } as any) // 面板開著 → 下一輪 refresh 讀到核准單（測試裡沒有 session.start 的定時器，用 /office 觸發）
@@ -1744,6 +1747,7 @@ test('office pane: a slip replaced by a new request reopens with a fresh cooldow
   }
   officeFs(on, files)
   on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: 'approve on' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: '' } as any)
@@ -1827,6 +1831,7 @@ test('office pane: if the slip text changes after opening (same toolUseId and no
   }
   officeFs(on, files)
   on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: 'approve on' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: '' } as any)
@@ -1875,6 +1880,7 @@ test('office pane: past the deadline the slip folds away and nothing can be pres
   }
   officeFs(on, files)
   on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: 'approve on' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: '' } as any)
@@ -1886,4 +1892,49 @@ test('office pane: past the deadline the slip folds away and nothing can be pres
   expect(await ui.find({ key: 'review-bbbb' })).toBeUndefined()
   expect(files['decisions/bbbb.json']).toBeUndefined()
   await ui.unmount()
+})
+
+import { ALLOW_READY, ALLOW_WAIT, queueOrder } from './register'
+
+test('approval is off by default: an open pane alone publishes no approve flag and shows no review buttons', async ($, on) => {
+  const NOW = 1_000_000
+  mock.clock(on, { now: NOW })
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'ls', nonce: 'nn', at: NOW, deadline: NOW + 8000 }
+  const files: Record<string, string> = {
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
+    'approvals/bbbb.json': JSON.stringify(slip),
+  }
+  officeFs(on, files)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const mine = JSON.parse(files[Object.keys(files).find(k => k.startsWith('sessions/') && k !== 'sessions/bbbb.json')!])
+  expect(mine.office).toBe(true)
+  expect(mine.approve).toBeUndefined() // 請求端看到這個就不送單
+  expect(await ui.find({ key: 'review-bbbb' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).not.toContain('核准已開啟')
+  // 打開：狀態檔帶 approve、面板頂端常駐提示、看得到單
+  const text: any = await $.command.run({ command: 'office', args: 'approve on' } as any)
+  expect(String(text?.text ?? text)).toContain('已開啟')
+  await $.command.run({ command: 'office', args: '' } as any)
+  const after = JSON.parse(files[Object.keys(files).find(k => k.startsWith('sessions/') && k !== 'sessions/bbbb.json')!])
+  expect(after.approve).toBe(true)
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text)).toContain('核准已開啟（/office approve off 關閉）')
+  expect(await ui.find({ key: 'review-bbbb' })).toBeDefined()
+  await $.command.run({ command: 'office', args: 'approve off' } as any)
+  await $.command.run({ command: 'office', args: '' } as any)
+  expect(await ui.find({ key: 'review-bbbb' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the queue at the counter follows the waiting state, not the slip: it works with approval off', () => {
+  const a = { ...P('a', 'a', 'waiting'), since: 2000 }
+  const b = { ...P('b', 'b', 'waiting'), since: 1000 }
+  expect(queueOrder([a, P('c', 'c', 'typing'), b])).toEqual(['b', 'a']) // 先等的排前面；沒有任何 approval 單
+})
+
+test('the Allow label is as wide while cooling down as when ready, so Deny never moves', () => {
+  const w = (t: string) => [...t].reduce((n, ch) => n + (/[⺀-￯]/.test(ch) ? 2 : 1), 0)
+  expect(w(ALLOW_WAIT)).toBe(w(ALLOW_READY))
+  expect(ALLOW_WAIT.length).toBe(ALLOW_READY.length)
 })

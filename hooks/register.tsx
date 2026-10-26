@@ -28,6 +28,7 @@ let others: Coworker[] = []
 let walkers: Walker[] = []
 let nightMode = false
 let pet: Pet = 'cat'
+let approveOn = false // 審核端開關（/office approve on|off，存 $.store；預設關，jacky 2026-10-26 裁示）
 let meeting = false // 開會中（~/.claude/pixel-office/meeting.json 的 until 之前）
 let attendees: string[] = [] // 開會的參與者（meeting.json 的 participants）；空的就是主管的 peer
 let meetingTopic = ''
@@ -329,7 +330,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -480,8 +481,8 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
     }
     seenErrand.set(c.id, errandAt)
 
-    // 等核准：拿著紙走去櫃台排隊；結案後走回座位
-    const approvalAt = c.approval?.at
+    // 等核准（waiting）：拿著紙走去櫃台排隊；結束後走回座位
+    const approvalAt = c.mode === 'waiting' ? c.since ?? -1 : undefined
     if (seenApproval.has(c.id) && approvalAt !== seenApproval.get(c.id)) {
       const pl = lastPlaced?.get(c.id)
       if (pl && width > 0 && rows > 0) {
@@ -549,6 +550,7 @@ async function refresh($: EngineInterface) {
           lastError: s.lastError && typeof s.lastError.text === 'string' && typeof s.lastError.at === 'number' ? { text: s.lastError.text, at: s.lastError.at } : undefined,
           prompt: s.prompt && typeof s.prompt.text === 'string' && typeof s.prompt.at === 'number' ? { text: s.prompt.text, at: s.prompt.at } : undefined,
           office: s.office === true ? true : undefined,
+          approve: s.office === true && s.approve === true ? true : undefined,
           approval: s.approval && typeof s.approval.tool === 'string' && typeof s.approval.at === 'number' && typeof s.approval.deadline === 'number' && now < s.approval.deadline ? { tool: s.approval.tool, at: s.approval.at, deadline: s.approval.deadline } : undefined,
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
@@ -580,7 +582,7 @@ async function refresh($: EngineInterface) {
     attendees = who
     trackMoves(everyone())
   }
-  if (me.office) await readApprovals($, d, now)
+  if (me.office && approveOn) await readApprovals($, d, now)
   await showCrew($)
 }
 
@@ -590,6 +592,18 @@ async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
   me = { ...me, mode: next, tool: name ?? me.tool, since }
   await showCrew($)
   await publish($, false).catch(() => undefined)
+}
+
+/** /office approve on|off：這個視窗要不要替別人按核准；存 $.store，重開記得 */
+async function setApprove($: EngineInterface, on: boolean): Promise<string> {
+  approveOn = on
+  if (!on) reviewing = undefined
+  await $.store.set('approve', on).catch(() => undefined)
+  await publish($, false).catch(() => undefined)
+  $.ui.invalidate('ui.render')
+  return on
+    ? '辦公室核准已開啟：開著面板時，別的 session 的權限詢問會送來這裡（約 8 秒內可按）。關閉：/office approve off'
+    : '辦公室核准已關閉：權限詢問都在各自的終端機按。'
 }
 
 /** 這個視窗的辦公室面板開／關：寫進狀態檔，等核准的 session 據此決定要不要送單 */
@@ -830,8 +844,8 @@ export function approvalWindow(remainingMs: number): number | undefined {
   return w >= MIN_WINDOW_MS ? w : undefined
 }
 
-/** 有沒有人開著辦公室面板（含自己）：沒有就不送單，直接交回終端機 */
-export const officeWatched = (list: Coworker[]) => list.some(c => c.office === true)
+/** 有沒有人開著辦公室面板「且核准開啟」（含自己）：沒有就不送單，直接交回終端機（預設關，跟沒開辦公室一樣） */
+export const officeApproves = (list: Coworker[]) => list.some(c => c.office === true && c.approve === true)
 
 const asks: Ask[] = [] // 最近判定 ask 的工具呼叫（tool.check 記，PermissionRequest 對）
 const settled = new Set<string>() // 已在別處結案的 toolUseId：終端機先按、指令跑完、被拒
@@ -907,9 +921,9 @@ async function askOffice($: EngineInterface, toolUseId: string, tool: string, te
   )
 }
 
-/** 隊伍順序：送單早的排前面 */
-function queueOrder(list: Coworker[] = everyone()): string[] {
-  return list.filter(c => c.approval).sort((a, b) => a.approval!.at - b.approval!.at).map(c => c.id)
+/** 隊伍順序：等核准（waiting）早的排前面。靠狀態不靠單 —— 核准關著時一樣排隊 */
+export function queueOrder(list: Coworker[] = everyone()): string[] {
+  return list.filter(c => c.mode === 'waiting').sort((a, b) => (a.since ?? 0) - (b.since ?? 0)).map(c => c.id)
 }
 
 /** 開著面板的視窗：讀所有在線 session 的核准單；展開中的那張被換成新的一筆 → 重新展開、冷卻重算 */
@@ -964,11 +978,18 @@ async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
   $.ui.invalidate('ui.render')
 }
 
+// 冷卻中與可按同寬（同樣 3 個全形字）：換字時 Deny 不會左右跳（oftest 2026-10-26）
+export const ALLOW_WAIT = 'Allow（等一秒）'
+export const ALLOW_READY = 'Allow（可以按）'
+
 /** 面板上的核准區：等人審的名單（審 <名牌>），展開的那張顯示全文與 Allow／Deny；Allow／Deny 不給 hotkey */
 function approvalRows($: EngineInterface, els: Record<string, any>, now: number): unknown[] {
   const { Box, Text, Button } = els
-  if (pending.every(a => now >= a.deadline)) return []
+  if (!approveOn) return []
+  const banner = <Text key="approval-on" dimColor>核准已開啟（/office approve off 關閉）</Text>
+  if (pending.every(a => now >= a.deadline)) return [banner]
   const rows: unknown[] = [
+    banner,
     <Box key="approval-queue" flexDirection="row">
       <Text color="yellow">🟡 等你核准：</Text>
       {pending.filter(a => now < a.deadline).map(a => (
@@ -987,7 +1008,7 @@ function approvalRows($: EngineInterface, els: Record<string, any>, now: number)
     </Text>,
     <Text key="approval-body">{fits ? cur.text : `${cur.text.slice(0, 300)}…`}</Text>,
     <Box key="approval-act" flexDirection="row">
-      {fits ? <Button key="approval-allow" label={ready ? 'Allow' : 'Allow（1 秒後可按）'} onPress={() => decide($, 'allow')} /> : null}
+      {fits ? <Button key="approval-allow" label={ready ? ALLOW_READY : ALLOW_WAIT} onPress={() => decide($, 'allow')} /> : null}
       <Button key="approval-deny" label="Deny" onPress={() => decide($, 'deny')} />
       <Button key="approval-close" label={fits ? '收起' : '回終端機按'} onPress={() => { reviewing = undefined; $.ui.invalidate('ui.render') }} />
     </Box>,
@@ -1050,6 +1071,7 @@ export const register: Register = on => {
       await update($, instanceRef, () => instance)
     }
     await adopt($, await $.session.id())
+    approveOn = (await $.store.get('approve').catch(() => undefined)) === true
     const savedPet = await $.store.get('pet').catch(() => undefined)
     if (isPet(savedPet)) {
       pet = savedPet
@@ -1176,7 +1198,7 @@ export const register: Register = on => {
       const toolUseId = matchAsk(asks, ev.tool_name, canon(ev.tool_input), await $.clock.now())
       if (!toolUseId) return next(e)
       await refresh($).catch(() => undefined)
-      if (!officeWatched(everyone())) return next(e)
+      if (!officeApproves(everyone())) return next(e)
       // 這個 hook 只有 10 秒預算（過了引擎就改由終端機問，hook 卻還在背景跑）：等到預算快用完就自己收單（oftest 2026-10-26 實測）
       const window = approvalWindow(next.budget.remainingMs)
       if (window === undefined) return next(e)
@@ -1235,6 +1257,11 @@ export const register: Register = on => {
       if (v !== 'on' && v !== 'off') return { text: '用法：/office auto on（auto 模式，不舉手）｜/office auto off（會等人核准）' }
       return { text: await applyProfile($, { auto: v === 'on' }) }
     }
+    if (sub === 'approve') {
+      const v = value.trim().toLowerCase()
+      if (v !== 'on' && v !== 'off') return { text: `用法：/office approve on（開著面板時替別人按核准）｜/office approve off（關，預設）。目前：${approveOn ? '開' : '關'}` }
+      return { text: await setApprove($, v === 'on') }
+    }
     if (sub === 'buttons') {
       const list = await loadButtons($)
       return { text: list.length > 0 ? `已載入 ${list.length} 顆個人按鈕：${list.map(b => b.label).join('、')}` : '沒有個人按鈕：~/.claude/pixel-office/buttons.json 不存在或格式不對。' }
@@ -1243,7 +1270,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office approve on|off（替別人按核准，預設關）｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
