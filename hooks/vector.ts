@@ -74,6 +74,7 @@ class Pen {
   shapes: Shape[] = []
   glow: Shape[] = []
   labels: Shape[] = []
+  faces = new Map<string, number>() // 主管的人物造型（同場不重複），沒有就照名字雜湊
   lit = false // true 時畫到 glow（夜裡在暗幕之上：螢幕、問號、火花）
   constructor(readonly night: boolean) {}
   private put(s: Shape) {
@@ -163,13 +164,6 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   const meetW = officeX - 2 * WALL
   p.sprite('calendar', WALL + 1, WALL + 0.6, 4.2)
   windows(p, WALL + 7, WALL + meetW - 1, frame)
-  // 時鐘掛在員工區看得到的那面牆（會議室門與隔牆之間，像範例圖掛在門上方）；太窄放不下就不掛
-  const room = officeX - WALL - (L.meetDoor + MEET_DOOR_W)
-  if (room >= 7) {
-    const kx = L.meetDoor + MEET_DOOR_W + (room - 6) / 2
-    p.rect(kx, WALL + TOP_H + 0.1, 6, 1.8, SW.ink, 0.2, SW.slate, 0.2)
-    p.glowing(() => p.text(kx + 3, WALL + TOP_H + 1.5, clock, 1.6, p.night ? SW.orange : SW.red, { anchor: 'middle', bold: true, mono: true }))
-  }
   windows(p, officeX + (plantInOffice ? 6 : 1), w - WALL - 1, frame, ['flagUS', 'picSunset'])
 
   // 門洞（地板色）＋門框
@@ -186,7 +180,7 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   if (L.meetDoor - WALL - 1 >= 7) p.text(WALL + 1, signY, '會議室', 1.7, SW.cyan, { bold: true })
 
   // 會議室椅子（長桌在 drawVector 裡、上排的人之後才畫）
-  for (const [i, s] of L.meet.entries()) p.sprite(CHAIRS[i % CHAIRS.length], s.x + 0.5 - 1.65, s.y + (i % 2 ? 0.8 : -1.2), 3.3, 6.6)
+  for (const [i, s] of L.meet.entries()) p.sprite(CHAIRS[i % CHAIRS.length], s.x + 0.5 - 1.65, s.y + (i % 2 ? -0.6 : -1.2), 3.3, 6.6) // 下排椅腳收在房間下緣 WALL+TOP_H，不伸進牆與門洞
 
   if (plantInOffice) plant(p, officeX + 1, WALL + 1)
   plant(p, WALL + 1, h - WALL - 7)
@@ -209,6 +203,14 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
     p.glowing(() => p.circle(qx + 1.5, qy + 0.8, 0.6, C.gold))
     p.spriteAt('paper2', qx + 4, qy - 0.4, 0.25)
     p.text(qx + COUNTER_W / 2, h - 0.4, 'YOU', 1.7, C.gold, { anchor: 'middle', bold: true })
+  }
+
+  // 時鐘掛在員工區看得到的那面牆（會議室門與隔牆之間，像範例圖掛在門上方）；最後畫，家具蓋不到；太窄放不下就不掛
+  const room = officeX - WALL - (L.meetDoor + MEET_DOOR_W)
+  if (room >= 7) {
+    const kx = L.meetDoor + MEET_DOOR_W + (room - 6) / 2
+    p.rect(kx, WALL + TOP_H + 0.1, 6, 1.8, SW.ink, 0.2, SW.slate, 0.2)
+    p.glowing(() => p.text(kx + 3, WALL + TOP_H + 1.5, clock, 1.6, p.night ? SW.orange : SW.red, { anchor: 'middle', bold: true, mono: true }))
   }
 }
 
@@ -285,7 +287,9 @@ export function lookOf(who: Pick<Coworker, 'name' | 'role'>): { person: number; 
  * done 跳高一點、error 左右抖＋冷汗、thinking 想法泡泡、waiting 問號、blocked 紅牌、reading 拿紙、idle 打瞌睡 z
  */
 function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false) {
-  const { person, shirt } = lookOf(who)
+  const look = lookOf(who)
+  const person = p.faces.get(who.id) ?? look.person
+  const shirt = look.shirt
   const mode = who.mode
   const shake = mode === 'error' ? (frame % 2 ? 0.4 : -0.4) : 0
   const bob = (mode === 'typing' || (walkStep !== undefined && walkStep !== 0)) && frame % 2 ? -PX : 0
@@ -349,7 +353,8 @@ function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number)
   p.sprite('table', x + 0.5, y + 5, 10)
   screen(p, x + 3, y + 8.6, 5, who ? who.mode : null, frame)
   const hh = hash(`${x},${y}`)
-  p.spriteAt(hh % 2 ? 'mug' : 'coffee', x + 8.4, y + 5.6 - (hh % 2 ? 0 : 1.2), 0.25)
+  const prop: SpriteId = hh % 2 ? 'mug' : 'coffee'
+  p.spriteAt(prop, x + 8.4, y + 5.95 - SPRITES[prop][3] * 0.25, 0.25) // 杯底在名牌框（y+6.1 起）上方，不壓名牌
   if (who) nameTag(p, x + 5.5, y + 7.7, who, 8.6, 'none')
 }
 
@@ -483,6 +488,15 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   // 主管的柯基：趴在主管室右下角
   p.spriteAt('corgi', width - WALL - 9.5, WALL + TOP_H - 4.2, 0.32)
 
+  // 主管都穿西裝，造型再撞就認不出誰是誰：依桌號從名字雜湊那個造型起找沒人用的
+  const used = new Set<number>()
+  for (const b of bosses.leads) {
+    let f = lookOf(b).person
+    for (let i = 0; i < PEOPLE && used.has(f); i++) f = (f + 1) % PEOPLE
+    used.add(f)
+    p.faces.set(b.id, f)
+  }
+
   const desks = [...placed].filter(([, pl]) => pl.kind === 'boss').sort((a, b) => a[1].slot - b[1].slot)
   const at = (id: string) => (!moving.has(id) ? byId.get(id) ?? null : null)
   if (desks.length <= 1) bossDesk(p, L.manager.x, L.manager.y, desks[0] ? at(desks[0][0]) : null, frame, bosses.extra)
@@ -506,28 +520,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     if (top) longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
   }
 
-  for (const [id, step] of moving) {
-    const who = byId.get(id)
-    if (!who) continue
-    const standing = queued.has(id) && !walkers.some(w => w.id === id)
-    figure(p, step.x + 0.5, step.y + 1.5, who, frame, standing ? 0 : frame % 2 ? 1 : -1)
-    const kind = errandOut.get(id) ?? (queued.has(id) ? 'mail' : undefined)
-    if (kind) carry(p, step, kind)
-    if (standing) nameTag(p, step.x + 0.5, step.y - 2.4, who, 8, C.white)
-  }
-
-  for (const nt of opts.notices ?? []) {
-    const pl = placed.get(nt.id)
-    if (pl && frame >= nt.start && frame < nt.end && frame % 2 === 0) {
-      p.rect(pl.stand.x + 3, pl.stand.y - 3, 3, 2, C.envelope, 0.2, C.envelopeLine, 0.15)
-      p.path(`M${pl.stand.x + 3} ${pl.stand.y - 3}l1.5 1 1.5 -1`, 'none', C.envelopeLine, 0.2)
-    }
-  }
-  for (const pl of opts.planes ?? []) {
-    const a = planePos(pl, frame)
-    if (a) p.path(`M${a.x + 0.5} ${a.y + 0.5}l${-a.dx * 2.6} -1.3 ${a.dx * 0.6} 1.3 ${-a.dx * 0.6} 1.3Z`, C.plane, C.planeFold, 0.2)
-  }
-
+  // 寵物先畫、走動與排隊的人後畫：窄面板排隊位置跟貓的路線重疊時人在前面（位置是跟 Raster 共用的計算，不改）
   const kind = opts.pet ?? 'cat'
   if (raid) {
     const lunge = raid.biting && frame % 2 ? (kind === 'baby' ? -1 : kind === 'bird' ? 0 : -2) : 0
@@ -553,6 +546,28 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
       else p.path(`M${bx} ${y0 + CAT_H - 2}h3l-0.5 1.6h-2Z`, C.heartBowl)
       hearts(p, x0 + CAT_W / 2, y0 - 1 - (Math.floor((frame - opts.treatFrame!) / 2) % 3))
     }
+  }
+
+  for (const [id, step] of moving) {
+    const who = byId.get(id)
+    if (!who) continue
+    const standing = queued.has(id) && !walkers.some(w => w.id === id)
+    figure(p, step.x + 0.5, step.y + 1.5, who, frame, standing ? 0 : frame % 2 ? 1 : -1)
+    const kind = errandOut.get(id) ?? (queued.has(id) ? 'mail' : undefined)
+    if (kind) carry(p, step, kind)
+    if (standing) nameTag(p, step.x + 0.5, step.y - 2.4, who, 8, C.white)
+  }
+
+  for (const nt of opts.notices ?? []) {
+    const pl = placed.get(nt.id)
+    if (pl && frame >= nt.start && frame < nt.end && frame % 2 === 0) {
+      p.rect(pl.stand.x + 3, pl.stand.y - 3, 3, 2, C.envelope, 0.2, C.envelopeLine, 0.15)
+      p.path(`M${pl.stand.x + 3} ${pl.stand.y - 3}l1.5 1 1.5 -1`, 'none', C.envelopeLine, 0.2)
+    }
+  }
+  for (const pl of opts.planes ?? []) {
+    const a = planePos(pl, frame)
+    if (a) p.path(`M${a.x + 0.5} ${a.y + 0.5}l${-a.dx * 2.6} -1.3 ${a.dx * 0.6} 1.3 ${-a.dx * 0.6} 1.3Z`, C.plane, C.planeFold, 0.2)
   }
 
   const extra = crew.length - placed.size - bosses.extra

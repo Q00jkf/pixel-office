@@ -193,3 +193,46 @@ test('the wall clock shows the time it is given', () => {
   expect(texts(drawVector([], 0, 112, 80, [], undefined, { clock: '09:41' }))).toContain('09:41')
   expect(texts(drawVector([], 0, 112, 80))).toContain('12:00')
 })
+
+// ---- 0.15.1：oftest E 期驗收 B1～B4 ----
+type Rect4 = { x: number; y: number; w: number; h: number }
+const spriteBox = (s: Sprite): Rect4 => ({ x: s.x, y: s.y, w: s.w, h: s.h })
+
+test('B1: meeting chairs stay inside the room and nothing covers the wall clock', () => {
+  for (const c of cases()) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    for (const ch of sprites(v).filter(s => s.id.startsWith('chair') && s.y < 22)) expect(ch.y + ch.h).toBeLessThanOrEqual(22 + 1e-9)
+    const all = v.shapes.concat(v.glow)
+    const i = all.findIndex(s => s.k === 'text' && s.text === '12:00')
+    if (i < 0) continue
+    const face = all[i - 1] as Extract<Shape, { k: 'rect' }> // 時鐘框就在數字前一筆
+    for (const s of all.slice(i + 1)) if (s.k === 'sprite' && hit(spriteBox(s), face)) throw new Error(`${c.name}: ${s.id} 蓋到時鐘`)
+    expect(all.slice(0, i - 1).filter((s): s is Sprite => s.k === 'sprite' && s.id.startsWith('chair')).some(s => hit(spriteBox(s), face))).toBe(false)
+  }
+})
+
+test('B2: cups on the desks stay clear of the nameplates', () => {
+  for (const c of cases()) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const cups = sprites(v).filter(s => s.id === 'mug' || s.id === 'coffee')
+    for (const t of nameTexts(v)) for (const m of cups) if (hit(box(t), spriteBox(m))) throw new Error(`${c.name}: ${m.id} × ${t.text}`)
+  }
+})
+
+test('B3: managers wear the suit but each has a different face', () => {
+  for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('night'))) {
+    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id).filter(id => id.endsWith('s7'))
+    expect(ids.length).toBeGreaterThan(0)
+    expect(new Set(ids).size).toBe(ids.length)
+  }
+})
+
+test('B4: people queuing at the counter are drawn in front of the pet', () => {
+  for (const c of cases().filter(c => c.name.startsWith('max'))) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const order = v.shapes.map(s => (s.k === 'sprite' ? s.id : ''))
+    const queueIds = new Set(['s6', 's14'].map(id => lookOf(c.crew.find(x => x.id === id)!)).map(l => `p${l.person}s${l.shirt}`))
+    expect(order.indexOf('cat')).toBeGreaterThanOrEqual(0)
+    expect(order.findLastIndex(id => queueIds.has(id))).toBeGreaterThan(order.indexOf('cat'))
+  }
+})
