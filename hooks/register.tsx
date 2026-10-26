@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
 import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
-import { drawVector, vectorSvg, type Furniture, type Hit } from './vector'
+import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
@@ -258,24 +258,21 @@ export function menuFor(object: Furniture, mine: CustomButton[]): { label: strin
   return own.length > 0 ? own.map(b => ({ label: b.label, prompt: b.prompt! })) : MENUS[object]
 }
 
-/**
- * 場景單位 → 面板字元格（疊按鈕用）。終端機 Raster 一格＝1 單位寬、2 單位高（精確）；
- * Desktop 的 Svg 撐滿面板寬：一欄＝1 單位、一列＝2.5 單位（2026-10-27 Desktop 實測，office-calib 0.0.2，四個十字都對準）。
- * k＝面板欄數／場景寬：場景比面板寬（Svg 被縮小）或窄（被放大）時，一單位就不是一欄，乘上 k 換算
- */
-export const CELL_UNITS = { terminal: { col: 1, row: 2 }, desktop: { col: 1, row: 2.5 } }
-export function cellAt(x: number, y: number, surface: 'terminal' | 'desktop', k = 1): { top: number; left: number } {
-  const u = CELL_UNITS[surface]
-  return { top: Math.max(0, Math.floor((y * k) / u.row)), left: Math.max(0, Math.floor((x * k) / u.col)) }
-}
+export { CELL_UNITS, cellAt, menuPlace } from './vector'
 /** 終端機的按鈕放在東西的中心，往左挪 1 格讓 1～2 格寬的符號置中 */
 export const hitCell = (h: Hit, surface: 'terminal' | 'desktop', k = 1) => cellAt(h.x + h.w / 2 - 1, h.y + h.h / 2, surface, k)
 /** 終端機的 Raster 沒畫柯基、販賣機，月曆與時鐘也不在同一個位置 → 這幾樣只在 Desktop 點得到 */
 export const terminalHits = (hits: Hit[]) => hits.filter(h => !['corgi', 'vending', 'calendar', 'clock'].includes(h.what))
+const terminalScene = (v: { hits: Hit[]; avoid: Rect[] }) => {
+  lastAvoid = v.avoid
+  return (lastHits = terminalHits(v.hits))
+}
 
 let openMenu: Furniture | null = null // 同時只開一個選單
 let corgiFed: number | undefined
 let lastHits: Hit[] = []
+let lastAvoid: Rect[] = []
+let petNote: { text: string; until: number } | undefined // 終端機看不到 toast：點寵物的結果在按鈕列留一行，約 5 秒
 let petCell = '' // 終端機：寵物按鈕上次畫在哪一格；換格才重畫整個面板（Raster 平時只 blit）
 
 /** 點寵物：停著（正在吃、坐著）→ 換下一隻；走動中 → 貓與寶寶餵、山雀放飛 */
@@ -301,7 +298,12 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
   const out = hits.map(hit => { // 不能叫 h：JSX 編譯成 h(...)
     const press =
       hit.what === 'pet'
-        ? () => void pressPet($).then(t => $.ui.toast(t))
+        ? () =>
+            void pressPet($).then(t => {
+              $.ui.toast(t)
+              petNote = { text: t, until: frame + 20 }
+              $.ui.invalidate('ui.render')
+            })
         : hit.what === 'corgi'
           ? () => {
               corgiFed = frame
@@ -330,15 +332,14 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
   const open = openMenu ? hits.find(h => h.what === openMenu) : undefined
   if (open && openMenu) {
     const items = menuFor(openMenu, mine)
-    const at = cellAt(open.x, open.y, surface, k)
-    const right = cellAt(sceneW, 0, surface, k).left
-    const left = at.left + Math.ceil(open.w * k) + 18 > right ? Math.max(0, at.left - 18) : at.left + Math.ceil(open.w * k) + 1
+    const others = [...hits.filter(h => h !== open), ...lastAvoid]
+    const at = menuPlace(open, [...items.map(i => i.label), '取消'], others, surface, k, sceneW)
     const close = () => {
       openMenu = null
       $.ui.invalidate('ui.render')
     }
     out.push(
-      <Box key="menu" position="absolute" top={Math.max(0, at.top - items.length)} left={left} flexDirection="column">
+      <Box key="menu" position="absolute" top={at.top} left={at.left} flexDirection="column">
         {items.map((it, i) => (
           <Button
             key={`menu-${i}`}
@@ -1242,7 +1243,7 @@ export const register: Register = on => {
         // 寵物按鈕要跟著寵物：Raster 只 blit 不重畫，寵物換格才請面板重畫一次
         const hit = drawVector(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts()).hits.find(h => h.what === 'pet')
         const cell = hit ? JSON.stringify(hitCell(hit, 'terminal')) : ''
-        if (cell !== petCell) {
+        if (cell !== petCell || frame === petNote?.until) {
           petCell = cell
           $.ui.invalidate('ui.render')
         }
@@ -1560,6 +1561,7 @@ export const register: Register = on => {
         const v = drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock, corgiFed }) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
         svg = vectorSvg(v)
         lastHits = v.hits
+        lastAvoid = v.avoid
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
@@ -1607,7 +1609,7 @@ export const register: Register = on => {
         {approvalRows($, $.ui.resolve(e) as Record<string, any>, now)}
         <Box key="stage">
           <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
-          {overlay($, $.ui.resolve(e) as Record<string, any>, (lastHits = terminalHits(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()).hits)), 'terminal', mine, width, 1)}
+          {overlay($, $.ui.resolve(e) as Record<string, any>, terminalScene(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts())), 'terminal', mine, width, 1)}
         </Box>
         {/* 預留列：放個人按鈕（~/.claude/pixel-office/buttons.json），沒有就空一列 */}
         {row.length > 0 ? (
@@ -1627,6 +1629,7 @@ export const register: Register = on => {
         )}
         <Box flexDirection="row">
           <Button key="night" label={nightMode ? '開燈' : '夜間模式'} hotkey="n" onPress={toggleNight} />
+          {petNote && frame < petNote.until ? <Text dimColor>{`  ${petNote.text}`}</Text> : null}
         </Box>
       </Box>
     )

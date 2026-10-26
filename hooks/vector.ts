@@ -26,10 +26,15 @@ export type Shape =
 
 /** 點得到的東西（場景單位的框）：家具開選單、寵物與柯基點了有反應；畫面疊按鈕時照這裡放 */
 export type Furniture = 'printer' | 'cabinet' | 'mailbox' | 'calendar' | 'vending' | 'clock' | 'meeting'
-export type Hit = { what: Furniture | 'pet' | 'corgi'; x: number; y: number; w: number; h: number; sitting?: boolean }
+export type Rect = { x: number; y: number; w: number; h: number }
+/** room＝這件東西所在的房間（選單不能跨出去，例如會議室的選單不壓主管室） */
+export type Hit = Rect & { what: Furniture | 'pet' | 'corgi'; sitting?: boolean; room?: Rect }
 
-/** shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它）；hits＝點得到的東西 */
-export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[]; hits: Hit[] }
+/**
+ * shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它）；
+ * hits＝點得到的東西；avoid＝走動與排隊的人（選單盡量別蓋到）
+ */
+export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[]; hits: Hit[]; avoid: Rect[] }
 
 /** 素材的 Sweetie 16 色盤：自己畫的牆、地板、螢幕框跟素材同色，才不會一眼看出是兩套 */
 const SW = {
@@ -79,6 +84,7 @@ class Pen {
   glow: Shape[] = []
   labels: Shape[] = []
   hits: Hit[] = []
+  avoid: Rect[] = []
   faces = new Map<string, number>() // 主管的人物造型（同場不重複），沒有就照名字雜湊
   lit = false // true 時畫到 glow（夜裡在暗幕之上：螢幕、問號、火花）
   constructor(readonly night: boolean) {}
@@ -559,6 +565,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     if (!who) continue
     const standing = queued.has(id) && !walkers.some(w => w.id === id)
     figure(p, step.x + 0.5, step.y + 1.5, who, frame, standing ? 0 : frame % 2 ? 1 : -1, false, step.dx)
+    p.avoid.push({ x: step.x - 3.5, y: step.y - 4.5, w: 9, h: 11 }) // 人＋頭上名牌
     const kind = errandOut.get(id) ?? (queued.has(id) ? 'mail' : undefined)
     if (kind) carry(p, step, kind)
     if (standing) nameTag(p, step.x + 0.5, step.y - 2.4, who, 8, C.white)
@@ -578,8 +585,56 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
 
   const extra = crew.length - placed.size - bosses.extra
   if (extra > 0) p.text(WALL + 0.5, 1.6, `+${extra}`, 1.8, C.white, { bold: true })
-  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels, hits: p.hits }
+  // 每件東西所在的房間：上排會議室／主管室，其餘是員工區＋走廊
+  const top = WALL + TOP_H
+  const meetRoom = { x: WALL, y: WALL, w: L.officeX - 2 * WALL, h: TOP_H }
+  const bossRoom = { x: L.officeX, y: WALL, w: width - WALL - L.officeX, h: TOP_H }
+  const floor = { x: WALL, y: top + WALL, w: width - 2 * WALL, h: L.h - top - 2 * WALL }
+  for (const hit of p.hits) hit.room = hit.y + hit.h / 2 < top ? (hit.x < L.officeX ? meetRoom : bossRoom) : floor
+  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels, hits: p.hits, avoid: p.avoid }
 }
+
+// ---------- 點擊：場景單位 → 面板字元格（register.tsx 疊按鈕與選單用） ----------
+
+/**
+ * 場景單位 → 面板字元格（疊按鈕用）。終端機 Raster 一格＝1 單位寬、2 單位高（精確）；
+ * Desktop 的 Svg 撐滿面板寬：一欄＝1 單位、一列＝2.5 單位（2026-10-27 Desktop 實測，office-calib 0.0.2，四個十字都對準）。
+ * k＝面板欄數／場景寬：場景比面板寬（Svg 被縮小）或窄（被放大）時，一單位就不是一欄，乘上 k 換算
+ */
+export const CELL_UNITS = { terminal: { col: 1, row: 2 }, desktop: { col: 1, row: 2.5 } }
+export function cellAt(x: number, y: number, surface: 'terminal' | 'desktop', k = 1): { top: number; left: number } {
+  const u = CELL_UNITS[surface]
+  return { top: Math.max(0, Math.floor((y * k) / u.row)), left: Math.max(0, Math.floor((x * k) / u.col)) }
+}
+/** 字元格寬：中日韓全形字 2 格 */
+export const cellWidth = (t: string) => [...t].reduce((n, ch) => n + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1), 0)
+
+/**
+ * 選單放哪（字元格）：依序試家具的右、左、上、下，選單要整個留在家具所在的房間（會議室的選單不壓主管室），
+ * 先挑不蓋到其他點得到的東西與走動、排隊的人的那一側；每一側都會蓋到就挑蓋最少的。按鈕寬＝字寬＋4（含框）
+ */
+export function menuPlace(it: Hit, labels: string[], others: Rect[], surface: 'terminal' | 'desktop', k: number, sceneW: number): { top: number; left: number } {
+  const u = CELL_UNITS[surface]
+  const box = (r: Rect) => ({ t: Math.floor((r.y * k) / u.row), l: Math.floor((r.x * k) / u.col), b: Math.ceil(((r.y + r.h) * k) / u.row), r: Math.ceil(((r.x + r.w) * k) / u.col) })
+  const I = box(it)
+  const R = box(it.room ?? { x: 0, y: 0, w: sceneW, h: it.y + it.h })
+  const cw = Math.max(...labels.map(cellWidth)) + 4
+  const ch = labels.length
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
+  const sideTop = clamp(I.b - ch, R.t, R.b - ch)
+  const midLeft = clamp(I.l, R.l, R.r - cw)
+  const tries = [
+    { top: sideTop, left: I.r + 1 },
+    { top: sideTop, left: I.l - 1 - cw },
+    { top: I.t - ch, left: midLeft },
+    { top: I.b, left: midLeft },
+  ]
+  const fits = tries.filter(m => m.left >= R.l && m.left + cw <= R.r && m.top >= R.t && m.top + ch <= R.b)
+  const hits = (m: { top: number; left: number }) => others.map(box).filter(o => o.l < m.left + cw && m.left < o.r && o.t < m.top + ch && m.top < o.b).length
+  const best = fits.reduce<{ top: number; left: number } | undefined>((a, m) => (a === undefined || hits(m) < hits(a) ? m : a), undefined)
+  return best ?? { top: Math.max(0, I.t - ch), left: clamp(I.l, 0, Math.max(0, R.r - cw)) }
+}
+
 
 // ---------- SVG ----------
 

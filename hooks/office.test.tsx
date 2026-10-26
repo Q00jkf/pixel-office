@@ -1928,7 +1928,7 @@ test('the Allow label is as wide while cooling down as when ready, so Deny never
 
 // ---------- 0.16.0：點寵物、點家具開選單 ----------
 
-import { FURNITURE, MENUS, cellAt, menuFor } from './register'
+import { FURNITURE, MENUS, cellAt, menuFor, menuPlace } from './register'
 
 const DESKTOP = (bodyColumns = 112, bodyRows = 80) =>
   ({
@@ -2054,5 +2054,67 @@ test('terminal: the pet, printer, cabinet, mailbox and meeting table get a one-c
   for (const k of ['hit-corgi', 'hit-vending', 'hit-clock', 'hit-calendar']) expect(await ui.find({ key: k })).toBeUndefined()
   await ui.press({ key: 'hit-mailbox' })
   expect((await ui.find({ key: 'menu-0' }))?.text).toBe('狀態')
+  await ui.unmount()
+})
+
+// ---------- 0.16.1：選單挑放得下、不蓋別的東西的那一側；終端機點寵物留一行 ----------
+
+import { cases } from './scenarios'
+import { cellWidth, drawVector, type Rect } from './vector'
+
+const MENU_LABELS = (f: keyof typeof MENUS) => [...MENUS[f].map(i => i.label), '取消']
+const cellBox = (r: Rect, row: number) => ({ t: Math.floor(r.y / row), l: Math.floor(r.x), b: Math.ceil((r.y + r.h) / row), r: Math.ceil(r.x + r.w) })
+
+test('menus open inside the room of the furniture and avoid other clickable things and standing people, on every case and both surfaces', () => {
+  for (const c of cases()) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    for (const surface of ['desktop', 'terminal'] as const) {
+      const row = surface === 'desktop' ? 2.5 : 2
+      for (const it of v.hits) {
+        if (it.what === 'pet' || it.what === 'corgi') continue
+        const labels = MENU_LABELS(it.what)
+        const at = menuPlace(it, labels, [...v.hits.filter(h => h !== it), ...v.avoid], surface, 1, c.width)
+        const cw = Math.max(...labels.map(cellWidth)) + 4
+        const R = cellBox(it.room!, row)
+        const where = `${c.name} ${surface} ${it.what}`
+        expect({ where, ok: at.left >= R.l && at.left + cw <= R.r && at.top >= R.t && at.top + labels.length <= R.b }).toEqual({ where, ok: true })
+      }
+    }
+  }
+})
+
+test('48 columns: the printer menu covers no other clickable thing nor the queue (oftest G1)', () => {
+  for (const name of ['max-48-7', 'max-48-0', 'bird-48-7']) {
+    const c = cases().find(k => k.name === name)!
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const pr = v.hits.find(h => h.what === 'printer')!
+    const labels = MENU_LABELS('printer')
+    const others = [...v.hits.filter(h => h !== pr), ...v.avoid]
+    const at = menuPlace(pr, labels, others, 'desktop', 1, c.width)
+    const cw = Math.max(...labels.map(cellWidth)) + 4
+    const over = others.map(o => cellBox(o, 2.5)).filter(o => o.l < at.left + cw && at.left < o.r && o.t < at.top + labels.length && at.top < o.b)
+    expect({ name, over: over.length }).toEqual({ name, over: 0 })
+  }
+})
+
+test('the meeting menu stays in the meeting room (no longer over the manager room frame)', () => {
+  for (const c of cases()) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const m = v.hits.find(h => h.what === 'meeting')
+    if (!m) continue
+    const boss = v.hits.find(h => h.what === 'corgi')!.room!
+    const at = menuPlace(m, MENU_LABELS('meeting'), [], 'terminal', 1, c.width)
+    expect(at.left + Math.max(...MENU_LABELS('meeting').map(cellWidth)) + 4).toBeLessThanOrEqual(Math.floor(boss.x))
+  }
+})
+
+test('terminal: clicking the pet leaves a line in the button row for about 5 s (the terminal may not show toasts)', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await ui.press({ key: 'hit-pet' })
+  await new Promise(r => setTimeout(r, 20))
+  const note = await ui.find({ type: 'Text', text: /餵|換|小寶寶|山雀|貓/ })
+  expect(note).toBeDefined()
   await ui.unmount()
 })
