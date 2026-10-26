@@ -62,11 +62,13 @@ test('nameplates: me marked >, manager in the office with a gold *, staff on des
   expect(cellText(encode(drawScene(many, 0, 48, 32)), 48, 32)[0]).toContain('+2')
 })
 
-test('a second manager sits in the open area but keeps the *', () => {
+test('a manager who finds no desk is counted as +N on the boss plate, not seated among staff (0.12.0)', () => {
   const crew = [P('m1', 'boss', 'idle', false, 'manager'), P('m2', 'vice', 'idle', false, 'manager')]
-  const text = cellText(encode(drawScene(crew, 0, 48, 32)), 48, 32).join('\n')
-  expect(text).toContain('*boss')
-  expect(text).toContain('*vice')
+  const lines = cellText(encode(drawScene(crew, 0, 48, 32)), 48, 32)
+  const text = lines.join('\n')
+  expect(text).toContain('+1*boss') // 48 寬主管室只放得下一張桌
+  expect(text).not.toContain('vice')
+  expect(lines[0]).not.toContain('+1') // 左上角的 +N 不重複算
 })
 
 test('scene encodes to width x rows cells for every size and mode', () => {
@@ -1349,4 +1351,101 @@ test('an error stays visible in the roster after the turn ends (error → done �
   expect(done).toContain('剛完成，等輸入・上次出錯 3 分前：Exit code 1')
   expect(idle).toContain('等輸入（2 分）・上次出錯 3 分前：Exit code 1')
   expect(roster([{ ...P('a', 'x', 'idle'), lastError: { ...lastError, at: 0 } }], NOW)).not.toContain('上次出錯') // 10 分鐘後收掉
+})
+
+// ---------- 0.12.0：多主管、各主管 peer 區、櫃台 ----------
+
+import { bossSeating, counterSpot, teamZones } from './scene'
+
+const boss = (id: string, name: string, agent: string): Coworker => ({ ...P(id, name, 'idle', false, 'manager'), agent })
+
+test('the manager office holds up to 3 desks at full width, 2 at 90 columns, 1 when narrow; the 4th manager is +1', () => {
+  expect(layout(112, 60).bossDesks).toHaveLength(3)
+  expect(layout(90, 60).bossDesks).toHaveLength(2)
+  expect(layout(60, 44).bossDesks).toHaveLength(1)
+  const four = [boss('a', 'aa', 'm-a'), boss('b', 'bb', 'm-b'), boss('c', 'cc', 'm-c'), boss('d', 'dd', 'm-d')]
+  const L = layout(112, 60)
+  const lines = cellText(encode(drawScene(four, 0, 112, 60)), 112, 60)
+  const plates = lines[4]
+  expect(plates.slice(L.officeX)).toContain('*aa')
+  expect(plates).toContain('*bb')
+  expect(plates).toContain('+1*') // 最後一張桌（最左）帶 +1
+  expect(lines.join('\n')).not.toContain('dd')
+  expect(bossSeating(four, 112, 60).extra).toBe(1)
+  // 每張桌在主管室裡、彼此不重疊、不碰盆栽
+  const xs = L.bossDesks.map(d => d.x).sort((a, b) => a - b)
+  expect(xs[0]).toBeGreaterThanOrEqual(L.officeX + 6)
+  for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[0 + i - 1]).toBeGreaterThanOrEqual(10)
+})
+
+test('a second manager arriving does not make the first one get up (same stand), and seats stay sticky', () => {
+  const a = boss('a', 'aa', 'm-a')
+  const one = assignSeats([a], 112, 60)
+  const two = assignSeats([a, boss('b', 'bb', 'm-b')], 112, 60, one)
+  expect(two.get('a')!.slot).toBe(one.get('a')!.slot)
+  expect(two.get('a')!.stand).toEqual(one.get('a')!.stand)
+  const again = assignSeats([boss('0', 'zz', 'm-0'), a, boss('b', 'bb', 'm-b')], 112, 60, two)
+  expect(again.get('a')!.slot).toBe(two.get('a')!.slot) // 新來的人不搶舊位子
+  expect(again.get('b')!.slot).toBe(two.get('b')!.slot)
+})
+
+test('each manager with peers online gets a column of their own, rightmost first, with its own rug and TEAM sign', () => {
+  const a = boss('a', 'aa', 'm-a')
+  const b = boss('b', 'bb', 'm-b')
+  const crew = [a, b, { ...P('p1', 'p1'), team: 'm-a' }, { ...P('p2', 'p2'), team: 'm-b' }, { ...P('p3', 'p3'), team: 'bb' }, P('o', 'o')]
+  const L = layout(112, 60)
+  expect(L.cols).toBe(3)
+  const colOf = (x: number) => L.clusters.findIndex((k, i) => i < L.cols && x >= k.x && x < k.x + 23)
+  const seats = assignSeats(crew, 112, 60)
+  expect(colOf(seats.get('p1')!.seat.x)).toBe(2) // 第一位主管：最右欄
+  expect(colOf(seats.get('p2')!.seat.x)).toBe(1)
+  expect(colOf(seats.get('p3')!.seat.x)).toBe(1) // team 填名牌也算
+  expect(colOf(seats.get('o')!.seat.x)).toBe(0) // 沒有 team 的人坐一般區
+  const scene = drawScene(crew, 0, 112, 60)
+  const px = [...scene.px]
+  expect(px.some(c => c === 0xeadfc8)).toBe(true) // 金邊（第一位）
+  expect(px.some(c => c === 0xdbe7ef)).toBe(true) // 藍（第二位）
+  const text = cellText(encode(scene), 112, 60).join('\n')
+  expect(text).toContain('TEAM aa')
+  expect(text).toContain('TEAM bb')
+})
+
+test('with several managers only those with peers get a zone; one column is always left for everyone else', () => {
+  const a = boss('a', 'aa', 'm-a')
+  const b = boss('b', 'bb', 'm-b')
+  const c = boss('c', 'cc', 'm-c')
+  expect(teamZones([a], [a], 2).map(m => m.id)).toEqual(['a']) // 一位主管：照舊，沒有 peer 也鋪
+  expect(teamZones([a, b], [a, b, { ...P('p', 'p'), team: 'm-b' }], 3).map(m => m.id)).toEqual(['b'])
+  const all = [a, b, c, ...['m-a', 'm-b', 'm-c'].map((t, i) => ({ ...P(`p${i}`, `p${i}`), team: t }))]
+  expect(teamZones([a, b, c], all, 3).map(m => m.id)).toEqual(['a', 'b']) // 3 欄最多 2 區
+  expect(teamZones([a, b], all, 1)).toEqual([])
+})
+
+test('walking from every manager desk to every seat never enters a wall (three managers)', () => {
+  const w = 112, r = 60
+  const L = layout(w, r)
+  const crew = [boss('a', 'aa', 'm-a'), boss('b', 'bb', 'm-b'), boss('c', 'cc', 'm-c'), ...L.seats.slice(0, 6).map((_, i) => P(`s${i}`, `s${i}`))]
+  const placed = [...assignSeats(crew, w, r).values()]
+  for (const a of placed.filter(p => p.kind === 'boss')) {
+    for (const b of placed) {
+      if (a === b) continue
+      for (const pt of route(a, b, w, r)) expect(pt.x >= 2 + 3 && pt.x <= w - 2 - 4).toBe(true)
+    }
+  }
+})
+
+test('the counter sits right of the front door when there is room, labelled YOU on the wall, never over the copier', () => {
+  expect(counterSpot(48, 44)).toBeUndefined()
+  for (const w of [60, 80, 112]) {
+    const spot = counterSpot(w, 44)!
+    expect(spot).toBeDefined()
+    const qx = spot.x - 3
+    const door = [Math.floor(w / 2) - 3, Math.floor(w / 2) + 2]
+    const cp = [w - 2 - 16, w - 2 - 16 + 7]
+    expect(qx).toBeGreaterThan(door[1])
+    expect(qx + 7 - 1).toBeLessThan(cp[0])
+    const text = cellText(encode(drawScene([], 0, w, 44)), w, 44)
+    expect(text[43].slice(qx, qx + 3)).toBe('YOU')
+  }
+  expect(cellText(encode(drawScene([], 0, 48, 44)), 48, 44).join('\n')).not.toContain('YOU')
 })
