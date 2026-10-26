@@ -1522,9 +1522,9 @@ test('at 60~80 columns two managers each with peers get two zones when nobody is
 
 // ---------- 點人核准（控制塔第 1 期）----------
 
-import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalText, canon, judgeDecision, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
+import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalText, canon, judgeDecision, textHash, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
 
-const WANT = { session: 's1', toolUseId: 'toolu_1', nonce: 'n-1' }
+const WANT = { session: 's1', toolUseId: 'toolu_1', nonce: 'n-1', textHash: 'h-1' }
 const decided = (over: Record<string, unknown> = {}) => JSON.stringify({ state: 'decided', ...WANT, behavior: 'allow', at: 1, ...over })
 
 test('approval text: Bash/PowerShell show the command, other tools the whole input; Allow only when it all fits', () => {
@@ -1556,6 +1556,8 @@ test('a decision is taken only when session, toolUseId and nonce all match; tomb
   expect(judgeDecision(decided({ nonce: 'n-2' }), WANT)).toEqual({ kind: 'mismatch', why: 'nonce' })
   expect(judgeDecision(decided({ toolUseId: 'toolu_0' }), WANT)).toEqual({ kind: 'mismatch', why: 'toolUseId' })
   expect(judgeDecision(decided({ session: 's2' }), WANT)).toEqual({ kind: 'mismatch', why: 'session' })
+  expect(judgeDecision(decided({ textHash: 'h-other' }), WANT)).toEqual({ kind: 'mismatch', why: 'textHash' }) // 單上的指令被換過
+  expect(judgeDecision(decided({ textHash: undefined }), WANT)).toEqual({ kind: 'mismatch', why: 'textHash' })
   expect(judgeDecision(decided({ behavior: 'always' }), WANT)).toEqual({ kind: 'corrupt' }) // 只有 allow／deny
 })
 
@@ -1672,13 +1674,14 @@ const slipIO = (files: Record<string, string>, opts: { settledAt?: number } = {}
 }
 
 test('a slip: old decision cleared before sending, guessed nonce discarded, the real one taken; afterwards both files are tombstones', async () => {
-  const files: Record<string, string> = { decision: decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce' }) } // 上一輪殘檔，剛好長得一樣也不能被採用
+  const h = await textHash('git push --force')
+  const files: Record<string, string> = { decision: decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h }) } // 上一輪殘檔，剛好長得一樣也不能被採用
   const f = slipIO(files)
   let step = 0
   f.onTick(() => {
     step += 1
-    if (step === 1) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'guess' })
-    if (step === 3) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', behavior: 'deny' })
+    if (step === 1) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'guess', textHash: h })
+    if (step === 3) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h, behavior: 'deny' })
   })
   const got = await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'git push --force')
   expect(got).toBe('deny')
@@ -1691,13 +1694,14 @@ test('a slip: old decision cleared before sending, guessed nonce discarded, the 
 })
 
 test('a slip times out after 120 s with no answer, or stops as soon as the terminal answers; tombstones either way', async () => {
+  const h = await textHash('ls')
   const quiet: Record<string, string> = {}
   expect(await runSlip(slipIO(quiet).io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
   expect(quiet.slip).toBe(TOMBSTONE)
   const files: Record<string, string> = {}
   const f = slipIO(files, { settledAt: 1_000_000 + 600 })
   f.onTick(t => {
-    if (t > 1_000_000 + 900) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce' })
+    if (t > 1_000_000 + 900) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h })
   })
   expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
   expect(files.decision).toBe(TOMBSTONE)
@@ -1725,7 +1729,7 @@ test('office pane: lists the slip, Allow is held for 1 s after opening, then wri
   expect(writes.some(w => w.path === 'decisions/bbbb.json')).toBe(false)
   await clock.advance(ALLOW_COOLDOWN_MS)
   await ui.press({ key: 'approval-allow' })
-  expect(JSON.parse(files['decisions/bbbb.json'])).toMatchObject({ state: 'decided', session: 'bbbb', toolUseId: 'toolu_5', nonce: 'nn', behavior: 'allow' })
+  expect(JSON.parse(files['decisions/bbbb.json'])).toMatchObject({ state: 'decided', session: 'bbbb', toolUseId: 'toolu_5', nonce: 'nn', textHash: await textHash('git push'), behavior: 'allow' })
   await ui.unmount()
 })
 
@@ -1790,4 +1794,43 @@ test('the roster says the office pane can answer a waiting session', () => {
   const c = { ...P('w', 'w', 'waiting'), tool: 'Bash', since: 1000, approval: { tool: 'Bash', at: 1000 } }
   expect(roster([c], 5000)).toContain('辦公室面板可審')
   expect(roster([{ ...c, approval: undefined }], 5000)).not.toContain('辦公室面板可審')
+})
+
+test('a decision for swapped command text is not taken: same toolUseId and nonce, but the hash is of what the viewer saw', async () => {
+  expect(await textHash('ls')).toMatch(/^[0-9a-f]{64}$/)
+  expect(await textHash('ls')).not.toBe(await textHash('rm -rf ~'))
+  // 等的人要跑 rm -rf ~；有人把單上的 text 換成 ls，使用者看到 ls 按了 Allow → 決定帶的是 ls 的 hash
+  const files: Record<string, string> = {}
+  const f = slipIO(files)
+  const seen = await textHash('ls')
+  let step = 0
+  const logs: string[] = []
+  f.io.log = (x: string) => void logs.push(x)
+  f.onTick(() => {
+    step += 1
+    if (step === 1) files.decision = decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: seen })
+  })
+  expect(await runSlip({ ...f.io, now: f.io.now } as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'rm -rf ~')).toBeUndefined() // 丟棄後等到逾時
+  expect(logs.some(l => l.includes('textHash'))).toBe(true)
+})
+
+test('office pane: if the slip text changes after opening (same toolUseId and nonce), Allow sends nothing', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'rm -rf ~', nonce: 'nn', at: NOW }
+  const files: Record<string, string> = {
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
+    'approvals/bbbb.json': JSON.stringify(slip),
+  }
+  officeFs(on, files)
+  on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await $.command.run({ command: 'office', args: '' } as any)
+  await ui.press({ key: 'review-bbbb' })
+  await clock.advance(ALLOW_COOLDOWN_MS)
+  files['approvals/bbbb.json'] = JSON.stringify({ ...slip, text: 'ls' }) // 展開後被換字
+  await ui.press({ key: 'approval-allow' }) // 按下時重讀：跟展開時看到的不同 → 不送
+  expect(files['decisions/bbbb.json']).toBeUndefined()
+  await ui.unmount()
 })

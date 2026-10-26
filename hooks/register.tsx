@@ -719,7 +719,7 @@ async function noteSessionTitle($: EngineInterface, e: unknown) {
 
 // ---------- 點人核准（控制塔第 1 期）----------
 // 等核准的 session 把單寫到 approvals/<session>.json；開著辦公室面板的視窗顯示「審 <名牌>」，
-// 使用者點 Allow／Deny 才寫 decisions/<session>.json；等的那方比對 session＋toolUseId＋nonce 全對才採用。
+// 使用者點 Allow／Deny 才寫 decisions/<session>.json；等的那方比對 session＋toolUseId＋nonce＋自己手上指令的 hash 全對才採用。
 // 終端機原本的詢問照常同時出現，誰先按算誰的；逾時、沒人開辦公室、檔案壞掉 → 不回答，交回終端機。
 // $.fs 沒有刪檔：處理完覆寫成不含指令內容的墓碑，逾時的一律當不存在（主管 office 2026-10-26 裁示）。
 
@@ -733,7 +733,13 @@ export const TOMBSTONE = JSON.stringify({ state: 'done' })
 
 export type ApprovalRecord = { state: 'waiting'; session: string; name: string; toolUseId: string; tool: string; text: string; nonce: string; at: number }
 export type Ask = { toolUseId: string; tool: string; input: string; at: number }
-type Want = { session: string; toolUseId: string; nonce: string }
+type Want = { session: string; toolUseId: string; nonce: string; textHash: string }
+
+/** 指令全文的 SHA-256：決定綁在使用者看到的那段文字上，單上的 text 被換掉就對不上（主管 office 2026-10-26 裁示） */
+export async function textHash(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
 
 const officeRoot = (sessionsDir: string) => sessionsDir.replace(/\/sessions$/, '')
 const approvalFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/approvals/${sid}.json`
@@ -766,7 +772,7 @@ export function matchAsk(list: Ask[], tool: string, input: string, now: number):
   return hits.length === 1 ? hits[0].toolUseId : undefined
 }
 
-/** 讀到的決定檔：沒有／墓碑＝none；三項有一項不符＝mismatch（丟棄）；壞檔＝corrupt（不回答） */
+/** 讀到的決定檔：沒有／墓碑＝none；四項（session、toolUseId、nonce、指令 hash）有一項不符＝mismatch（丟棄）；壞檔＝corrupt（不回答） */
 export function judgeDecision(raw: string | undefined, want: Want): { kind: 'none' } | { kind: 'corrupt' } | { kind: 'mismatch'; why: string } | { kind: 'ok'; behavior: 'allow' | 'deny' } {
   if (raw === undefined || raw.trim() === '') return { kind: 'none' }
   let d: Record<string, unknown>
@@ -777,7 +783,7 @@ export function judgeDecision(raw: string | undefined, want: Want): { kind: 'non
   }
   if (!d || typeof d !== 'object') return { kind: 'corrupt' }
   if (d.state !== 'decided') return { kind: 'none' }
-  for (const k of ['session', 'toolUseId', 'nonce'] as const) if (d[k] !== want[k]) return { kind: 'mismatch', why: k }
+  for (const k of ['session', 'toolUseId', 'nonce', 'textHash'] as const) if (d[k] !== want[k]) return { kind: 'mismatch', why: k }
   return d.behavior === 'allow' || d.behavior === 'deny' ? { kind: 'ok', behavior: d.behavior } : { kind: 'corrupt' }
 }
 
@@ -794,7 +800,7 @@ export function parseApproval(raw: string | undefined, now: number): ApprovalRec
 
 export type WaitIO = { read: () => Promise<string | undefined>; discard: () => Promise<void>; now: () => Promise<number>; sleep: (ms: number) => Promise<void>; settled: () => boolean; log: (text: string) => void }
 
-/** 等決定：採用三項全對的；不符的丟棄並記一行；壞檔、逾時、終端機先結案 → undefined（不回答） */
+/** 等決定：採用四項全對的；不符的丟棄並記一行；壞檔、逾時、終端機先結案 → undefined（不回答） */
 export async function waitForDecision(io: WaitIO, want: Want, start: number): Promise<'allow' | 'deny' | undefined> {
   while (!io.settled()) {
     if ((await io.now()) - start >= APPROVAL_TIMEOUT_MS) return undefined
@@ -819,7 +825,7 @@ export const officeWatched = (list: Coworker[]) => list.some(c => c.office === t
 const asks: Ask[] = [] // 最近判定 ask 的工具呼叫（tool.check 記，PermissionRequest 對）
 const settled = new Set<string>() // 已在別處結案的 toolUseId：終端機先按、指令跑完、被拒
 let pending: ApprovalRecord[] = [] // 辦公室裡等人審的單（開著面板的視窗才讀）
-let reviewing: (Want & { openedAt: number }) | undefined // 面板上展開的那一張
+let reviewing: { session: string; toolUseId: string; nonce: string; text: string; openedAt: number } | undefined // 面板上展開的那一張（text＝使用者看到的全文）
 
 function settle(e: unknown) {
   const id = (e as { tool_use_id?: unknown }).tool_use_id
@@ -841,9 +847,9 @@ export type SlipIO = WaitIO & { writeSlip: (text: string) => Promise<void>; clea
 /** 送單一輪：先把舊決定清成墓碑再送單（上一輪的決定不會被誤採用）→ 等 → 不論結果兩個檔都清成墓碑 */
 export async function runSlip(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string): Promise<'allow' | 'deny' | undefined> {
   const start = await io.now()
-  const want = { session: who.session, toolUseId, nonce: io.nonce() }
+  const want = { session: who.session, toolUseId, nonce: io.nonce(), textHash: await textHash(text) }
   await io.discard()
-  const rec: ApprovalRecord = { state: 'waiting', ...want, name: who.name, tool, text, at: start }
+  const rec: ApprovalRecord = { state: 'waiting', session: want.session, toolUseId, nonce: want.nonce, name: who.name, tool, text, at: start }
   await io.writeSlip(JSON.stringify(rec))
   await io.shown({ tool, at: start })
   try {
@@ -900,7 +906,7 @@ async function readApprovals($: EngineInterface, d: string, now: number) {
   if (reviewing) {
     const cur = found.find(a => a.session === reviewing!.session)
     if (!cur) reviewing = undefined
-    else if (cur.toolUseId !== reviewing.toolUseId || cur.nonce !== reviewing.nonce) openReview($, cur, now)
+    else if (cur.toolUseId !== reviewing.toolUseId || cur.nonce !== reviewing.nonce || cur.text !== reviewing.text) openReview($, cur, now) // 指令被改了也重看
   }
   const changed = JSON.stringify(found) !== JSON.stringify(pending)
   pending = found
@@ -908,12 +914,12 @@ async function readApprovals($: EngineInterface, d: string, now: number) {
 }
 
 function openReview($: EngineInterface, a: ApprovalRecord, now: number) {
-  reviewing = { session: a.session, toolUseId: a.toolUseId, nonce: a.nonce, openedAt: now }
+  reviewing = { session: a.session, toolUseId: a.toolUseId, nonce: a.nonce, text: a.text, openedAt: now }
   $.ui.invalidate('ui.render')
   $.clock.after(ALLOW_COOLDOWN_MS + 50, () => $.ui.invalidate('ui.render')) // 冷卻結束，Allow 換回可按的字
 }
 
-/** 使用者在面板上按 Allow／Deny：重讀那張單，三項仍相同才寫決定（只有這裡會寫 decisions/） */
+/** 使用者在面板上按 Allow／Deny：重讀那張單，toolUseId、nonce、全文都跟展開時相同才寫決定（只有這裡會寫 decisions/）；決定帶全文的 hash */
 async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
   const want = reviewing
   if (!want) return
@@ -924,14 +930,14 @@ async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
   }
   const d = await sharedDir($)
   const a = parseApproval(await $.fs.read(approvalFile(d, want.session)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined), now)
-  if (!a || a.toolUseId !== want.toolUseId || a.nonce !== want.nonce) {
+  if (!a || a.toolUseId !== want.toolUseId || a.nonce !== want.nonce || a.text !== want.text) {
     reviewing = undefined
     $.ui.toast('這張單已經結案或換了一筆，沒有送出。')
     $.ui.invalidate('ui.render')
     return
   }
   if (behavior === 'allow' && !approvalFits(a.text)) return
-  await $.fs.write(decisionFile(d, want.session), JSON.stringify({ state: 'decided', session: want.session, toolUseId: want.toolUseId, nonce: want.nonce, behavior, at: now }))
+  await $.fs.write(decisionFile(d, want.session), JSON.stringify({ state: 'decided', session: want.session, toolUseId: want.toolUseId, nonce: want.nonce, textHash: await textHash(want.text), behavior, at: now }))
   reviewing = undefined
   $.ui.toast(`${behavior === 'allow' ? '已核准' : '已拒絕'}：${a.name} 的 ${a.tool}`)
   $.ui.invalidate('ui.render')
@@ -949,7 +955,7 @@ function approvalRows($: EngineInterface, els: Record<string, any>, now: number)
       ))}
     </Box>,
   ]
-  const cur = reviewing && pending.find(a => a.session === reviewing!.session && a.toolUseId === reviewing!.toolUseId && a.nonce === reviewing!.nonce)
+  const cur = reviewing && pending.find(a => a.session === reviewing!.session && a.toolUseId === reviewing!.toolUseId && a.nonce === reviewing!.nonce && a.text === reviewing!.text)
   if (!cur || !reviewing) return rows
   const fits = approvalFits(cur.text)
   const ready = now - reviewing.openedAt >= ALLOW_COOLDOWN_MS
