@@ -24,6 +24,8 @@ export function cases(): Case[] {
   for (const [width, rows] of [[112, 80], [80, 50], [60, 44], [48, 44]]) {
     const crew = bigCrew()
     const seating = assignSeats(crew, width, rows)
+    const attendees = ['實作8', '實作16', '實作24', 'peer-9'] // 前三位閒著（idle）會進會議室；peer-9 在忙，留在座位
+    const meetSeating = assignSeats(crew, width, rows, seating, true, attendees) // 開會時的座位：參加者坐進會議室
     const s3 = seating.get('s3')!
     for (const frame of [0, 7]) {
       list.push({ name: `empty-${width}-${frame}`, crew: [], width, rows, frame, walkers: [], opts: {} })
@@ -35,10 +37,10 @@ export function cases(): Case[] {
         rows,
         frame,
         walkers: [{ id: 's5', path: [s3.stand, { x: s3.stand.x, y: 26 }, { x: width - 20, y: 26 }], start: 0, kind: 'mail' }],
-        seating,
+        seating: meetSeating,
         opts: {
           meeting: true,
-          attendees: ['peer-1', 'peer-5', 'peer-9'],
+          attendees,
           queue: ['s6', 's14'],
           planes: [{ from: s3.stand, to: { x: width - 10, y: 6 }, start: frame - 3 }],
           notices: [{ id: 's7', start: 0, end: 20 }],

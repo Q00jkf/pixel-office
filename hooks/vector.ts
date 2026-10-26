@@ -17,12 +17,14 @@ export type Shape =
   | { k: 'circle'; cx: number; cy: number; r: number; fill: Paint; stroke?: Paint; sw?: number; op?: number }
   | { k: 'ellipse'; cx: number; cy: number; rx: number; ry: number; fill: Paint; stroke?: Paint; sw?: number }
   | { k: 'path'; d: string; fill?: Paint; stroke?: Paint; sw?: number; op?: number }
-  | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint }
+  | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; halo?: Paint }
 
-export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[] }
+/** shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它） */
+export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[] }
 
 const FONT = "'Microsoft JhengHei','PingFang TC','Noto Sans TC','Noto Sans CJK TC',sans-serif"
 const NAME_SIZE = 1.9
+const NAME_MIN = 1.5 // 放不下先縮到這麼小，還放不下才截字
 
 /** 字的估計寬度：全形（中日韓）一個字＝字高，半形約 0.6 */
 const wide = (ch: string) => /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
@@ -41,9 +43,25 @@ export function fitText(t: string, maxW: number, size: number): string {
   return out
 }
 
+/** 放進 maxW：先縮字（到 NAME_MIN），再截字 */
+export function fitLabel(t: string, maxW: number, size = NAME_SIZE): { text: string; size: number } {
+  const w = textWidth(t, size)
+  if (w <= maxW) return { text: t, size }
+  const shrunk = Math.max(NAME_MIN, Math.floor((size * maxW / w) * 20) / 20)
+  return { text: fitText(t, maxW, shrunk), size: shrunk }
+}
+
+/** 描邊跟字反差：深字配白邊，淺字（金色主管名牌）配深棕邊 */
+const haloFor = (fill: Paint): Paint => {
+  if (typeof fill !== 'number') return C.white
+  const l = 0.299 * ((fill >> 16) & 255) + 0.587 * ((fill >> 8) & 255) + 0.114 * (fill & 255)
+  return l > 140 ? C.boss : C.white
+}
+
 class Pen {
   shapes: Shape[] = []
   glow: Shape[] = []
+  labels: Shape[] = []
   lit = false // true 時畫到 glow（夜裡在暗幕之上：螢幕、問號、火花）
   constructor(readonly night: boolean) {}
   private put(s: Shape) {
@@ -63,6 +81,13 @@ class Pen {
   }
   text(x: number, y: number, text: string, size: number, fill: Paint, o: { anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint } = {}) {
     if (text) this.put({ k: 'text', x, y, text, size, fill, ...o })
+  }
+  /** 名牌類：畫在最上層，字帶淺色描邊 */
+  label(x: number, y: number, text: string, size: number, fill: Paint, o: { anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint } = {}) {
+    if (text) this.labels.push({ k: 'text', x, y, text, size, fill, halo: o.bg === undefined || o.bg === 'none' ? haloFor(fill) : undefined, ...o })
+  }
+  labelRect(x: number, y: number, w: number, h: number, fill: Paint, r = 0) {
+    this.labels.push({ k: 'rect', x, y, w, h, r, fill })
   }
   glowing(f: () => void) {
     const was = this.lit
@@ -202,7 +227,7 @@ const looks = (who: Coworker) => {
 }
 
 /** 圓頭小人：(x, y) 是頭的圓心。表情依 mode：thinking 眼睛往上、error 冒汗發抖、done 跳一下、waiting 頭上問號、idle 會眨眼 */
-function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number) {
+function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false) {
   const { shirt, hair, hh } = looks(who)
   const mode = who.mode
   const shake = mode === 'error' ? (frame % 2 ? 0.4 : -0.4) : 0
@@ -239,8 +264,16 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
   } else if (mode === 'reading') p.rect(x + 1.2, hy + 2.2, 2, 2.2, C.white, 0.2, C.ink, 0.15)
   else if (mode === 'waiting' || mode === 'blocked') p.circle(x + 3.2, hy - 0.4, 0.6, C.skin)
 
+  // side：頭上方是名牌（主管桌）→ 泡泡、問號、紅牌改畫在頭的右側
+  const ax = side ? hx + 4.2 : hx
+  const ay = side ? hy + 1.6 : hy
   p.glowing(() => {
-    if (mode === 'thinking') {
+    if (mode === 'thinking' && side) {
+      p.circle(hx + 2.3, hy - 0.4, 0.35, C.white)
+      p.circle(hx + 3.1, hy - 0.9, 0.5, C.white)
+      p.ellipse(hx + 4.4, hy - 1.2, 1.4, 0.9, C.white)
+      for (let i = 0; i < 3; i++) if (i <= frame % 3) p.circle(hx + 3.7 + i * 0.7, hy - 1.2, 0.2, C.ink)
+    } else if (mode === 'thinking') {
       p.circle(hx - 2.4, hy - 2.2, 0.35, C.white)
       p.circle(hx - 3.1, hy - 3.2, 0.55, C.white)
       p.ellipse(hx - 4.4, hy - 4.6, 1.5, 0.9, C.white)
@@ -250,17 +283,17 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
     } else if (mode === 'done') {
       for (const [dx, dy] of [[-3.5, -2], [3.5, -2.2], [-4, 1], [4, 0.8]].filter((_, k) => (frame + k) % 2)) p.path(`M${n(hx + dx)} ${n(hy + dy - 0.6)}l0.25 0.45 0.5 0.15 -0.5 0.15 -0.25 0.45 -0.25 -0.45 -0.5 -0.15 0.5 -0.15Z`, C.spark)
     } else if (mode === 'waiting') {
-      p.text(hx, hy - 2.6, '?', 3, frame % 2 ? C.wait : C.waitDark, { anchor: 'middle', bold: true })
+      p.text(ax, ay - 2.6, '?', 3, frame % 2 ? C.wait : C.waitDark, { anchor: 'middle', bold: true })
     } else if (mode === 'blocked') {
-      p.rect(hx + 1.4, hy - 5.2, 3.6, 2.6, C.white, 0.3)
-      p.rect(hx + 1.8, hy - 4.8, 2.8, 1.8, C.err, 0.2)
+      p.rect(ax + 1.4, ay - 5.2, 3.6, 2.6, C.white, 0.3)
+      p.rect(ax + 1.8, ay - 4.8, 2.8, 1.8, C.err, 0.2)
     }
   })
 }
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
-  const t = fitText(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW, NAME_SIZE)
-  p.text(x, y, t, NAME_SIZE, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
+  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW)
+  p.label(x, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
 }
 
 function carry(p: Pen, at: Step, kind: ErrandKind) {
@@ -298,9 +331,11 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
   p.rect(x - 4, y + 1, 2, 2, C.chair, 0.6)
   p.rect(x - 4, y + 4, 2, 2, C.chair, 0.6)
   if (who) {
-    figure(p, x + 7.5, y + 8.6, who, frame)
-    p.text(x + 7, y + 4.6, fitText(`${extra > 0 ? `+${extra} ` : ''}★${who.name}`, 13, NAME_SIZE), NAME_SIZE, C.gold, { anchor: 'middle', bold: true })
+    figure(p, x + 7.5, y + 8.6, who, frame, undefined, true)
+    const t = fitLabel(`★${who.name}`, 13)
+    p.label(x + 7, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
+  if (extra > 0) plusBadge(p, x + 15.5, y + 3.2, extra)
 }
 
 function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
@@ -309,9 +344,19 @@ function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame
   screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
   p.rect(x, y + 7, 9, 4.5, C.leather, 1.5)
   if (who) {
-    figure(p, x + 4.5, y + 8.6, who, frame)
-    p.text(x + DESK_W / 2, y + 4.6, fitText(`${extra > 0 ? `+${extra} ` : ''}★${who.name}`, DESK_W, NAME_SIZE), NAME_SIZE, C.gold, { anchor: 'middle', bold: true })
+    figure(p, x + 4.5, y + 8.6, who, frame, undefined, true)
+    const t = fitLabel(`★${who.name}`, DESK_W + 0.6)
+    p.label(x + DESK_W / 2, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
+  if (extra > 0) plusBadge(p, x + DESK_W - 1, y + 0.2, extra)
+}
+
+/** 坐不下的主管數：桌角一顆小徽章，不擠進名牌 */
+function plusBadge(p: Pen, cx: number, cy: number, extra: number) {
+  const t = `+${extra}`
+  const w = textWidth(t, 1.5) + 0.8
+  p.labelRect(cx - w / 2, cy - 1, w, 2, C.goldDark, 1)
+  p.labels.push({ k: 'text', x: cx, y: cy + 0.55, text: t, size: 1.5, fill: C.white, anchor: 'middle', bold: true })
 }
 
 // ---------- 寵物 ----------
@@ -386,8 +431,8 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
       if (i === col) {
         const t = fitText(`TEAM ${lead.name}`, rw - 3, 1.7)
         const tw = textWidth(t, 1.7) + 1.2
-        p.rect(k.x - 2 + (rw - tw) / 2, k.y - 4.6, tw, 2.2, look.edge, 1)
-        p.text(k.x - 2 + rw / 2, k.y - 3, t, 1.7, look.text, { anchor: 'middle', bold: true })
+        p.labelRect(k.x - 2 + (rw - tw) / 2, k.y - 4.6, tw, 2.2, look.edge, 1)
+        p.labels.push({ k: 'text', x: k.x - 2 + rw / 2, y: k.y - 3, text: t, size: 1.7, fill: look.text, anchor: 'middle', bold: true })
       }
     })
   })
@@ -426,7 +471,8 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     if (pl.kind !== 'meet' || moving.has(id) || !who) continue
     const top = pl.slot % 2 === 0
     figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame)
-    nameTag(p, pl.seat.x + 0.5, top ? pl.seat.y - 1.2 : pl.seat.y + 6.4, who, 8, 'none')
+    const above = pl.seat.y - 1.2
+    nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
   }
 
   for (const [id, step] of moving) {
@@ -480,7 +526,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
 
   const extra = crew.length - placed.size - bosses.extra
   if (extra > 0) p.text(WALL + 0.5, 1.6, `+${extra}`, 1.8, C.white, { bold: true })
-  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow }
+  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels }
 }
 
 // ---------- SVG ----------
@@ -500,7 +546,8 @@ function shapeSvg(s: Shape): string {
     const x = s.anchor === 'middle' ? s.x - w / 2 : s.x - 0.3
     return `<rect x="${n(x)}" y="${n(s.y - s.size * 0.85)}" width="${n(w)}" height="${n(s.size * 1.1)}" rx="0.4" fill="${hex(s.bg)}"/>`
   })() : ''
-  return `${bg}<text x="${n(s.x)}" y="${n(s.y)}" font-size="${s.size}" fill="${hex(s.fill)}"${s.anchor === 'middle' ? ' text-anchor="middle"' : ''}${s.bold ? ' font-weight="bold"' : ''}>${xml(s.text)}</text>`
+  const halo = s.halo !== undefined ? ` stroke="${hex(s.halo)}" stroke-width="0.5" stroke-linejoin="round" paint-order="stroke"` : ''
+  return `${bg}<text x="${n(s.x)}" y="${n(s.y)}" font-size="${s.size}" fill="${hex(s.fill)}"${halo}${s.anchor === 'middle' ? ' text-anchor="middle"' : ''}${s.bold ? ' font-weight="bold"' : ''}>${xml(s.text)}</text>`
 }
 
 /** 形狀清單 → SVG（跟 encodeSvg 同樣一單位一像素、寬高放大 pxSize 倍）；夜裡在中間蓋一層暗幕，發光的畫在暗幕之上 */
@@ -508,5 +555,5 @@ export function vectorSvg(v: VectorScene, pxSize = 8): string {
   const defs = `<defs><pattern id="tile" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="${hex(C.tileB)}"/><rect width="6" height="6" fill="${hex(C.tileA)}"/><rect x="6" y="6" width="6" height="6" fill="${hex(C.tileA)}"/></pattern></defs>`
   const body = v.shapes.map(shapeSvg).join('')
   const dark = v.night ? `<rect width="${v.width}" height="${v.h}" fill="#050a1e" opacity="0.66"/>${v.glow.map(shapeSvg).join('')}` : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${v.width} ${v.h}" width="${v.width * pxSize}" height="${v.h * pxSize}" font-family="${FONT}">${defs}${body}${dark}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${v.width} ${v.h}" width="${v.width * pxSize}" height="${v.h * pxSize}" font-family="${FONT}">${defs}${body}${dark}${v.labels.map(shapeSvg).join('')}</svg>`
 }
