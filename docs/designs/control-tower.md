@@ -71,13 +71,13 @@ classic.PermissionRequest 觸發 ──寫──> approvals/<X>.json            
 - 指令太長，面板放不下全文 → 只給 Deny 和「回終端機按」。
 - 走路動畫沿用現有 `errand`／`walkerPos`（紙飛機、送信已經有走路路徑）。
 
-### 第 2 期：向量場景
+### 第 2 期：向量場景（已實作 Desktop：pixel-office 0.14.0，2026-10-26）
 
 - 新增 `vector.ts`：輸入同一份 `crew`＋座位（`assignSeats`），輸出「形狀清單」（圓、圓角矩形、路徑、文字）。
 - Desktop：形狀清單 → SVG，取代 `encodeSvg` 的點陣路徑；名牌可以用中文。
-- 支援圖片的終端機：同一份形狀清單 → 點陣化成 PNG，交給 `Image`。
+- 支援圖片的終端機：同一份形狀清單 → 點陣化成 PNG，交給 `Image`。**之後再做**（0.14.0 沒做）。
 - Windows Terminal：維持 `drawScene`＋`encode`，不動。
-- 人物：圓頭、兩顆眼睛（看向游標或螢幕）、依 `mode` 換表情；`done` 跳一下。
+- 人物：圓頭、兩顆眼睛（看向游標或螢幕）、依 `mode` 換表情；`done` 跳一下。0.14.0 做的：thinking 眼睛往上、error 冒汗發抖、done 跳一下、waiting 頭上問號、idle 眨眼；「看向游標」沒做。
 
 ### 第 3 期：手機版辦公室
 

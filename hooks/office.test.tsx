@@ -157,6 +157,7 @@ test('desktop draws the office as an SVG under the size limit, with all buttons'
   expect(src.startsWith('<svg')).toBe(true)
   expect(src).toContain('<path')
   expect(src.length).toBeLessThanOrEqual(131072)
+  expect(src).toContain('Microsoft JhengHei') // 0.14.0 起 Desktop 畫向量（vector.ts），不是點陣
   expect(String(svg!.props.alt)).toContain('人在線')
   for (const key of ['role', 'cat', 'night']) expect(await ui.find({ key })).toBeDefined()
   await ui.unmount()

@@ -1277,3 +1277,9 @@ export function plateName(cwd: string, id: string): string {
   const isSessionId = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(ascii)
   return ascii.length >= 2 && !isSessionId ? ascii : `s-${id.slice(0, 4)}`
 }
+
+// ---------- 給 vector.ts（Desktop 的向量畫法）共用的版面常數與配色：只匯出，Raster 這條路不受影響 ----------
+
+export const GEOM = { WALL, TOP_H, OPEN_Y, UNIT_W, UNIT_H, CLUSTER_W, CLUSTER_H, ROW_SPLIT, BOSS_W, CABINET_X, CAT_START, CAT_W, CAT_H, CAT_LIFT, DESK_W, COUNTER_W, MEET_DOOR_W, WALK_SPEED, TREAT_FRAMES }
+export const PALETTE = C
+export { TEAM_RUGS, SHIRTS, HAIR, BOOKS, hash, shade, meetTable, mailboxX, counterX }

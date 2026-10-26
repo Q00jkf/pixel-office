@@ -2,8 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
+import { drawVector, vectorSvg } from './vector'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
@@ -1381,7 +1382,7 @@ export const register: Register = on => {
         )
       }
       svgOpen = true
-      // 同色合併成 path 後，最大 112×80 約 7.4 萬字元（2026-10-05 實測），仍在 Svg 上限 131072 內；超過就縮小再畫
+      // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 4.7 萬字元（2026-10-26 實測），在 Svg 上限 131072 內；超過就縮小再畫
       let sw = sceneWidth(e.props.bodyColumns)
       let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
       let svg = ''
@@ -1391,7 +1392,7 @@ export const register: Register = on => {
           rows = sr
         }
         lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
-        svg = encodeSvg(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))
+        svg = vectorSvg(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts())) // Desktop 畫向量（圓頭小人、中文名牌）；終端機照舊點陣
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
