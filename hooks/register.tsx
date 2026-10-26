@@ -424,7 +424,10 @@ export function roster(list: Coworker[], now: number): string {
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
+  const asking = sorted.filter(c => c.approval && now < c.approval.deadline)
   const head = [
+    // 等核准的單最醒目：放第一行，只剩幾秒能按
+    ...(asking.length > 0 ? [`🟡🟡 等你核准（開辦公室面板按「審 <名牌>」）：${asking.map(c => `${c.name}（${c.approval!.tool}，剩 ${Math.max(0, Math.ceil((c.approval!.deadline - now) / 1000))} 秒）`).join('、')}`] : []),
     `像素辦公室名單（${list.length} 人在線，${new Date(now).toISOString().slice(11, 19)} UTC）`,
     ...(blockedNames.length > 0 ? [`🔴 待放行：${blockedNames.join('、')}（要使用者在各自的視窗說「放行」，別的 session 轉達無效）`] : []),
     ...clashNotes(sorted),
@@ -546,7 +549,7 @@ async function refresh($: EngineInterface) {
           lastError: s.lastError && typeof s.lastError.text === 'string' && typeof s.lastError.at === 'number' ? { text: s.lastError.text, at: s.lastError.at } : undefined,
           prompt: s.prompt && typeof s.prompt.text === 'string' && typeof s.prompt.at === 'number' ? { text: s.prompt.text, at: s.prompt.at } : undefined,
           office: s.office === true ? true : undefined,
-          approval: s.approval && typeof s.approval.tool === 'string' && typeof s.approval.at === 'number' ? { tool: s.approval.tool, at: s.approval.at } : undefined,
+          approval: s.approval && typeof s.approval.tool === 'string' && typeof s.approval.at === 'number' && typeof s.approval.deadline === 'number' && now < s.approval.deadline ? { tool: s.approval.tool, at: s.approval.at, deadline: s.approval.deadline } : undefined,
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
@@ -723,7 +726,9 @@ async function noteSessionTitle($: EngineInterface, e: unknown) {
 // 終端機原本的詢問照常同時出現，誰先按算誰的；逾時、沒人開辦公室、檔案壞掉 → 不回答，交回終端機。
 // $.fs 沒有刪檔：處理完覆寫成不含指令內容的墓碑，逾時的一律當不存在（主管 office 2026-10-26 裁示）。
 
-export const APPROVAL_TIMEOUT_MS = 120000
+export const APPROVAL_TIMEOUT_MS = 120000 // 上限：只在 hook 沒有預算計時（測試、未來版本）時用得到
+export const BUDGET_MARGIN_MS = 1500 // classic.PermissionRequest 的 hook 預算 10 秒（HookBudget.ms），留這麼多給清檔與回答
+export const MIN_WINDOW_MS = 2000 // 剩不到這麼久就不送單：使用者來不及看
 const APPROVAL_POLL_MS = 300
 export const ASK_WINDOW_MS = 2000 // tool.check 到 PermissionRequest 超過這麼久就不接手（免得配到很久以前的同指令）
 export const ALLOW_COOLDOWN_MS = 1000 // 展開後 Allow 要等這麼久才按得下去（防連點誤放行）
@@ -731,7 +736,7 @@ export const APPROVAL_TEXT_MAX = 1500 // 指令全文超過就只給 Deny 與「
 const APPROVAL_LINES_MAX = 20
 export const TOMBSTONE = JSON.stringify({ state: 'done' })
 
-export type ApprovalRecord = { state: 'waiting'; session: string; name: string; toolUseId: string; tool: string; text: string; nonce: string; at: number }
+export type ApprovalRecord = { state: 'waiting'; session: string; name: string; toolUseId: string; tool: string; text: string; nonce: string; at: number; deadline: number }
 export type Ask = { toolUseId: string; tool: string; input: string; at: number }
 type Want = { session: string; toolUseId: string; nonce: string; textHash: string }
 
@@ -787,12 +792,12 @@ export function judgeDecision(raw: string | undefined, want: Want): { kind: 'non
   return d.behavior === 'allow' || d.behavior === 'deny' ? { kind: 'ok', behavior: d.behavior } : { kind: 'corrupt' }
 }
 
-/** 讀到的核准單：墓碑、壞檔、欄位不全、逾時一律當不存在 */
+/** 讀到的核准單：墓碑、壞檔、欄位不全、過了 deadline（等的那方已不再等）一律當不存在 */
 export function parseApproval(raw: string | undefined, now: number): ApprovalRecord | undefined {
   try {
     const a = JSON.parse(raw ?? '')
-    const ok = a && a.state === 'waiting' && ['session', 'name', 'toolUseId', 'tool', 'text', 'nonce'].every(k => typeof a[k] === 'string') && typeof a.at === 'number'
-    return ok && now - a.at < APPROVAL_TIMEOUT_MS ? (a as ApprovalRecord) : undefined
+    const ok = a && a.state === 'waiting' && ['session', 'name', 'toolUseId', 'tool', 'text', 'nonce'].every(k => typeof a[k] === 'string') && typeof a.at === 'number' && typeof a.deadline === 'number'
+    return ok && now < a.deadline && now - a.at < APPROVAL_TIMEOUT_MS ? (a as ApprovalRecord) : undefined
   } catch {
     return undefined
   }
@@ -800,10 +805,10 @@ export function parseApproval(raw: string | undefined, now: number): ApprovalRec
 
 export type WaitIO = { read: () => Promise<string | undefined>; discard: () => Promise<void>; now: () => Promise<number>; sleep: (ms: number) => Promise<void>; settled: () => boolean; log: (text: string) => void }
 
-/** 等決定：採用四項全對的；不符的丟棄並記一行；壞檔、逾時、終端機先結案 → undefined（不回答） */
-export async function waitForDecision(io: WaitIO, want: Want, start: number): Promise<'allow' | 'deny' | undefined> {
+/** 等決定到 deadline（絕對時間）：採用四項全對的；不符的丟棄並記一行；壞檔、到期、終端機先結案、被中止 → undefined（不回答） */
+export async function waitForDecision(io: WaitIO, want: Want, deadline: number): Promise<'allow' | 'deny' | undefined> {
   while (!io.settled()) {
-    if ((await io.now()) - start >= APPROVAL_TIMEOUT_MS) return undefined
+    if ((await io.now()) >= deadline) return undefined
     const j = judgeDecision(await io.read(), want)
     if (j.kind === 'ok') return j.behavior
     if (j.kind === 'corrupt') {
@@ -814,9 +819,15 @@ export async function waitForDecision(io: WaitIO, want: Want, start: number): Pr
       io.log(`pixel-office：丟棄一筆不符的核准決定（${j.why} 不同）`)
       await io.discard()
     }
-    await io.sleep(APPROVAL_POLL_MS)
+    await io.sleep(Math.min(APPROVAL_POLL_MS, Math.max(0, deadline - (await io.now()))))
   }
   return undefined
+}
+
+/** 這一輪能等多久：hook 預算剩下的減安全邊際，上限 APPROVAL_TIMEOUT_MS；太短回 undefined（不送單） */
+export function approvalWindow(remainingMs: number): number | undefined {
+  const w = Math.min(APPROVAL_TIMEOUT_MS, remainingMs - BUDGET_MARGIN_MS)
+  return w >= MIN_WINDOW_MS ? w : undefined
 }
 
 /** 有沒有人開著辦公室面板（含自己）：沒有就不送單，直接交回終端機 */
@@ -834,7 +845,13 @@ function settle(e: unknown) {
   if (settled.size > 200) settled.delete(settled.values().next().value as string) // 只記最近的：等單最多 120 秒，舊的用不到
 }
 
-const sleep = ($: EngineInterface, ms: number) => new Promise<void>(r => $.clock.after(ms, () => r()))
+/** 睡 ms；signal 中止就立刻醒 */
+const sleep = ($: EngineInterface, ms: number, signal?: AbortSignal) =>
+  new Promise<void>(r => {
+    if (signal?.aborted) return r()
+    signal?.addEventListener('abort', () => r(), { once: true })
+    $.clock.after(ms, () => r())
+  })
 
 async function clearApproval($: EngineInterface, sid: string) {
   const d = await sharedDir($)
@@ -842,18 +859,19 @@ async function clearApproval($: EngineInterface, sid: string) {
   await $.fs.write(decisionFile(d, sid), TOMBSTONE)
 }
 
-export type SlipIO = WaitIO & { writeSlip: (text: string) => Promise<void>; clearAll: () => Promise<void>; nonce: () => string; shown: (on: { tool: string; at: number } | undefined) => Promise<void> }
+export type SlipIO = WaitIO & { writeSlip: (text: string) => Promise<void>; clearAll: () => Promise<void>; nonce: () => string; shown: (on: { tool: string; at: number; deadline: number } | undefined) => Promise<void> }
 
 /** 送單一輪：先把舊決定清成墓碑再送單（上一輪的決定不會被誤採用）→ 等 → 不論結果兩個檔都清成墓碑 */
-export async function runSlip(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string): Promise<'allow' | 'deny' | undefined> {
+export async function runSlip(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string, window: number): Promise<'allow' | 'deny' | undefined> {
   const start = await io.now()
+  const deadline = start + window
   const want = { session: who.session, toolUseId, nonce: io.nonce(), textHash: await textHash(text) }
   await io.discard()
-  const rec: ApprovalRecord = { state: 'waiting', session: want.session, toolUseId, nonce: want.nonce, name: who.name, tool, text, at: start }
+  const rec: ApprovalRecord = { state: 'waiting', session: want.session, toolUseId, nonce: want.nonce, name: who.name, tool, text, at: start, deadline }
   await io.writeSlip(JSON.stringify(rec))
-  await io.shown({ tool, at: start })
+  await io.shown({ tool, at: start, deadline })
   try {
-    return await waitForDecision(io, want, start)
+    return await waitForDecision(io, want, deadline)
   } finally {
     await io.clearAll().catch(() => undefined)
     await io.shown(undefined).catch(() => undefined)
@@ -861,7 +879,7 @@ export async function runSlip(io: SlipIO, who: { session: string; name: string }
 }
 
 /** 送單到辦公室並等決定；回 undefined＝不回答（交回終端機） */
-async function askOffice($: EngineInterface, toolUseId: string, tool: string, text: string): Promise<'allow' | 'deny' | undefined> {
+async function askOffice($: EngineInterface, toolUseId: string, tool: string, text: string, window: number, signal: AbortSignal): Promise<'allow' | 'deny' | undefined> {
   const d = await sharedDir($)
   const sid = me.id
   return runSlip(
@@ -877,14 +895,15 @@ async function askOffice($: EngineInterface, toolUseId: string, tool: string, te
         await publish($, false)
       },
       now: () => $.clock.now(),
-      sleep: ms => sleep($, ms),
-      settled: () => settled.has(toolUseId),
+      sleep: ms => sleep($, ms, signal),
+      settled: () => settled.has(toolUseId) || signal.aborted, // 引擎放棄這次詢問（使用者中斷、預算用完）→ 立刻清單
       log: t => $.ui.log(t),
     },
     { session: sid, name: me.name },
     toolUseId,
     tool,
     text,
+    window,
   )
 }
 
@@ -910,13 +929,14 @@ async function readApprovals($: EngineInterface, d: string, now: number) {
   }
   const changed = JSON.stringify(found) !== JSON.stringify(pending)
   pending = found
-  if (changed) $.ui.invalidate('ui.render')
+  if (changed || found.length > 0) $.ui.invalidate('ui.render') // 有單就每秒重畫，倒數才會動
 }
 
 function openReview($: EngineInterface, a: ApprovalRecord, now: number) {
   reviewing = { session: a.session, toolUseId: a.toolUseId, nonce: a.nonce, text: a.text, openedAt: now }
   $.ui.invalidate('ui.render')
   $.clock.after(ALLOW_COOLDOWN_MS + 50, () => $.ui.invalidate('ui.render')) // 冷卻結束，Allow 換回可按的字
+  $.clock.after(Math.max(0, a.deadline - now) + 50, () => $.ui.invalidate('ui.render')) // 到 deadline 收起，不必等下一輪 refresh
 }
 
 /** 使用者在面板上按 Allow／Deny：重讀那張單，toolUseId、nonce、全文都跟展開時相同才寫決定（只有這裡會寫 decisions/）；決定帶全文的 hash */
@@ -936,6 +956,7 @@ async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
     $.ui.invalidate('ui.render')
     return
   }
+  if (now >= a.deadline) return // 過了 deadline：等的那方已交回終端機，寫了也不會被採用
   if (behavior === 'allow' && !approvalFits(a.text)) return
   await $.fs.write(decisionFile(d, want.session), JSON.stringify({ state: 'decided', session: want.session, toolUseId: want.toolUseId, nonce: want.nonce, textHash: await textHash(want.text), behavior, at: now }))
   reviewing = undefined
@@ -946,22 +967,23 @@ async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
 /** 面板上的核准區：等人審的名單（審 <名牌>），展開的那張顯示全文與 Allow／Deny；Allow／Deny 不給 hotkey */
 function approvalRows($: EngineInterface, els: Record<string, any>, now: number): unknown[] {
   const { Box, Text, Button } = els
-  if (pending.length === 0) return []
+  if (pending.every(a => now >= a.deadline)) return []
   const rows: unknown[] = [
     <Box key="approval-queue" flexDirection="row">
       <Text color="yellow">🟡 等你核准：</Text>
-      {pending.map(a => (
+      {pending.filter(a => now < a.deadline).map(a => (
         <Button key={`review-${a.session}`} label={`審 ${a.name}`} onPress={async () => openReview($, a, await $.clock.now())} />
       ))}
     </Box>,
   ]
-  const cur = reviewing && pending.find(a => a.session === reviewing!.session && a.toolUseId === reviewing!.toolUseId && a.nonce === reviewing!.nonce && a.text === reviewing!.text)
+  const live = (a: ApprovalRecord) => now < a.deadline
+  const cur = reviewing && pending.filter(live).find(a => a.session === reviewing!.session && a.toolUseId === reviewing!.toolUseId && a.nonce === reviewing!.nonce && a.text === reviewing!.text)
   if (!cur || !reviewing) return rows
   const fits = approvalFits(cur.text)
   const ready = now - reviewing.openedAt >= ALLOW_COOLDOWN_MS
   rows.push(
     <Text key="approval-head" bold>
-      {cur.name} 要用 {cur.tool}{fits ? '：' : '（全文太長，面板放不下，請回它的終端機看完再按）：'}
+      {cur.name} 要用 {cur.tool}（剩 {Math.max(0, Math.ceil((cur.deadline - now) / 1000))} 秒）{fits ? '：' : '（全文太長，面板放不下，請回它的終端機看完再按）：'}
     </Text>,
     <Text key="approval-body">{fits ? cur.text : `${cur.text.slice(0, 300)}…`}</Text>,
     <Box key="approval-act" flexDirection="row">
@@ -1155,7 +1177,10 @@ export const register: Register = on => {
       if (!toolUseId) return next(e)
       await refresh($).catch(() => undefined)
       if (!officeWatched(everyone())) return next(e)
-      const behavior = await askOffice($, toolUseId, ev.tool_name, approvalText(ev.tool_name, ev.tool_input))
+      // 這個 hook 只有 10 秒預算（過了引擎就改由終端機問，hook 卻還在背景跑）：等到預算快用完就自己收單（oftest 2026-10-26 實測）
+      const window = approvalWindow(next.budget.remainingMs)
+      if (window === undefined) return next(e)
+      const behavior = await askOffice($, toolUseId, ev.tool_name, approvalText(ev.tool_name, ev.tool_input), window, next.signal)
       if (behavior === 'allow') return { decision: { behavior: 'allow' } }
       if (behavior === 'deny') return { decision: { behavior: 'deny', message: '使用者在像素辦公室按了 Deny' } }
     } catch {}
@@ -1346,8 +1371,8 @@ export const register: Register = on => {
       }
       return (
         <Box flexDirection="column">
-          <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
           {approvalRows($, els, now)}
+          <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
           {mine.length > 0 ? (
             <Box flexDirection="row">
               {mine.map((b, i) =>
@@ -1384,8 +1409,8 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
         {approvalRows($, $.ui.resolve(e) as Record<string, any>, now)}
+        <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
         {/* 預留列：放個人按鈕（~/.claude/pixel-office/buttons.json），沒有就空一列 */}
         {mine.length > 0 ? (
           <Box flexDirection="row">

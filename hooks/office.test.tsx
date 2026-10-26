@@ -1522,7 +1522,7 @@ test('at 60~80 columns two managers each with peers get two zones when nobody is
 
 // ---------- 點人核准（控制塔第 1 期）----------
 
-import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalText, canon, judgeDecision, textHash, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
+import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalWindow, approvalText, canon, judgeDecision, textHash, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
 
 const WANT = { session: 's1', toolUseId: 'toolu_1', nonce: 'n-1', textHash: 'h-1' }
 const decided = (over: Record<string, unknown> = {}) => JSON.stringify({ state: 'decided', ...WANT, behavior: 'allow', at: 1, ...over })
@@ -1561,10 +1561,12 @@ test('a decision is taken only when session, toolUseId and nonce all match; tomb
   expect(judgeDecision(decided({ behavior: 'always' }), WANT)).toEqual({ kind: 'corrupt' }) // 只有 allow／deny
 })
 
-test('an approval slip older than the timeout, a tombstone or a broken file counts as not there', () => {
-  const rec = { state: 'waiting', session: 's1', name: 'e2', toolUseId: 't', tool: 'Bash', text: 'ls', nonce: 'n', at: 1000 }
+test('an approval slip past its deadline, a tombstone or a broken file counts as not there', () => {
+  const rec = { state: 'waiting', session: 's1', name: 'e2', toolUseId: 't', tool: 'Bash', text: 'ls', nonce: 'n', at: 1000, deadline: 9500 }
   expect(parseApproval(JSON.stringify(rec), 1000 + 5000)?.text).toBe('ls')
-  expect(parseApproval(JSON.stringify(rec), 1000 + APPROVAL_TIMEOUT_MS)).toBeUndefined()
+  expect(parseApproval(JSON.stringify(rec), 9500)).toBeUndefined() // 過了 deadline
+  expect(parseApproval(JSON.stringify({ ...rec, deadline: undefined }), 2000)).toBeUndefined() // 舊版沒 deadline 的單
+  expect(parseApproval(JSON.stringify({ ...rec, deadline: 1e15 }), 1000 + APPROVAL_TIMEOUT_MS)).toBeUndefined() // 上限
   expect(parseApproval(TOMBSTONE, 1000)).toBeUndefined()
   expect(parseApproval('{', 1000)).toBeUndefined()
   expect(parseApproval(JSON.stringify({ ...rec, nonce: 3 }), 1000)).toBeUndefined()
@@ -1594,23 +1596,22 @@ const fakeIO = (reads: (string | undefined)[], opts: { settledAt?: number; step?
 
 test('waiting: a nonce or toolUseId mismatch is discarded with one log line and waiting goes on', async () => {
   const f = fakeIO([undefined, decided({ nonce: 'old' }), decided({ toolUseId: 'toolu_0' }), decided()])
-  expect(await waitForDecision(f.io, WANT, 0)).toBe('allow')
+  expect(await waitForDecision(f.io, WANT, 8500)).toBe('allow')
   expect(f.discards()).toBe(2)
   expect(f.logs).toHaveLength(2)
   expect(f.logs[0]).toContain('nonce')
   expect(f.logs[1]).toContain('toolUseId')
 })
 
-test('waiting: timeout, a broken file or the terminal answering first all give no answer (back to the terminal)', async () => {
+test('waiting: the deadline, a broken file or the terminal answering first all give no answer (back to the terminal)', async () => {
   const slow = fakeIO([undefined])
-  expect(await waitForDecision(slow.io, WANT, 0)).toBeUndefined()
-  expect(slow.elapsed()).toBeGreaterThanOrEqual(APPROVAL_TIMEOUT_MS)
-  expect(slow.elapsed()).toBeLessThan(APPROVAL_TIMEOUT_MS + 1000)
+  expect(await waitForDecision(slow.io, WANT, 8500)).toBeUndefined()
+  expect(slow.elapsed()).toBe(8500) // 剛好停在 deadline，不多睡一輪
   const broken = fakeIO([undefined, '{not json'])
-  expect(await waitForDecision(broken.io, WANT, 0)).toBeUndefined()
+  expect(await waitForDecision(broken.io, WANT, 8500)).toBeUndefined()
   expect(broken.logs[0]).toContain('壞掉')
   const terminal = fakeIO([undefined, undefined, decided()], { settledAt: 300 }) // 終端機先按了：之後才到的決定也不採用
-  expect(await waitForDecision(terminal.io, WANT, 0)).toBeUndefined()
+  expect(await waitForDecision(terminal.io, WANT, 8500)).toBeUndefined()
 })
 
 test('PermissionRequest with no matching ask (or from a subagent) is left to the terminal untouched', async ($, on) => {
@@ -1683,7 +1684,7 @@ test('a slip: old decision cleared before sending, guessed nonce discarded, the 
     if (step === 1) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'guess', textHash: h })
     if (step === 3) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h, behavior: 'deny' })
   })
-  const got = await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'git push --force')
+  const got = await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'git push --force', 8500)
   expect(got).toBe('deny')
   expect(f.order.slice(0, 2)).toEqual(['decision', 'slip']) // 先清舊決定，再送單
   expect(f.order.filter(x => x === 'decision').length).toBe(2) // 送單前一次＋丟棄猜錯的一次
@@ -1693,26 +1694,26 @@ test('a slip: old decision cleared before sending, guessed nonce discarded, the 
   expect(f.shown[f.shown.length - 1]).toBeUndefined() // 畫面上的單收掉
 })
 
-test('a slip times out after 120 s with no answer, or stops as soon as the terminal answers; tombstones either way', async () => {
+test('a slip ends at its deadline with no answer, or as soon as the terminal answers; tombstones either way', async () => {
   const h = await textHash('ls')
   const quiet: Record<string, string> = {}
-  expect(await runSlip(slipIO(quiet).io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
+  expect(await runSlip(slipIO(quiet).io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls', 8500)).toBeUndefined()
   expect(quiet.slip).toBe(TOMBSTONE)
   const files: Record<string, string> = {}
   const f = slipIO(files, { settledAt: 1_000_000 + 600 })
   f.onTick(t => {
     if (t > 1_000_000 + 900) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h })
   })
-  expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
+  expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls', 8500)).toBeUndefined()
   expect(files.decision).toBe(TOMBSTONE)
 })
 
 test('office pane: lists the slip, Allow is held for 1 s after opening, then writes the exact decision', async ($, on) => {
   const NOW = 1_000_000
   const clock = mock.clock(on, { now: NOW })
-  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'git push', nonce: 'nn', at: NOW - 1000 }
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'git push', nonce: 'nn', at: NOW - 1000, deadline: NOW + 8000 }
   const files: Record<string, string> = {
-    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false, approval: { tool: 'Bash', at: NOW - 1000 } }),
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false, approval: { tool: 'Bash', at: NOW - 1000, deadline: NOW + 8000 } }),
     'approvals/bbbb.json': JSON.stringify(slip),
   }
   const writes: { path: string; text: string }[] = []
@@ -1736,7 +1737,7 @@ test('office pane: lists the slip, Allow is held for 1 s after opening, then wri
 test('office pane: a slip replaced by a new request reopens with a fresh cooldown; a too-long command offers only Deny (no cooldown on Deny)', async ($, on) => {
   const NOW = 1_000_000
   const clock = mock.clock(on, { now: NOW })
-  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'ls', nonce: 'n1', at: NOW }
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'ls', nonce: 'n1', at: NOW, deadline: NOW + 8000 }
   const files: Record<string, string> = {
     'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
     'approvals/bbbb.json': JSON.stringify(slip),
@@ -1791,8 +1792,10 @@ test('waiting for the office: people queue at the counter (front door when narro
 })
 
 test('the roster says the office pane can answer a waiting session', () => {
-  const c = { ...P('w', 'w', 'waiting'), tool: 'Bash', since: 1000, approval: { tool: 'Bash', at: 1000 } }
+  const c = { ...P('w', 'w', 'waiting'), tool: 'Bash', since: 1000, approval: { tool: 'Bash', at: 1000, deadline: 9500 } }
   expect(roster([c], 5000)).toContain('辦公室面板可審')
+  expect(roster([P('a', 'a'), c], 5000).split('\n')[0]).toBe('🟡🟡 等你核准（開辦公室面板按「審 <名牌>」）：w（Bash，剩 5 秒）') // 第一行最醒目
+  expect(roster([c], 9500)).not.toContain('等你核准')
   expect(roster([{ ...c, approval: undefined }], 5000)).not.toContain('辦公室面板可審')
 })
 
@@ -1810,14 +1813,14 @@ test('a decision for swapped command text is not taken: same toolUseId and nonce
     step += 1
     if (step === 1) files.decision = decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: seen })
   })
-  expect(await runSlip({ ...f.io, now: f.io.now } as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'rm -rf ~')).toBeUndefined() // 丟棄後等到逾時
+  expect(await runSlip({ ...f.io, now: f.io.now } as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'rm -rf ~', 8500)).toBeUndefined() // 丟棄後等到逾時
   expect(logs.some(l => l.includes('textHash'))).toBe(true)
 })
 
 test('office pane: if the slip text changes after opening (same toolUseId and nonce), Allow sends nothing', async ($, on) => {
   const NOW = 1_000_000
   const clock = mock.clock(on, { now: NOW })
-  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'rm -rf ~', nonce: 'nn', at: NOW }
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'rm -rf ~', nonce: 'nn', at: NOW, deadline: NOW + 8000 }
   const files: Record<string, string> = {
     'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
     'approvals/bbbb.json': JSON.stringify(slip),
@@ -1831,6 +1834,56 @@ test('office pane: if the slip text changes after opening (same toolUseId and no
   await clock.advance(ALLOW_COOLDOWN_MS)
   files['approvals/bbbb.json'] = JSON.stringify({ ...slip, text: 'ls' }) // 展開後被換字
   await ui.press({ key: 'approval-allow' }) // 按下時重讀：跟展開時看到的不同 → 不送
+  expect(files['decisions/bbbb.json']).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the wait fits inside the 10 s hook budget: remaining minus 1.5 s, capped, and no slip when too little is left', () => {
+  expect(approvalWindow(10_000)).toBe(8500)
+  expect(approvalWindow(Infinity)).toBe(APPROVAL_TIMEOUT_MS) // 沒有計時（測試）時才用上限
+  expect(approvalWindow(3000)).toBeUndefined() // 剩 1.5 秒不夠看
+})
+
+test('budget running out clears the slip by itself; an abort (interrupt, terminal settled) clears it within one poll', async () => {
+  const files: Record<string, string> = {}
+  const f = slipIO(files)
+  expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls', approvalWindow(10_000)!)).toBeUndefined()
+  expect(files.slip).toBe(TOMBSTONE)
+  expect(f.shown[f.shown.length - 1]).toBeUndefined()
+  const g = slipIO(files)
+  const ac = new AbortController()
+  g.io.settled = () => ac.signal.aborted
+  let woke = 0
+  g.onTick(t => {
+    if (!ac.signal.aborted) ac.abort()
+    woke = t
+  })
+  const start = await g.io.now()
+  files.slip = 'x'
+  expect(await runSlip(g.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls', 8500)).toBeUndefined()
+  expect(woke - start).toBeLessThanOrEqual(300)
+  expect(files.slip).toBe(TOMBSTONE)
+})
+
+test('office pane: past the deadline the slip folds away and nothing can be pressed; the countdown shows the seconds left', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'ls', nonce: 'nn', at: NOW, deadline: NOW + 3000 }
+  const files: Record<string, string> = {
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
+    'approvals/bbbb.json': JSON.stringify(slip),
+  }
+  officeFs(on, files)
+  on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await $.command.run({ command: 'office', args: '' } as any)
+  await ui.press({ key: 'review-bbbb' })
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).toContain('剩 3 秒')
+  await clock.advance(1500) // 冷卻過了、還沒到 deadline
+  await clock.advance(1600) // 過了 deadline（這段時間 refresh 還沒跑也一樣）
+  expect(await ui.find({ key: 'approval-allow' })).toBeUndefined()
+  expect(await ui.find({ key: 'review-bbbb' })).toBeUndefined()
   expect(files['decisions/bbbb.json']).toBeUndefined()
   await ui.unmount()
 })
