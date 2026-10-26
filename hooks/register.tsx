@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, encodeSvg, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 
 const PANE = 'pixel-office'
@@ -50,6 +50,7 @@ const seenGot = new Map<string, number | undefined>()
 const seenMode = new Map<string, OfficeMode>()
 const seenBlocked = new Map<string, number | undefined>()
 const seenErrand = new Map<string, number | undefined>()
+const seenApproval = new Map<string, number | undefined>()
 
 const sceneOpts = (): SceneOptions => {
   planes = planes.filter(pl => frame - pl.start <= PLANE_FRAMES)
@@ -58,7 +59,7 @@ const sceneOpts = (): SceneOptions => {
     catOffset += raidEnd - raid.start
     raid = undefined
   }
-  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet, meeting, attendees }
+  return { night: nightMode, treatFrame, catOffset, planes, notices, raid, pet, meeting, attendees, queue: queueOrder() }
 }
 
 // 餵貓（寶寶是餵奶）：把上一次吃飯停下的時間併進位移，再開始新的一次
@@ -263,6 +264,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
 
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
+  await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
   defaultName = plateName(await $.session.cwd(), id)
   me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff' }
   // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
@@ -327,7 +329,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -398,7 +400,7 @@ export function titleStale(c: Pick<Coworker, 'title' | 'titleAuto' | 'titleAt' |
 function doingText(c: Coworker, now: number): string {
   if (c.blocked) return `🔴 被擋（${c.blocked.tool}），已等 ${Math.max(0, Math.round((now - c.blocked.at) / 60000))} 分，要使用者在它的視窗說「放行」`
   const secs = c.since !== undefined ? Math.max(0, Math.round((now - c.since) / 1000)) : undefined
-  if (c.mode === 'waiting') return `🟡 等核准${secs !== undefined ? ` ${secs} 秒` : ''}（${c.tool}）`
+  if (c.mode === 'waiting') return `🟡 等核准${secs !== undefined ? ` ${secs} 秒` : ''}（${c.tool}）${c.approval ? '・辦公室面板可審' : ''}`
   if (c.mode === 'error') return `出錯（${c.tool}）${c.lastError ? `：${c.lastError.text}` : ''}`
   // 出錯後停下來等人（done → idle）最需要看到錯誤：等輸入也附上次出錯
   const base =
@@ -475,6 +477,19 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
     }
     seenErrand.set(c.id, errandAt)
 
+    // 等核准：拿著紙走去櫃台排隊；結案後走回座位
+    const approvalAt = c.approval?.at
+    if (seenApproval.has(c.id) && approvalAt !== seenApproval.get(c.id)) {
+      const pl = lastPlaced?.get(c.id)
+      if (pl && width > 0 && rows > 0) {
+        const spot = queueSpot(width, rows, Math.max(0, queueOrder(list).indexOf(c.id)))
+        const go = corridorRoute(pl, spot, width, rows)
+        walkers = walkers.filter(w => w.id !== c.id)
+        walkers.push({ id: c.id, path: approvalAt !== undefined ? go : [...go].reverse(), start: frame })
+      }
+    }
+    seenApproval.set(c.id, approvalAt)
+
     const blockedAt = c.blocked?.at
     if (seenBlocked.has(c.id) && blockedAt !== undefined && blockedAt !== seenBlocked.get(c.id) && !c.isMe) {
       $.ui.toast(`${c.name} 被權限擋下（${c.blocked!.tool}），要你在它的視窗說「放行」`)
@@ -530,6 +545,8 @@ async function refresh($: EngineInterface) {
           since: typeof s.since === 'number' ? s.since : undefined,
           lastError: s.lastError && typeof s.lastError.text === 'string' && typeof s.lastError.at === 'number' ? { text: s.lastError.text, at: s.lastError.at } : undefined,
           prompt: s.prompt && typeof s.prompt.text === 'string' && typeof s.prompt.at === 'number' ? { text: s.prompt.text, at: s.prompt.at } : undefined,
+          office: s.office === true ? true : undefined,
+          approval: s.approval && typeof s.approval.tool === 'string' && typeof s.approval.at === 'number' ? { tool: s.approval.tool, at: s.approval.at } : undefined,
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
@@ -560,6 +577,7 @@ async function refresh($: EngineInterface) {
     attendees = who
     trackMoves(everyone())
   }
+  if (me.office) await readApprovals($, d, now)
   await showCrew($)
 }
 
@@ -569,6 +587,18 @@ async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
   me = { ...me, mode: next, tool: name ?? me.tool, since }
   await showCrew($)
   await publish($, false).catch(() => undefined)
+}
+
+/** 這個視窗的辦公室面板開／關：寫進狀態檔，等核准的 session 據此決定要不要送單 */
+async function setOffice($: EngineInterface, open: boolean) {
+  if (!open) {
+    rasterOpen = false
+    svgOpen = false
+    reviewing = undefined
+  }
+  if ((me.office === true) === open) return
+  me = { ...me, office: open ? true : undefined }
+  await publish($, false)
 }
 
 const TOOL = 'mcp__pixel-office__office_profile'
@@ -685,6 +715,256 @@ async function noteSessionTitle($: EngineInterface, e: unknown) {
     await autoTitle($, undefined, await $.clock.now())
     await publish($, false)
   }
+}
+
+// ---------- 點人核准（控制塔第 1 期）----------
+// 等核准的 session 把單寫到 approvals/<session>.json；開著辦公室面板的視窗顯示「審 <名牌>」，
+// 使用者點 Allow／Deny 才寫 decisions/<session>.json；等的那方比對 session＋toolUseId＋nonce 全對才採用。
+// 終端機原本的詢問照常同時出現，誰先按算誰的；逾時、沒人開辦公室、檔案壞掉 → 不回答，交回終端機。
+// $.fs 沒有刪檔：處理完覆寫成不含指令內容的墓碑，逾時的一律當不存在（主管 office 2026-10-26 裁示）。
+
+export const APPROVAL_TIMEOUT_MS = 120000
+const APPROVAL_POLL_MS = 300
+export const ASK_WINDOW_MS = 2000 // tool.check 到 PermissionRequest 超過這麼久就不接手（免得配到很久以前的同指令）
+export const ALLOW_COOLDOWN_MS = 1000 // 展開後 Allow 要等這麼久才按得下去（防連點誤放行）
+export const APPROVAL_TEXT_MAX = 1500 // 指令全文超過就只給 Deny 與「回終端機按」
+const APPROVAL_LINES_MAX = 20
+export const TOMBSTONE = JSON.stringify({ state: 'done' })
+
+export type ApprovalRecord = { state: 'waiting'; session: string; name: string; toolUseId: string; tool: string; text: string; nonce: string; at: number }
+export type Ask = { toolUseId: string; tool: string; input: string; at: number }
+type Want = { session: string; toolUseId: string; nonce: string }
+
+const officeRoot = (sessionsDir: string) => sessionsDir.replace(/\/sessions$/, '')
+const approvalFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/approvals/${sid}.json`
+const decisionFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/decisions/${sid}.json`
+
+/** tool_input → 給人看的全文：Bash／PowerShell 取 command，其他整份 JSON */
+export function approvalText(tool: string, input: unknown): string {
+  const cmd = (input as { command?: unknown } | undefined)?.command
+  if (/^(bash|powershell)$/i.test(tool) && typeof cmd === 'string') return cmd
+  try {
+    return JSON.stringify(input, null, 1) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 全文放得下（字數與行數）才給 Allow */
+export const approvalFits = (text: string) => text.length > 0 && text.length <= APPROVAL_TEXT_MAX && text.split('\n').length <= APPROVAL_LINES_MAX
+
+/** 鍵排序後的 JSON：tool.check 的 input 與 PermissionRequest 的 tool_input 鍵順序可能不同 */
+export function canon(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`
+  if (v && typeof v === 'object') return `{${Object.keys(v as object).sort().map(k => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`).join(',')}}`
+  return JSON.stringify(v) ?? 'null'
+}
+
+/** PermissionRequest 沒有 tool_use_id：從 2 秒內的 tool.check（ask）找 tool 與 input 完全相同的那筆；不是剛好一筆就不接手 */
+export function matchAsk(list: Ask[], tool: string, input: string, now: number): string | undefined {
+  const hits = list.filter(a => a.tool === tool && a.input === input && now - a.at >= 0 && now - a.at <= ASK_WINDOW_MS)
+  return hits.length === 1 ? hits[0].toolUseId : undefined
+}
+
+/** 讀到的決定檔：沒有／墓碑＝none；三項有一項不符＝mismatch（丟棄）；壞檔＝corrupt（不回答） */
+export function judgeDecision(raw: string | undefined, want: Want): { kind: 'none' } | { kind: 'corrupt' } | { kind: 'mismatch'; why: string } | { kind: 'ok'; behavior: 'allow' | 'deny' } {
+  if (raw === undefined || raw.trim() === '') return { kind: 'none' }
+  let d: Record<string, unknown>
+  try {
+    d = JSON.parse(raw)
+  } catch {
+    return { kind: 'corrupt' }
+  }
+  if (!d || typeof d !== 'object') return { kind: 'corrupt' }
+  if (d.state !== 'decided') return { kind: 'none' }
+  for (const k of ['session', 'toolUseId', 'nonce'] as const) if (d[k] !== want[k]) return { kind: 'mismatch', why: k }
+  return d.behavior === 'allow' || d.behavior === 'deny' ? { kind: 'ok', behavior: d.behavior } : { kind: 'corrupt' }
+}
+
+/** 讀到的核准單：墓碑、壞檔、欄位不全、逾時一律當不存在 */
+export function parseApproval(raw: string | undefined, now: number): ApprovalRecord | undefined {
+  try {
+    const a = JSON.parse(raw ?? '')
+    const ok = a && a.state === 'waiting' && ['session', 'name', 'toolUseId', 'tool', 'text', 'nonce'].every(k => typeof a[k] === 'string') && typeof a.at === 'number'
+    return ok && now - a.at < APPROVAL_TIMEOUT_MS ? (a as ApprovalRecord) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export type WaitIO = { read: () => Promise<string | undefined>; discard: () => Promise<void>; now: () => Promise<number>; sleep: (ms: number) => Promise<void>; settled: () => boolean; log: (text: string) => void }
+
+/** 等決定：採用三項全對的；不符的丟棄並記一行；壞檔、逾時、終端機先結案 → undefined（不回答） */
+export async function waitForDecision(io: WaitIO, want: Want, start: number): Promise<'allow' | 'deny' | undefined> {
+  while (!io.settled()) {
+    if ((await io.now()) - start >= APPROVAL_TIMEOUT_MS) return undefined
+    const j = judgeDecision(await io.read(), want)
+    if (j.kind === 'ok') return j.behavior
+    if (j.kind === 'corrupt') {
+      io.log('pixel-office：決定檔壞掉，交回終端機')
+      return undefined
+    }
+    if (j.kind === 'mismatch') {
+      io.log(`pixel-office：丟棄一筆不符的核准決定（${j.why} 不同）`)
+      await io.discard()
+    }
+    await io.sleep(APPROVAL_POLL_MS)
+  }
+  return undefined
+}
+
+/** 有沒有人開著辦公室面板（含自己）：沒有就不送單，直接交回終端機 */
+export const officeWatched = (list: Coworker[]) => list.some(c => c.office === true)
+
+const asks: Ask[] = [] // 最近判定 ask 的工具呼叫（tool.check 記，PermissionRequest 對）
+const settled = new Set<string>() // 已在別處結案的 toolUseId：終端機先按、指令跑完、被拒
+let pending: ApprovalRecord[] = [] // 辦公室裡等人審的單（開著面板的視窗才讀）
+let reviewing: (Want & { openedAt: number }) | undefined // 面板上展開的那一張
+
+function settle(e: unknown) {
+  const id = (e as { tool_use_id?: unknown }).tool_use_id
+  if (typeof id !== 'string') return
+  settled.add(id)
+  if (settled.size > 200) settled.delete(settled.values().next().value as string) // 只記最近的：等單最多 120 秒，舊的用不到
+}
+
+const sleep = ($: EngineInterface, ms: number) => new Promise<void>(r => $.clock.after(ms, () => r()))
+
+async function clearApproval($: EngineInterface, sid: string) {
+  const d = await sharedDir($)
+  await $.fs.write(approvalFile(d, sid), TOMBSTONE)
+  await $.fs.write(decisionFile(d, sid), TOMBSTONE)
+}
+
+export type SlipIO = WaitIO & { writeSlip: (text: string) => Promise<void>; clearAll: () => Promise<void>; nonce: () => string; shown: (on: { tool: string; at: number } | undefined) => Promise<void> }
+
+/** 送單一輪：先把舊決定清成墓碑再送單（上一輪的決定不會被誤採用）→ 等 → 不論結果兩個檔都清成墓碑 */
+export async function runSlip(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string): Promise<'allow' | 'deny' | undefined> {
+  const start = await io.now()
+  const want = { session: who.session, toolUseId, nonce: io.nonce() }
+  await io.discard()
+  const rec: ApprovalRecord = { state: 'waiting', ...want, name: who.name, tool, text, at: start }
+  await io.writeSlip(JSON.stringify(rec))
+  await io.shown({ tool, at: start })
+  try {
+    return await waitForDecision(io, want, start)
+  } finally {
+    await io.clearAll().catch(() => undefined)
+    await io.shown(undefined).catch(() => undefined)
+  }
+}
+
+/** 送單到辦公室並等決定；回 undefined＝不回答（交回終端機） */
+async function askOffice($: EngineInterface, toolUseId: string, tool: string, text: string): Promise<'allow' | 'deny' | undefined> {
+  const d = await sharedDir($)
+  const sid = me.id
+  return runSlip(
+    {
+      read: () => $.fs.read(decisionFile(d, sid)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined),
+      discard: () => $.fs.write(decisionFile(d, sid), TOMBSTONE).catch(() => undefined),
+      writeSlip: t => $.fs.write(approvalFile(d, sid), t),
+      clearAll: () => clearApproval($, sid),
+      nonce: () => crypto.randomUUID(),
+      shown: async approval => {
+        me = { ...me, approval }
+        await showCrew($)
+        await publish($, false)
+      },
+      now: () => $.clock.now(),
+      sleep: ms => sleep($, ms),
+      settled: () => settled.has(toolUseId),
+      log: t => $.ui.log(t),
+    },
+    { session: sid, name: me.name },
+    toolUseId,
+    tool,
+    text,
+  )
+}
+
+/** 隊伍順序：送單早的排前面 */
+function queueOrder(list: Coworker[] = everyone()): string[] {
+  return list.filter(c => c.approval).sort((a, b) => a.approval!.at - b.approval!.at).map(c => c.id)
+}
+
+/** 開著面板的視窗：讀所有在線 session 的核准單；展開中的那張被換成新的一筆 → 重新展開、冷卻重算 */
+async function readApprovals($: EngineInterface, d: string, now: number) {
+  const alive = new Set(everyone().map(c => c.id))
+  const found: ApprovalRecord[] = []
+  for (const id of alive) {
+    const raw = await $.fs.read(approvalFile(d, id)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined)
+    const a = parseApproval(raw, now)
+    if (a && a.session === id) found.push(a)
+  }
+  found.sort((a, b) => a.at - b.at)
+  if (reviewing) {
+    const cur = found.find(a => a.session === reviewing!.session)
+    if (!cur) reviewing = undefined
+    else if (cur.toolUseId !== reviewing.toolUseId || cur.nonce !== reviewing.nonce) openReview($, cur, now)
+  }
+  const changed = JSON.stringify(found) !== JSON.stringify(pending)
+  pending = found
+  if (changed) $.ui.invalidate('ui.render')
+}
+
+function openReview($: EngineInterface, a: ApprovalRecord, now: number) {
+  reviewing = { session: a.session, toolUseId: a.toolUseId, nonce: a.nonce, openedAt: now }
+  $.ui.invalidate('ui.render')
+  $.clock.after(ALLOW_COOLDOWN_MS + 50, () => $.ui.invalidate('ui.render')) // 冷卻結束，Allow 換回可按的字
+}
+
+/** 使用者在面板上按 Allow／Deny：重讀那張單，三項仍相同才寫決定（只有這裡會寫 decisions/） */
+async function decide($: EngineInterface, behavior: 'allow' | 'deny') {
+  const want = reviewing
+  if (!want) return
+  const now = await $.clock.now()
+  if (behavior === 'allow' && now - want.openedAt < ALLOW_COOLDOWN_MS) {
+    $.ui.toast('剛展開，看完全文再按 Allow（1 秒後才按得下去）')
+    return
+  }
+  const d = await sharedDir($)
+  const a = parseApproval(await $.fs.read(approvalFile(d, want.session)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined), now)
+  if (!a || a.toolUseId !== want.toolUseId || a.nonce !== want.nonce) {
+    reviewing = undefined
+    $.ui.toast('這張單已經結案或換了一筆，沒有送出。')
+    $.ui.invalidate('ui.render')
+    return
+  }
+  if (behavior === 'allow' && !approvalFits(a.text)) return
+  await $.fs.write(decisionFile(d, want.session), JSON.stringify({ state: 'decided', session: want.session, toolUseId: want.toolUseId, nonce: want.nonce, behavior, at: now }))
+  reviewing = undefined
+  $.ui.toast(`${behavior === 'allow' ? '已核准' : '已拒絕'}：${a.name} 的 ${a.tool}`)
+  $.ui.invalidate('ui.render')
+}
+
+/** 面板上的核准區：等人審的名單（審 <名牌>），展開的那張顯示全文與 Allow／Deny；Allow／Deny 不給 hotkey */
+function approvalRows($: EngineInterface, els: Record<string, any>, now: number): unknown[] {
+  const { Box, Text, Button } = els
+  if (pending.length === 0) return []
+  const rows: unknown[] = [
+    <Box key="approval-queue" flexDirection="row">
+      <Text color="yellow">🟡 等你核准：</Text>
+      {pending.map(a => (
+        <Button key={`review-${a.session}`} label={`審 ${a.name}`} onPress={async () => openReview($, a, await $.clock.now())} />
+      ))}
+    </Box>,
+  ]
+  const cur = reviewing && pending.find(a => a.session === reviewing!.session && a.toolUseId === reviewing!.toolUseId && a.nonce === reviewing!.nonce)
+  if (!cur || !reviewing) return rows
+  const fits = approvalFits(cur.text)
+  const ready = now - reviewing.openedAt >= ALLOW_COOLDOWN_MS
+  rows.push(
+    <Text key="approval-head" bold>
+      {cur.name} 要用 {cur.tool}{fits ? '：' : '（全文太長，面板放不下，請回它的終端機看完再按）：'}
+    </Text>,
+    <Text key="approval-body">{fits ? cur.text : `${cur.text.slice(0, 300)}…`}</Text>,
+    <Box key="approval-act" flexDirection="row">
+      {fits ? <Button key="approval-allow" label={ready ? 'Allow' : 'Allow（1 秒後可按）'} onPress={() => decide($, 'allow')} /> : null}
+      <Button key="approval-deny" label="Deny" onPress={() => decide($, 'deny')} />
+      <Button key="approval-close" label={fits ? '收起' : '回終端機按'} onPress={() => { reviewing = undefined; $.ui.invalidate('ui.render') }} />
+    </Box>,
+  )
+  return rows
 }
 
 // 暫時狀態：ms 後若沒被別的狀態蓋掉，就切回 to
@@ -848,9 +1128,42 @@ export const register: Register = on => {
     const verdict = await next(e)
     try {
       // 自己宣告 auto 的 session 不舉手；classic.PreToolUse 在這版沒有觸發，permissionMode 只當備用
-      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) await setMode($, 'waiting', String(e.tool))
+      if (waitsForApproval(verdict.decision, e.tool_use_id, me.auto ? 'auto' : permissionMode)) {
+        // 只記主迴圈、由人回答的詢問：subagent 的、host 程式代答的都不送辦公室
+        if (e.agentId === undefined && e.approver !== 'host') {
+          const now = await $.clock.now()
+          asks.splice(0, asks.length, ...asks.filter(a => now - a.at <= ASK_WINDOW_MS), { toolUseId: String(e.tool_use_id), tool: String(e.tool), input: canon(e.input), at: now })
+        }
+        await setMode($, 'waiting', String(e.tool))
+      }
     } catch {}
     return verdict
+  })
+
+  // 點人核准：辦公室有人開著才送單；只回 allow／deny，從不送 updatedPermissions（沒有 Always）
+  on('classic.PermissionRequest', async ($, e, next) => {
+    try {
+      const ev = e as unknown as { tool_name: string; tool_input: unknown; agent_id?: string; permission_mode?: string }
+      if (ev.agent_id !== undefined || me.auto || NO_HUMAN_MODES.has(ev.permission_mode ?? permissionMode)) return next(e) // auto 交給分類器；subagent 不接
+      const toolUseId = matchAsk(asks, ev.tool_name, canon(ev.tool_input), await $.clock.now())
+      if (!toolUseId) return next(e)
+      await refresh($).catch(() => undefined)
+      if (!officeWatched(everyone())) return next(e)
+      const behavior = await askOffice($, toolUseId, ev.tool_name, approvalText(ev.tool_name, ev.tool_input))
+      if (behavior === 'allow') return { decision: { behavior: 'allow' } }
+      if (behavior === 'deny') return { decision: { behavior: 'deny', message: '使用者在像素辦公室按了 Deny' } }
+    } catch {}
+    return next(e)
+  })
+
+  // 終端機先按了（指令跑完／失敗／被拒）：那張單結案，等的迴圈停下、清檔
+  on('classic.PostToolUse', ($, e, next) => (settle(e), next(e)))
+  on('classic.PostToolUseFailure', ($, e, next) => (settle(e), next(e)))
+  on('classic.PermissionDenied', ($, e, next) => (settle(e), next(e)))
+
+  on('ui.close', async ($, e, next) => {
+    if ((e as { id?: unknown }).id === PANE) await setOffice($, false).catch(() => undefined)
+    return next(e)
   })
 
   on('session.end', async ($, e, next) => {
@@ -949,6 +1262,7 @@ export const register: Register = on => {
       await setMode($, READING.has(name) ? 'reading' : 'typing', name)
     } catch {}
     const ran = await next(e)
+    settle(e)
     try {
       const r = ran as { deny?: string; isError?: boolean; text?: string }
       if (classifierBlocked(r)) {
@@ -989,6 +1303,8 @@ export const register: Register = on => {
     const isBoss = me.role === 'manager'
     const toggleRole = () => applyProfile($, { role: isBoss ? '員工' : '主管' })
     const toggleNight = () => update($, night, v => !v)
+    if (!me.office) void setOffice($, true).catch(() => undefined) // 面板畫得出來＝有人看得到辦公室，等核准的單才會送來
+    const now = pending.length > 0 ? await $.clock.now() : 0 // 有單才要算冷卻
 
     if (e.surface !== 'terminal') {
       const els = $.ui.resolve(e) as Record<string, unknown>
@@ -1025,6 +1341,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
+          {approvalRows($, els, now)}
           {mine.length > 0 ? (
             <Box flexDirection="row">
               {mine.map((b, i) =>
@@ -1062,6 +1379,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
+        {approvalRows($, $.ui.resolve(e) as Record<string, any>, now)}
         {/* 預留列：放個人按鈕（~/.claude/pixel-office/buttons.json），沒有就空一列 */}
         {mine.length > 0 ? (
           <Box flexDirection="row">

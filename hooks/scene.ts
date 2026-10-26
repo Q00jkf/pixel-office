@@ -154,7 +154,11 @@ const matchesLead = (c: Coworker, lead: Coworker) => c.team !== undefined && (c.
 export function teamZones(leads: Coworker[], crew: Coworker[], cols: number): Coworker[] {
   if (cols < 2 || leads.length === 0) return []
   if (leads.length === 1) return leads
-  return leads.filter(m => crew.some(c => matchesLead(c, m))).slice(0, cols - 1)
+  const withPeers = leads.filter(m => crew.some(c => matchesLead(c, m)))
+  // 最左一欄只在真的有人分不到區（沒 team、或他的主管排不進分區）時才留給他們；沒有就每欄都可當分區（主管 office 2026-10-26 裁示）
+  const all = withPeers.slice(0, cols)
+  const loose = crew.some(c => c.role !== 'manager' && !all.some(m => matchesLead(c, m)))
+  return loose ? withPeers.slice(0, cols - 1) : all
 }
 
 /** 主管室座位：先坐回上次那張桌，新來的依編號補空桌；坐不下的不畫（overflow，名牌 +N） */
@@ -356,13 +360,12 @@ export function errandSpot(kind: ErrandKind, width: number, rows: number): Seat 
   return { x: mailboxX(width) + 1, y }
 }
 
-/** 座位 → 上方大走道 → 座位群之間（或右側）的直走道 → 底部走廊 → 目的地，再原路回座位 */
-export function errandRoute(from: Placement, kind: ErrandKind, width: number, rows: number): Seat[] {
+/** 座位 → 上方大走道 → 座位群之間（或右側）的直走道 → 底部走廊的 spot（單程） */
+export function corridorRoute(from: Placement, spot: Seat, width: number, rows: number): Seat[] {
   const L = layout(width, rows)
   const hall = OPEN_Y + 3
   const k0 = L.clusters[0]
   const aisleX = L.cols > 1 ? k0.x + CLUSTER_W + Math.floor(AISLE / 2) : k0.x + CLUSTER_W + 3
-  const spot = errandSpot(kind, width, rows)
   // 借用 route 的「出座位到大走道」那一段：route(from, from) 的前半
   const out = route(from, from, width, rows)
   const exit = out.slice(0, Math.ceil(out.length / 2))
@@ -370,8 +373,19 @@ export function errandRoute(from: Placement, kind: ErrandKind, width: number, ro
   const go = [...exit]
   if (last.y !== hall) go.push({ x: last.x, y: hall })
   go.push({ x: aisleX, y: hall }, { x: aisleX, y: spot.y }, { x: spot.x, y: spot.y })
-  const back = [...go].reverse().slice(1)
-  return [...go, ...back]
+  return go
+}
+
+/** 對外動作：走到家具前再原路回座位 */
+export function errandRoute(from: Placement, kind: ErrandKind, width: number, rows: number): Seat[] {
+  const go = corridorRoute(from, errandSpot(kind, width, rows), width, rows)
+  return [...go, ...[...go].reverse().slice(1)]
+}
+
+/** 等核准的隊伍：第 i 個人站的位置。有櫃台排櫃台前，沒有（窄面板）排大門口；往左排，每人 8 像素 */
+export function queueSpot(width: number, rows: number, i: number): Seat {
+  const base = counterSpot(width, rows) ?? { x: Math.floor(width / 2), y: rows * 2 - WALL - 10 }
+  return { x: Math.max(WALL + 4, base.x - 8 * i), y: base.y }
 }
 
 export type Step = Seat & { dx: number; dy: number } // 位置＋這一段的行進方向（-1／0／1）
@@ -1083,7 +1097,7 @@ function envelope(p: Px, x: number, y: number) {
   p.set(x + 1, y, C.envelopeLine)
 }
 
-export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet; meeting?: boolean; attendees?: string[] }
+export type SceneOptions = { night?: boolean; treatFrame?: number; catOffset?: number; planes?: Plane[]; notices?: Notice[]; raid?: CatRaid; pet?: Pet; meeting?: boolean; attendees?: string[]; queue?: string[] }
 
 export function drawScene(
   crew: Coworker[],
@@ -1138,6 +1152,9 @@ export function drawScene(
   const hugged: OfficeMode = opts.pet === 'baby' || opts.pet === 'bird' ? 'idle' : 'error'
   if (raid?.biting) crew = crew.map(c => (c.id === opts.raid!.targetId ? { ...c, mode: hugged } : c))
   const byId = new Map(crew.map(c => [c.id, c]))
+  // 等核准的人拿著紙站在櫃台（或大門口）排隊，不坐在位子上；走過去／走回來的路上由 walkers 畫
+  const queued = new Map((opts.queue ?? []).map((id, i) => [id, i]))
+  for (const id of queued.keys()) if (!moving.has(id)) moving.set(id, { ...queueSpot(width, rows, queued.get(id)!), dx: 0, dy: 1 })
 
   // 主管室：有主管且沒在走路才坐在位子上；一位坐 L 型大桌，兩位以上換小桌；坐不下的算在最後一張桌的 +N
   const desks = [...placed].filter(([, pl]) => pl.kind === 'boss').sort((a, b) => a[1].slot - b[1].slot)
@@ -1161,8 +1178,9 @@ export function drawScene(
 
   for (const [id, at] of moving) {
     const who = byId.get(id)
-    if (who) walking(p, at, who, frame)
-    const kind = errandOut.get(id)
+    const standing = queued.has(id) && !walkers.some(w => w.id === id)
+    if (who) walking(p, at, who, standing ? 0 : frame)
+    const kind = errandOut.get(id) ?? (queued.has(id) ? 'mail' : undefined) // 排隊的人手上拿著那張單
     if (who && kind) carry(p, at, kind)
   }
 

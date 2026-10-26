@@ -55,7 +55,7 @@ Mode: Builder（jacky 選「自己用得爽」）
 - **協作流程**：coordination 的「目前主管」改成「主管名單」（主管、負責範圍、peer）；派工與撞檔仲裁照「檔案歸哪位主管的範圍」決定，跨範圍的交給 jacky。細節在 eng review 讀完 `collab.md` 與 `01-`～`07-` 再定。
 - 樣板要跟著改（`templates/vault/` 的 coordination 表頭），不然舊 vault 偵測不到（repo `CLAUDE.md`「skill 要求 vault 做某件事時，要讓樣板看得見」）。
 
-### 第 1 期：點人核准
+### 第 1 期：點人核准（已實作：pixel-office 0.13.0，2026-10-26；Open Q2 待實機）
 
 ```
 session X（要跑指令）                    共用資料夾                     任何一個開著辦公室的視窗

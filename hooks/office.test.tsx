@@ -955,14 +955,15 @@ test('the terminal pane animates: the 250 ms timer blits new frames while it is 
 test('after /resume the window follows the new session id: old file marked left, new identity loaded', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   let sid = 'aaaa1111'
+  // 鍵用「資料夾/檔名」：approvals/、decisions/ 與 sessions/ 同檔名
   const files: Record<string, string> = {
-    'bbbb2222.json': JSON.stringify({ id: 'bbbb2222', name: 'boss', role: 'manager', title: 'lead', updatedAt: 0, left: true }),
+    'sessions/bbbb2222.json': JSON.stringify({ id: 'bbbb2222', name: 'boss', role: 'manager', title: 'lead', updatedAt: 0, left: true }),
   }
   on('env.get', () => ({ value: 'C:/Users/tester' }))
   on('fs.list', () => ({ value: [] }))
-  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).pop() ?? ''] ?? '{}' }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).slice(-2).join('/')] ?? '{}' }))
   on('fs.write', (_$: any, e: any) => {
-    files[e.path.split(/[\\/]/).pop() ?? ''] = e.text
+    files[e.path.split(/[\\/]/).slice(-2).join('/')] = e.text
     return { value: undefined }
   })
   on('command.register', () => ({ value: undefined }) as any)
@@ -972,12 +973,12 @@ test('after /resume the window follows the new session id: old file marked left,
   on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
   mock.store(on)
   await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
-  expect(JSON.parse(files['aaaa1111.json']).left).toBe(false)
+  expect(JSON.parse(files['sessions/aaaa1111.json']).left).toBe(false)
 
   sid = 'bbbb2222' // /resume：同一個程序換到另一段對話
   await clock.advance(5000)
-  expect(JSON.parse(files['aaaa1111.json']).left).toBe(true)
-  const now = JSON.parse(files['bbbb2222.json'])
+  expect(JSON.parse(files['sessions/aaaa1111.json']).left).toBe(true)
+  const now = JSON.parse(files['sessions/bbbb2222.json'])
   expect(now.left).toBe(false)
   expect(now.name).toBe('boss')
   expect(now.role).toBe('manager')
@@ -1414,14 +1415,16 @@ test('each manager with peers online gets a column of their own, rightmost first
   expect(text).toContain('TEAM bb')
 })
 
-test('with several managers only those with peers get a zone; one column is always left for everyone else', () => {
+test('with several managers only those with peers get a zone; the left column is kept only when someone has no zone', () => {
   const a = boss('a', 'aa', 'm-a')
   const b = boss('b', 'bb', 'm-b')
   const c = boss('c', 'cc', 'm-c')
   expect(teamZones([a], [a], 2).map(m => m.id)).toEqual(['a']) // 一位主管：照舊，沒有 peer 也鋪
   expect(teamZones([a, b], [a, b, { ...P('p', 'p'), team: 'm-b' }], 3).map(m => m.id)).toEqual(['b'])
   const all = [a, b, c, ...['m-a', 'm-b', 'm-c'].map((t, i) => ({ ...P(`p${i}`, `p${i}`), team: t }))]
-  expect(teamZones([a, b, c], all, 3).map(m => m.id)).toEqual(['a', 'b']) // 3 欄最多 2 區
+  expect(teamZones([a, b, c], all, 3).map(m => m.id)).toEqual(['a', 'b', 'c']) // 沒有閒雜人：3 欄都是分區
+  expect(teamZones([a, b, c], [...all, P('o', 'o')], 3).map(m => m.id)).toEqual(['a', 'b']) // 有沒 team 的人：最左一欄留給他
+  expect(teamZones([a, b, c], all, 2).map(m => m.id)).toEqual(['a']) // c 的 peer 排不進分區＝分不到區的人，照樣留一欄
   expect(teamZones([a, b], all, 1)).toEqual([])
 })
 
@@ -1493,4 +1496,298 @@ test('a manager without a desk still gets a peer zone and TEAM sign (59 columns:
   expect(colOf(seats.get('p1')!.seat.x)).toBe(1) // bb 沒桌子，他的 peer 照樣坐他那區
   expect(colOf(seats.get('o')!.seat.x)).toBe(0)
   expect(cellText(encode(drawScene(crew, 0, w, r)), w, r).join('\n')).toContain('TEAM bb')
+})
+
+test('at 60~80 columns two managers each with peers get two zones when nobody is without a team', () => {
+  for (const w of [60, 80]) {
+    const r = 44
+    const a = boss('a', 'aa', 'm-a')
+    const b = boss('b', 'bb', 'm-b')
+    const crew = [a, b, { ...P('p1', 'p1'), team: 'm-a' }, { ...P('p2', 'p2'), team: 'm-b' }]
+    const L = layout(w, r)
+    expect(L.cols).toBe(2)
+    const colOf = (x: number) => L.clusters.findIndex((k, i) => i < L.cols && x >= k.x && x < k.x + 23)
+    const seats = assignSeats(crew, w, r)
+    expect(colOf(seats.get('p1')!.seat.x)).toBe(1)
+    expect(colOf(seats.get('p2')!.seat.x)).toBe(0)
+    const text = cellText(encode(drawScene(crew, 0, w, r)), w, r).join('\n')
+    expect(text).toContain('TEAM aa')
+    expect(text).toContain('TEAM bb')
+    // 多一個沒 team 的人：退回一區，最左欄給他
+    const more = [...crew, P('o', 'o')]
+    expect(colOf(assignSeats(more, w, r).get('o')!.seat.x)).toBe(0)
+    expect(cellText(encode(drawScene(more, 0, w, r)), w, r).join('\n')).not.toContain('TEAM bb')
+  }
+})
+
+// ---------- 點人核准（控制塔第 1 期）----------
+
+import { ALLOW_COOLDOWN_MS, APPROVAL_TEXT_MAX, APPROVAL_TIMEOUT_MS, ASK_WINDOW_MS, TOMBSTONE, approvalFits, approvalText, canon, judgeDecision, matchAsk, officeWatched, parseApproval, waitForDecision } from './register'
+
+const WANT = { session: 's1', toolUseId: 'toolu_1', nonce: 'n-1' }
+const decided = (over: Record<string, unknown> = {}) => JSON.stringify({ state: 'decided', ...WANT, behavior: 'allow', at: 1, ...over })
+
+test('approval text: Bash/PowerShell show the command, other tools the whole input; Allow only when it all fits', () => {
+  expect(approvalText('Bash', { command: 'git push', description: 'x' })).toBe('git push')
+  expect(approvalText('PowerShell', { command: 'ls' })).toBe('ls')
+  expect(approvalText('Write', { file_path: 'a', content: 'b' })).toContain('"file_path"')
+  expect(approvalFits('git push')).toBe(true)
+  expect(approvalFits('')).toBe(false)
+  expect(approvalFits('x'.repeat(APPROVAL_TEXT_MAX + 1))).toBe(false)
+  expect(approvalFits(Array.from({ length: 21 }, () => 'a').join('\n'))).toBe(false)
+})
+
+test('PermissionRequest is matched to the tool.check ask only when exactly one same call was asked within 2 seconds', () => {
+  const ask = (id: string, at: number, command = 'ls') => ({ toolUseId: id, tool: 'Bash', input: canon({ command }), at })
+  expect(canon({ b: 1, a: { d: 2, c: [1, { f: 0, e: 1 }] } })).toBe(canon({ a: { c: [1, { e: 1, f: 0 }], d: 2 }, b: 1 }))
+  expect(matchAsk([ask('t1', 1000)], 'Bash', canon({ command: 'ls' }), 1071)).toBe('t1')
+  expect(matchAsk([ask('t1', 1000)], 'Bash', canon({ command: 'ls' }), 1000 + ASK_WINDOW_MS + 1)).toBeUndefined() // 太久以前
+  expect(matchAsk([ask('t1', 1000)], 'Bash', canon({ command: 'rm -rf x' }), 1071)).toBeUndefined() // 不同指令
+  expect(matchAsk([ask('t1', 1000)], 'PowerShell', canon({ command: 'ls' }), 1071)).toBeUndefined()
+  expect(matchAsk([ask('t1', 1000), ask('t2', 1050)], 'Bash', canon({ command: 'ls' }), 1071)).toBeUndefined() // 兩筆一樣：不猜
+})
+
+test('a decision is taken only when session, toolUseId and nonce all match; tombstones and junk are not decisions', () => {
+  expect(judgeDecision(undefined, WANT)).toEqual({ kind: 'none' })
+  expect(judgeDecision(TOMBSTONE, WANT)).toEqual({ kind: 'none' })
+  expect(judgeDecision('{oops', WANT)).toEqual({ kind: 'corrupt' })
+  expect(judgeDecision(decided(), WANT)).toEqual({ kind: 'ok', behavior: 'allow' })
+  expect(judgeDecision(decided({ behavior: 'deny' }), WANT)).toEqual({ kind: 'ok', behavior: 'deny' })
+  expect(judgeDecision(decided({ nonce: 'n-2' }), WANT)).toEqual({ kind: 'mismatch', why: 'nonce' })
+  expect(judgeDecision(decided({ toolUseId: 'toolu_0' }), WANT)).toEqual({ kind: 'mismatch', why: 'toolUseId' })
+  expect(judgeDecision(decided({ session: 's2' }), WANT)).toEqual({ kind: 'mismatch', why: 'session' })
+  expect(judgeDecision(decided({ behavior: 'always' }), WANT)).toEqual({ kind: 'corrupt' }) // 只有 allow／deny
+})
+
+test('an approval slip older than the timeout, a tombstone or a broken file counts as not there', () => {
+  const rec = { state: 'waiting', session: 's1', name: 'e2', toolUseId: 't', tool: 'Bash', text: 'ls', nonce: 'n', at: 1000 }
+  expect(parseApproval(JSON.stringify(rec), 1000 + 5000)?.text).toBe('ls')
+  expect(parseApproval(JSON.stringify(rec), 1000 + APPROVAL_TIMEOUT_MS)).toBeUndefined()
+  expect(parseApproval(TOMBSTONE, 1000)).toBeUndefined()
+  expect(parseApproval('{', 1000)).toBeUndefined()
+  expect(parseApproval(JSON.stringify({ ...rec, nonce: 3 }), 1000)).toBeUndefined()
+  expect(officeWatched([P('a', 'a'), { ...P('b', 'b'), office: true }])).toBe(true)
+  expect(officeWatched([P('a', 'a')])).toBe(false) // 辦公室沒開：不送單
+})
+
+const fakeIO = (reads: (string | undefined)[], opts: { settledAt?: number; step?: number } = {}) => {
+  let t = 0
+  let i = 0
+  const logs: string[] = []
+  let discards = 0
+  return {
+    io: {
+      read: async () => reads[Math.min(i++, reads.length - 1)],
+      discard: async () => void (discards += 1),
+      now: async () => t,
+      sleep: async (ms: number) => void (t += opts.step ?? ms),
+      settled: () => opts.settledAt !== undefined && t >= opts.settledAt,
+      log: (x: string) => void logs.push(x),
+    },
+    logs,
+    discards: () => discards,
+    elapsed: () => t,
+  }
+}
+
+test('waiting: a nonce or toolUseId mismatch is discarded with one log line and waiting goes on', async () => {
+  const f = fakeIO([undefined, decided({ nonce: 'old' }), decided({ toolUseId: 'toolu_0' }), decided()])
+  expect(await waitForDecision(f.io, WANT, 0)).toBe('allow')
+  expect(f.discards()).toBe(2)
+  expect(f.logs).toHaveLength(2)
+  expect(f.logs[0]).toContain('nonce')
+  expect(f.logs[1]).toContain('toolUseId')
+})
+
+test('waiting: timeout, a broken file or the terminal answering first all give no answer (back to the terminal)', async () => {
+  const slow = fakeIO([undefined])
+  expect(await waitForDecision(slow.io, WANT, 0)).toBeUndefined()
+  expect(slow.elapsed()).toBeGreaterThanOrEqual(APPROVAL_TIMEOUT_MS)
+  expect(slow.elapsed()).toBeLessThan(APPROVAL_TIMEOUT_MS + 1000)
+  const broken = fakeIO([undefined, '{not json'])
+  expect(await waitForDecision(broken.io, WANT, 0)).toBeUndefined()
+  expect(broken.logs[0]).toContain('壞掉')
+  const terminal = fakeIO([undefined, undefined, decided()], { settledAt: 300 }) // 終端機先按了：之後才到的決定也不採用
+  expect(await waitForDecision(terminal.io, WANT, 0)).toBeUndefined()
+})
+
+test('PermissionRequest with no matching ask (or from a subagent) is left to the terminal untouched', async ($, on) => {
+  MOCKS(on, [])
+  let reached = 0
+  on('classic.PermissionRequest', () => {
+    reached += 1
+    return {} as any
+  })
+  const base = { tool_name: 'Bash', tool_input: { command: 'git push' }, permission_suggestions: [] } as any
+  expect(await ($ as any).classic.PermissionRequest(base)).toEqual({})
+  expect(await ($ as any).classic.PermissionRequest({ ...base, agent_id: 'a1' })).toEqual({})
+  expect(await ($ as any).classic.PermissionRequest({ ...base, permission_mode: 'bypassPermissions' })).toEqual({})
+  expect(reached).toBe(3)
+})
+
+const officeFs = (on: any, files: Record<string, string>, writes: { path: string; text: string }[] = []) => {
+  const key = (p: string) => p.split(/[\\/]/).slice(-2).join('/')
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', (_$: any, e: any) => ({
+    value: Object.keys(files)
+      .filter(k => k.startsWith(`${String(e.path).split(/[\\/]/).pop()}/`))
+      .map(k => ({ name: k.split('/')[1], kind: 'file', size: 1, mtimeMs: 0, isLink: false })),
+  }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[key(e.path)] = e.text
+    writes.push({ path: key(e.path), text: e.text })
+    return { value: undefined }
+  })
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+}
+
+import { runSlip } from './register'
+
+const slipIO = (files: Record<string, string>, opts: { settledAt?: number } = {}) => {
+  let t = 1_000_000
+  const order: string[] = []
+  const shown: unknown[] = []
+  return {
+    io: {
+      read: async () => files.decision,
+      discard: async () => void ((files.decision = TOMBSTONE), order.push('decision')),
+      writeSlip: async (x: string) => void ((files.slip = x), order.push('slip')),
+      clearAll: async () => void ((files.slip = TOMBSTONE), (files.decision = TOMBSTONE)),
+      nonce: () => 'fresh-nonce',
+      shown: async (on: unknown) => void shown.push(on),
+      now: async () => t,
+      sleep: async (ms: number) => {
+        t += ms
+        tick?.(t)
+      },
+      settled: () => opts.settledAt !== undefined && t >= opts.settledAt,
+      log: () => undefined,
+    },
+    order,
+    shown,
+    onTick: (f: (t: number) => void) => void (tick = f),
+  }
+  var tick: ((t: number) => void) | undefined
+}
+
+test('a slip: old decision cleared before sending, guessed nonce discarded, the real one taken; afterwards both files are tombstones', async () => {
+  const files: Record<string, string> = { decision: decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce' }) } // 上一輪殘檔，剛好長得一樣也不能被採用
+  const f = slipIO(files)
+  let step = 0
+  f.onTick(() => {
+    step += 1
+    if (step === 1) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'guess' })
+    if (step === 3) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce', behavior: 'deny' })
+  })
+  const got = await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'git push --force')
+  expect(got).toBe('deny')
+  expect(f.order.slice(0, 2)).toEqual(['decision', 'slip']) // 先清舊決定，再送單
+  expect(f.order.filter(x => x === 'decision').length).toBe(2) // 送單前一次＋丟棄猜錯的一次
+  expect(files.slip).toBe(TOMBSTONE)
+  expect(files.decision).toBe(TOMBSTONE)
+  expect(f.shown[0]).toMatchObject({ tool: 'Bash' })
+  expect(f.shown[f.shown.length - 1]).toBeUndefined() // 畫面上的單收掉
+})
+
+test('a slip times out after 120 s with no answer, or stops as soon as the terminal answers; tombstones either way', async () => {
+  const quiet: Record<string, string> = {}
+  expect(await runSlip(slipIO(quiet).io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
+  expect(quiet.slip).toBe(TOMBSTONE)
+  const files: Record<string, string> = {}
+  const f = slipIO(files, { settledAt: 1_000_000 + 600 })
+  f.onTick(t => {
+    if (t > 1_000_000 + 900) files.decision = decided({ toolUseId: 'toolu_9', nonce: 'fresh-nonce' })
+  })
+  expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'ls')).toBeUndefined()
+  expect(files.decision).toBe(TOMBSTONE)
+})
+
+test('office pane: lists the slip, Allow is held for 1 s after opening, then writes the exact decision', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'git push', nonce: 'nn', at: NOW - 1000 }
+  const files: Record<string, string> = {
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false, approval: { tool: 'Bash', at: NOW - 1000 } }),
+    'approvals/bbbb.json': JSON.stringify(slip),
+  }
+  const writes: { path: string; text: string }[] = []
+  officeFs(on, files, writes)
+  on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await $.command.run({ command: 'office', args: '' } as any) // 面板開著 → 下一輪 refresh 讀到核准單（測試裡沒有 session.start 的定時器，用 /office 觸發）
+  expect(await ui.find({ key: 'review-bbbb' })).toBeDefined()
+  expect(JSON.parse(files[Object.keys(files).find(k => k.startsWith('sessions/') && k !== 'sessions/bbbb.json')!]).office).toBe(true)
+  await ui.press({ key: 'review-bbbb' })
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text)).toContain('git push')
+  await ui.press({ key: 'approval-allow' }) // 剛展開：擋下
+  expect(writes.some(w => w.path === 'decisions/bbbb.json')).toBe(false)
+  await clock.advance(ALLOW_COOLDOWN_MS)
+  await ui.press({ key: 'approval-allow' })
+  expect(JSON.parse(files['decisions/bbbb.json'])).toMatchObject({ state: 'decided', session: 'bbbb', toolUseId: 'toolu_5', nonce: 'nn', behavior: 'allow' })
+  await ui.unmount()
+})
+
+test('office pane: a slip replaced by a new request reopens with a fresh cooldown; a too-long command offers only Deny (no cooldown on Deny)', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const slip = { state: 'waiting', session: 'bbbb', name: 'impl', toolUseId: 'toolu_5', tool: 'Bash', text: 'ls', nonce: 'n1', at: NOW }
+  const files: Record<string, string> = {
+    'sessions/bbbb.json': JSON.stringify({ id: 'bbbb', name: 'impl', role: 'staff', mode: 'waiting', tool: 'Bash', updatedAt: NOW, left: false }),
+    'approvals/bbbb.json': JSON.stringify(slip),
+  }
+  officeFs(on, files)
+  on('ui.toast', () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount(PANE_PROPS)
+  await $.command.run({ command: 'office', args: '' } as any)
+  await ui.press({ key: 'review-bbbb' })
+  await clock.advance(ALLOW_COOLDOWN_MS)
+  // 對方換了一筆（新 toolUseId、新 nonce，指令很長）：重新展開、冷卻重算
+  const long = 'x'.repeat(APPROVAL_TEXT_MAX + 10)
+  files['approvals/bbbb.json'] = JSON.stringify({ ...slip, toolUseId: 'toolu_6', nonce: 'n2', text: long, at: NOW + 3000 })
+  files['sessions/bbbb.json'] = JSON.stringify({ ...JSON.parse(files['sessions/bbbb.json']), updatedAt: NOW + 3000 })
+  await $.command.run({ command: 'office', args: '' } as any)
+  expect(await ui.find({ key: 'approval-allow' })).toBeUndefined()
+  expect(await ui.find({ key: 'approval-deny' })).toBeDefined()
+  await ui.press({ key: 'approval-deny' })
+  expect(JSON.parse(files['decisions/bbbb.json'])).toMatchObject({ toolUseId: 'toolu_6', nonce: 'n2', behavior: 'deny' })
+  // 再換一筆短的：展開中的那張被換掉 → 冷卻從頭算，馬上按 Allow 擋下
+  await ui.press({ key: 'review-bbbb' })
+  await clock.advance(ALLOW_COOLDOWN_MS)
+  files['approvals/bbbb.json'] = JSON.stringify({ ...slip, toolUseId: 'toolu_7', nonce: 'n3', text: 'ls', at: NOW + 6000 })
+  await $.command.run({ command: 'office', args: '' } as any)
+  await ui.press({ key: 'approval-allow' })
+  expect(JSON.parse(files['decisions/bbbb.json']).toolUseId).toBe('toolu_6')
+  await clock.advance(ALLOW_COOLDOWN_MS)
+  await ui.press({ key: 'approval-allow' })
+  expect(JSON.parse(files['decisions/bbbb.json'])).toMatchObject({ toolUseId: 'toolu_7', nonce: 'n3', behavior: 'allow' })
+  await ui.unmount()
+})
+
+import { queueSpot } from './scene'
+
+test('waiting for the office: people queue at the counter (front door when narrow) holding a slip, not at their desk', () => {
+  expect(queueSpot(112, 44, 0)).toEqual(counterSpot(112, 44))
+  expect(queueSpot(112, 44, 1).x).toBe(counterSpot(112, 44)!.x - 8)
+  expect(queueSpot(48, 44, 0)).toEqual({ x: 24, y: 88 - 2 - 10 }) // 沒有櫃台：大門口
+  const w = P('w', 'w', 'waiting')
+  const seat = assignSeats([w], 112, 44).get('w')!
+  const plain = drawScene([w], 0, 112, 44).px
+  const queued = drawScene([w], 0, 112, 44, [], undefined, { queue: ['w'] }).px
+  const at = queueSpot(112, 44, 0)
+  const changed = (x0: number, y0: number) => {
+    let n = 0
+    for (let y = y0 - 3; y < y0 + 6; y++) for (let x = x0 - 3; x < x0 + 4; x++) if (plain[y * 112 + x] !== queued[y * 112 + x]) n += 1
+    return n
+  }
+  expect(changed(at.x, at.y)).toBeGreaterThan(10) // 櫃台前多了一個人
+  expect(changed(seat.stand.x, seat.stand.y)).toBeGreaterThan(0) // 座位上的人起身了
+})
+
+test('the roster says the office pane can answer a waiting session', () => {
+  const c = { ...P('w', 'w', 'waiting'), tool: 'Bash', since: 1000, approval: { tool: 'Bash', at: 1000 } }
+  expect(roster([c], 5000)).toContain('辦公室面板可審')
+  expect(roster([{ ...c, approval: undefined }], 5000)).not.toContain('辦公室面板可審')
 })
