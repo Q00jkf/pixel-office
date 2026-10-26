@@ -1,33 +1,45 @@
-// Desktop（Svg 元素）的向量畫法：跟 drawScene 吃同一份 crew、座位、SceneOptions，座標也是同一套「像素」單位，
-// 只是輸出一份形狀清單（圓、圓角矩形、路徑、文字）而不是點陣。純資料、不依賴 $；終端機的 Raster 照舊走 drawScene。
+// Desktop（Svg 元素）的畫法：跟 drawScene 吃同一份 crew、座位、SceneOptions，座標也是同一套「像素」單位，
+// 只是輸出一份形狀清單而不是點陣。純資料、不依賴 $；終端機的 Raster 照舊走 drawScene。
+// 0.15.0 起人、家具、寵物用 2dPig「Pixel Office」素材（CC0，assets/2dpig/）：素材表在 <defs> 只嵌一次，
+// 每個圖素是一個巢狀 <svg viewBox> 用 <use> 裁切引用（2026-10-27 Edge 以 <img> 開實測可畫、可翻面）。
+// 名牌、狀態泡泡、螢幕、團隊地毯、寶寶與鳥照舊用向量畫。
 import type { Coworker, ErrandKind, OfficeMode, Pet } from '../types'
 import {
-  BOOKS, GEOM, HAIR, OFFICE_DOOR_W, OFFICE_DOOR_X, PALETTE as C, SHIRTS, TEAM_RUGS,
+  GEOM, OFFICE_DOOR_W, OFFICE_DOOR_X, PALETTE as C, TEAM_RUGS,
   assignSeats, bossSeating, catMoveFrame, catPose, catRange, counterSpot, counterX, hash, layout, mailboxX, meetTable,
-  pathLength, planePos, queueSpot, raidPath, raidPose, shade, teamZones, walkerPos,
+  pathLength, planePos, queueSpot, raidPath, raidPose, teamZones, walkerPos,
   type Placement, type SceneOptions, type Seat, type Step, type Walker,
 } from './scene'
+import { CELL, PEOPLE, SHEET_H, SHEET_PNG, SHEET_W, SHIRTS, SPRITES, type SpriteId } from './sheet'
 
-const { WALL, TOP_H, OPEN_Y, UNIT_W, UNIT_H, CLUSTER_W, CLUSTER_H, BOSS_W, CABINET_X, CAT_START, CAT_W, CAT_H, CAT_LIFT, DESK_W, COUNTER_W, MEET_DOOR_W, WALK_SPEED, TREAT_FRAMES } = GEOM
-void BOSS_W
+const { WALL, TOP_H, UNIT_W, UNIT_H, CLUSTER_W, ROW_SPLIT, CABINET_X, CAT_START, CAT_W, CAT_H, CAT_LIFT, DESK_W, COUNTER_W, MEET_DOOR_W, WALK_SPEED, TREAT_FRAMES } = GEOM
 
 type Paint = number | string // 數字＝顏色，字串＝原樣（例如 url(#tile)）
+type Box4 = readonly [number, number, number, number]
 export type Shape =
   | { k: 'rect'; x: number; y: number; w: number; h: number; r?: number; fill: Paint; stroke?: Paint; sw?: number; op?: number }
   | { k: 'circle'; cx: number; cy: number; r: number; fill: Paint; stroke?: Paint; sw?: number; op?: number }
   | { k: 'ellipse'; cx: number; cy: number; rx: number; ry: number; fill: Paint; stroke?: Paint; sw?: number }
   | { k: 'path'; d: string; fill?: Paint; stroke?: Paint; sw?: number; op?: number }
-  | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; halo?: Paint }
+  | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; halo?: Paint; mono?: boolean }
+  | { k: 'sprite'; id: SpriteId; src: Box4; x: number; y: number; w: number; h: number; flip?: boolean }
 
 /** shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它） */
 export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[] }
+
+/** 素材的 Sweetie 16 色盤：自己畫的牆、地板、螢幕框跟素材同色，才不會一眼看出是兩套 */
+const SW = {
+  ink: 0x1a1c2c, plum: 0x5d275d, red: 0xb13e53, orange: 0xef7d57, yellow: 0xffcd75, lime: 0xa7f070, green: 0x38b764, teal: 0x257179,
+  navy: 0x29366f, blue: 0x3b5dc9, sky: 0x41a6f6, cyan: 0x73eff7, white: 0xf4f4f4, silver: 0x94b0c2, slate: 0x566c86, dark: 0x333c57,
+}
+const PX = 0.3 // 人物素材一個像素＝0.3 單位：20×25 的人物格畫成 6×7.5，跟原本的圓頭小人一樣大
 
 const FONT = "'Microsoft JhengHei','PingFang TC','Noto Sans TC','Noto Sans CJK TC',sans-serif"
 const NAME_SIZE = 1.9
 const NAME_MIN = 1.5 // 放不下先縮到這麼小，還放不下才截字
 
 /** 字的估計寬度：全形（中日韓）一個字＝字高，半形約 0.6 */
-const wide = (ch: string) => /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
+const wide = (ch: string) => /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
 export function textWidth(t: string, size: number): number {
   let w = 0
   for (const ch of t) w += wide(ch) ? size : size * 0.6
@@ -79,8 +91,20 @@ class Pen {
   path(d: string, fill?: Paint, stroke?: Paint, sw?: number) {
     this.put({ k: 'path', d, fill, stroke, sw })
   }
-  text(x: number, y: number, text: string, size: number, fill: Paint, o: { anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint } = {}) {
+  text(x: number, y: number, text: string, size: number, fill: Paint, o: { anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; mono?: boolean } = {}) {
     if (text) this.put({ k: 'text', x, y, text, size, fill, ...o })
+  }
+  /** 素材圖：寬 w；h 省略時照原比例。crop＝只取圖素裡的一塊（相對座標） */
+  sprite(id: SpriteId, x: number, y: number, w: number, h?: number, flip = false, crop?: Box4): { w: number; h: number } {
+    const [sx, sy, sw, sh] = SPRITES[id]
+    const src: Box4 = crop ? [sx + crop[0], sy + crop[1], crop[2], crop[3]] : [sx, sy, sw, sh]
+    const hh = h ?? (w * src[3]) / src[2]
+    this.put({ k: 'sprite', id, src, x, y, w, h: hh, ...(flip ? { flip } : {}) })
+    return { w, h: hh }
+  }
+  /** 依素材原比例、以一個素材像素＝k 單位畫 */
+  spriteAt(id: SpriteId, x: number, y: number, k: number, flip = false) {
+    return this.sprite(id, x, y, SPRITES[id][2] * k, SPRITES[id][3] * k, flip)
   }
   /** 名牌類：畫在最上層，字帶淺色描邊 */
   label(x: number, y: number, text: string, size: number, fill: Paint, o: { anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint } = {}) {
@@ -101,108 +125,136 @@ const n = (v: number) => String(Math.round(v * 100) / 100)
 
 // ---------- 建築 ----------
 
-function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number, plantInOffice: boolean) {
+const BACK_H = 5 // 會議室、主管室的白色後牆（窗戶、時鐘、月曆掛在這）
+
+/** 白牆：橫向壁板線＋踢腳板 */
+function backWall(p: Pen, x: number, w: number) {
+  p.rect(x, WALL, w, BACK_H, SW.white)
+  p.path(`M${x} ${WALL + 1.5}h${w}M${x} ${WALL + 3}h${w}`, undefined, 0xdde4ea, 0.3)
+  p.rect(x, WALL + BACK_H - 0.6, w, 0.6, SW.silver)
+}
+
+function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number, plantInOffice: boolean, clock: string) {
   const { officeX, officeW, h } = L
   p.rect(0, 0, w, h, 'url(#tile)')
-  // 會議室木地板（木紋一條 path）、主管室地毯
-  p.rect(WALL, WALL, officeX - 2 * WALL, TOP_H, C.meetFloor)
+  // 會議室木地板、主管室紅地毯
+  p.rect(WALL, WALL, officeX - 2 * WALL, TOP_H, SW.yellow)
   let planks = ''
-  for (let y = WALL + 3; y < WALL + TOP_H; y += 4) planks += `M${WALL} ${y + 0.5}H${officeX - WALL}`
-  p.path(planks, undefined, C.meetPlank, 0.35)
-  p.rect(officeX, WALL, w - WALL - officeX, TOP_H, C.rugTrim)
-  p.rect(officeX + 1, WALL + 1, w - WALL - officeX - 2, TOP_H - 2, C.rug, 1.5)
+  for (let y = WALL + 3; y < WALL + TOP_H; y += 3) planks += `M${WALL} ${y + 0.5}H${officeX - WALL}`
+  p.path(planks, undefined, 0xe8b25f, 0.3)
+  p.rect(officeX, WALL, w - WALL - officeX, TOP_H, SW.plum)
+  p.rect(officeX + 1, WALL + 1, w - WALL - officeX - 2, TOP_H - 2, SW.red, 1)
+  backWall(p, WALL, officeX - 2 * WALL)
+  backWall(p, officeX, w - WALL - officeX)
 
-  // 牆
-  for (const [x, y, rw, rh] of [[0, 0, w, WALL], [0, h - WALL, w, WALL], [0, 0, WALL, h], [w - WALL, 0, WALL, h], [0, WALL + TOP_H, w, WALL], [officeX - WALL, 0, WALL, OPEN_Y]]) p.rect(x, y, rw, rh, C.wall)
-  p.rect(WALL, OPEN_Y - 1, w - 2 * WALL, 0.5, C.wallHi)
+  // 牆：深藍灰外框，上緣一條亮線
+  for (const [x, y, rw, rh] of [[0, 0, w, WALL], [0, h - WALL, w, WALL], [0, 0, WALL, h], [w - WALL, 0, WALL, h], [0, WALL + TOP_H, w, WALL], [officeX - WALL, 0, WALL, WALL + TOP_H + WALL]]) p.rect(x, y, rw, rh, SW.dark)
+  for (const [x, y, rw] of [[0, 0, w], [0, WALL + TOP_H, w]]) p.rect(x, y, rw, 0.5, SW.slate)
 
-  // 窗戶（夜裡換成夜空＋星星，畫在暗幕上面）
+  // 外牆的小窗（夜裡換成夜空＋星星，畫在暗幕上面）
   p.glowing(() => {
-    for (let x = 5; x + 6 < w - 3; x += 11) {
-      p.rect(x, 0.2, 6, 1.2, p.night ? C.nightSky : C.glass, 0.4)
-      if (p.night && (x + frame) % 7 !== 0) p.circle(x + 2.5, 0.8, 0.3, C.star)
-    }
-    for (let y = OPEN_Y + 4; y + 6 < h - 4; y += 11) {
-      p.rect(0.2, y, 1.2, 6, p.night ? C.nightSky : C.glass, 0.4)
-      p.rect(w - 1.4, y, 1.2, 6, p.night ? C.nightSky : C.glass, 0.4)
+    for (let y = WALL + TOP_H + WALL + 4; y + 6 < h - 4; y += 11) {
+      p.rect(0.3, y, 1.4, 6, p.night ? C.nightSky : SW.sky, 0.3, SW.ink, 0.2)
+      p.rect(w - 1.7, y, 1.4, 6, p.night ? C.nightSky : SW.sky, 0.3, SW.ink, 0.2)
     }
   })
 
-  // 門洞
-  p.rect(L.meetDoor, WALL + TOP_H, MEET_DOOR_W, WALL, C.tileA)
-  p.rect(officeX + OFFICE_DOOR_X, WALL + TOP_H, OFFICE_DOOR_W, WALL, C.tileA)
-  p.path(`M${officeX + OFFICE_DOOR_X} ${WALL + TOP_H}A${OFFICE_DOOR_W} ${OFFICE_DOOR_W - 3} 0 0 1 ${officeX + OFFICE_DOOR_X + OFFICE_DOOR_W} ${WALL + TOP_H - 4}`, 'none', C.ink, 0.3)
-  p.rect(Math.floor(w / 2) - 3, h - WALL, 6, WALL, C.tileA)
+  // 後牆：會議室＝月曆、窗；主管室＝窗、國旗、畫
+  const meetW = officeX - 2 * WALL
+  p.sprite('calendar', WALL + 1, WALL + 0.6, 4.2)
+  windows(p, WALL + 7, WALL + meetW - 1, frame)
+  // 時鐘掛在員工區看得到的那面牆（會議室門與隔牆之間，像範例圖掛在門上方）；太窄放不下就不掛
+  const room = officeX - WALL - (L.meetDoor + MEET_DOOR_W)
+  if (room >= 7) {
+    const kx = L.meetDoor + MEET_DOOR_W + (room - 6) / 2
+    p.rect(kx, WALL + TOP_H + 0.1, 6, 1.8, SW.ink, 0.2, SW.slate, 0.2)
+    p.glowing(() => p.text(kx + 3, WALL + TOP_H + 1.5, clock, 1.6, p.night ? SW.orange : SW.red, { anchor: 'middle', bold: true, mono: true }))
+  }
+  windows(p, officeX + (plantInOffice ? 6 : 1), w - WALL - 1, frame, ['flagUS', 'picSunset'])
+
+  // 門洞（地板色）＋門框
+  for (const [x, dw] of [[L.meetDoor, MEET_DOOR_W], [officeX + OFFICE_DOOR_X, OFFICE_DOOR_W]]) {
+    p.rect(x, WALL + TOP_H, dw, WALL, SW.sky)
+    p.rect(x - 0.4, WALL + TOP_H, 0.4, WALL, SW.ink)
+    p.rect(x + dw, WALL + TOP_H, 0.4, WALL, SW.ink)
+  }
+  p.rect(Math.floor(w / 2) - 3, h - WALL, 6, WALL, SW.sky)
 
   // 門牌（向量版可以寫中文）
   const signY = WALL + TOP_H + 1.5
   p.text(officeX + OFFICE_DOOR_X + OFFICE_DOOR_W + 1, signY, '主管室', 1.7, C.gold, { bold: true })
-  if (L.meetDoor - WALL - 1 >= 7) p.text(WALL + 1, signY, '會議室', 1.7, C.glassHi, { bold: true })
+  if (L.meetDoor - WALL - 1 >= 7) p.text(WALL + 1, signY, '會議室', 1.7, SW.cyan, { bold: true })
 
-  // 會議室：白板、橢圓長桌、椅子、時鐘
-  p.rect(WALL, WALL + 6, 1, 8, C.board, 0.3)
-  p.rect(WALL + 0.2, WALL + 8, 0.6, 0.6, C.marker)
-  const { cx, cy, a, b } = meetTable(officeX)
-  p.ellipse(cx + 0.5, cy + 0.5, a + 0.5, b + 0.5, C.table, C.tableEdge, 0.6)
-  p.ellipse(cx + 0.5, cy - 0.5, a - 1.5, b - 1.8, C.tableHi)
-  for (let x = Math.ceil(cx - a) + 1; x < cx + a - 1; x += 3) {
-    p.rect(x, Math.floor(cy - b) - 3, 2, 2, C.chair, 0.6)
-    p.rect(x, Math.ceil(cy + b) + 2, 2, 2, C.chair, 0.6)
-  }
-  p.circle(WALL + 3.5, WALL + 2.5, 1.6, C.white, C.text, 0.2)
-  const ang = (Math.floor(frame / 4) % 4) * (Math.PI / 2)
-  p.path(`M${WALL + 3.5} ${WALL + 2.5}l${n(Math.sin(ang) * 1.1)} ${n(-Math.cos(ang) * 1.1)}`, undefined, C.text, 0.25)
-
-  // 書架
-  p.rect(officeX + 7, WALL, officeW - 9, 2, C.bossEdge)
-  for (let x = officeX + 7; x < officeX + officeW - 2; x++) p.rect(x + 0.1, WALL + 0.6, 0.8, 1.3, BOOKS[(x * 7) % BOOKS.length], 0.15)
+  // 會議室椅子（長桌在 drawVector 裡、上排的人之後才畫）
+  for (const [i, s] of L.meet.entries()) p.sprite(CHAIRS[i % CHAIRS.length], s.x + 0.5 - 1.65, s.y + (i % 2 ? 0.8 : -1.2), 3.3, 6.6)
 
   if (plantInOffice) plant(p, officeX + 1, WALL + 1)
   plant(p, WALL + 1, h - WALL - 7)
   plant(p, w - WALL - 6, h - WALL - 7)
 
-  // 影印機、檔案櫃、郵筒、櫃台
+  // 走廊：販賣機、影印桌、紅色郵筒（垃圾桶素材）、櫃台
   const cpx = w - WALL - 16
   const cpy = h - WALL - 7
-  p.rect(cpx, cpy, 8, 5, C.copier, 0.8)
-  p.rect(cpx, cpy, 8, 1.2, C.copierTop, 0.5)
-  p.rect(cpx + 1, cpy + 2, 4, 2, C.paper, 0.3)
-  p.glowing(() => p.circle(cpx + 6.5, cpy + 2.5, 0.5, frame % 4 < 2 ? C.led : C.copierTop))
-  p.rect(CABINET_X, cpy - 1, 6, 6, C.cabinet, 0.5)
-  for (const dy of [0, 2, 4]) {
-    p.rect(CABINET_X, cpy - 1 + dy, 6, 0.4, C.cabinetDark)
-    p.rect(CABINET_X + 2.5, cpy + dy + 0.2, 1, 0.5, C.handle, 0.2)
-  }
+  p.sprite('vending', CABINET_X, cpy - 3, 5.4)
+  p.sprite('table', cpx, cpy + 0.2, 8)
+  p.spriteAt('printer', cpx + 1, cpy - 2.4, 0.4)
+  p.spriteAt('paper', cpx + 5, cpy - 1.6, 0.3)
+  p.glowing(() => p.circle(cpx + 3.8, cpy - 0.6, 0.35, frame % 4 < 2 ? C.led : SW.slate))
   const mx = mailboxX(w)
-  p.rect(mx, h - WALL - 6, 3, 4, C.mailbox, 1)
-  p.rect(mx + 0.5, h - WALL - 4.5, 2, 0.5, C.mailboxDark)
+  p.spriteAt('binRed', mx, h - WALL - 6.5, 0.33)
   if (counterSpot(w, h / 2)) {
     const qx = counterX(w)
     const qy = h - WALL - 4
-    p.rect(qx, qy, COUNTER_W, 4, C.table, 0.8)
-    p.rect(qx, qy, COUNTER_W, 1, C.tableHi, 0.5)
-    p.glowing(() => p.circle(qx + 1.5, qy + 1.6, 0.6, C.gold))
-    p.rect(qx + 4, qy + 1.2, 2, 1.2, C.paper, 0.2)
+    p.sprite('table', qx, qy - 0.4, COUNTER_W)
+    p.glowing(() => p.circle(qx + 1.5, qy + 0.8, 0.6, C.gold))
+    p.spriteAt('paper2', qx + 4, qy - 0.4, 0.25)
     p.text(qx + COUNTER_W / 2, h - 0.4, 'YOU', 1.7, C.gold, { anchor: 'middle', bold: true })
   }
 }
 
-function plant(p: Pen, x: number, y: number) {
-  p.rect(x + 1, y + 3.5, 3, 2.5, C.potRim, 0.6)
-  p.circle(x + 2.5, y + 2.4, 1.8, C.leafMid)
-  p.circle(x + 1.4, y + 1.6, 1.2, C.leaf)
-  p.circle(x + 3.6, y + 1.8, 1.1, C.leafDark)
+const CHAIRS: SpriteId[] = ['chairBlue', 'chairGreen', 'chairRed', 'chairYellow', 'chairWhite']
+
+/** 後牆上的窗戶（夜裡窗玻璃換夜空），中間穿插裝飾 */
+function windows(p: Pen, x0: number, x1: number, frame: number, deco: SpriteId[] = ['picBlue']) {
+  const ww = 6.2
+  let i = 0
+  for (let x = x0; x + ww <= x1; x += ww + 5, i++) {
+    p.sprite(i % 2 ? 'windowNote' : 'window', x, WALL + 0.1, ww)
+    if (p.night) p.glowing(() => {
+      p.rect(x + 0.6, WALL + 0.7, ww - 1.2, 3.8, C.nightSky)
+      if ((x + frame) % 7 !== 0) p.circle(x + 2, WALL + 1.6, 0.25, C.star)
+    })
+    const d = deco[i % deco.length]
+    if (x + ww + 5 + ww <= x1 || x + ww + 4 <= x1) p.spriteAt(d, x + ww + 1.5, WALL + 1.2, 0.25)
+  }
 }
 
-function partitions(p: Pen, k: Seat) {
-  p.rect(k.x + UNIT_W, k.y, 1, CLUSTER_H, C.partLo, 0.4)
-  p.rect(k.x, k.y + UNIT_H, CLUSTER_W, 2, C.partHi, 0.5)
+/** 長桌：素材兩端 6 像素照比例，中段拉長到要的寬度 */
+function longTable(p: Pen, x: number, y: number, w: number, h: number) {
+  const [, , sw, sh] = SPRITES.tableLong
+  const k = h / sh
+  const cap = 6 * k
+  p.sprite('tableLong', x, y, cap, h, false, [0, 0, 6, sh])
+  p.sprite('tableLong', x + cap, y, w - 2 * cap, h, false, [6, 0, sw - 12, sh])
+  p.sprite('tableLong', x + w - cap, y, cap, h, false, [sw - 6, 0, 6, sh])
+}
+
+function plant(p: Pen, x: number, y: number) {
+  p.spriteAt('plant', x + 0.3, y, 0.32)
+}
+
+/** 一排兩格的隔間：素材的灰色隔板（中間有立柱），掛點國旗或畫 */
+function partitionRow(p: Pen, x: number, y: number) {
+  p.sprite('partition', x, y - 2, CLUSTER_W)
+  const deco: SpriteId[] = ['flagUS', 'flagUK', 'flagIndia', 'picBlue', 'picOrange', 'calendar']
+  const h = hash(`${x},${y}`)
+  if (h % 3 === 0) p.spriteAt(deco[(h >> 3) % deco.length], x + (h % 2 ? 1 : CLUSTER_W - 4.5), y - 1.2, 0.3)
 }
 
 // ---------- 人 ----------
 
 const screenColor = (mode: OfficeMode | null, frame: number): number => {
-  if (mode === null) return C.off
+  if (mode === null) return SW.dark
   if (mode === 'typing') return C.codeDim
   if (mode === 'reading') return C.white
   if (mode === 'error') return frame % 2 ? C.err : C.errDark
@@ -213,56 +265,36 @@ const screenColor = (mode: OfficeMode | null, frame: number): number => {
   return C.screen
 }
 
+/** 螢幕（顏色＝狀態）：素材沒有能換色的螢幕，這塊照舊向量畫 */
 function screen(p: Pen, x: number, y: number, w: number, mode: OfficeMode | null, frame: number) {
-  p.rect(x - 0.3, y - 0.3, w + 0.6, 1.9, C.mon, 0.4)
+  p.rect(x - 0.3, y - 0.3, w + 0.6, 1.9, SW.ink, 0.3)
   p.glowing(() => {
-    p.rect(x, y, w, 1.3, screenColor(mode, frame), 0.25)
+    p.rect(x, y, w, 1.3, screenColor(mode, frame), 0.2)
     if (mode === 'typing') for (let i = 0; i < 3; i++) p.rect(x + 0.4, y + 0.2 + i * 0.35, ((i * 3 + frame) % 4) + 1, 0.2, C.code)
   })
 }
 
-const looks = (who: Coworker) => {
-  const hh = hash(who.id)
-  return { shirt: who.role === 'manager' ? C.suit : SHIRTS[hh % SHIRTS.length], hair: HAIR[(hh >> 4) % HAIR.length], hh }
+/** 造型：名字雜湊決定 5 個人物之一，再決定上衣顏色（主管一律深藍西裝） */
+export function lookOf(who: Pick<Coworker, 'name' | 'role'>): { person: number; shirt: number } {
+  const hh = hash(who.name)
+  return { person: hh % PEOPLE, shirt: who.role === 'manager' ? SHIRTS - 1 : Math.floor(hh / PEOPLE) % (SHIRTS - 1) }
 }
 
-/** 圓頭小人：(x, y) 是頭的圓心。表情依 mode：thinking 眼睛往上、error 冒汗發抖、done 跳一下、waiting 頭上問號、idle 會眨眼 */
+/**
+ * 人物：(x, y) 是頭的中心。素材沒有動畫格 → 走路、打字上下輕跳 1 個素材像素；
+ * done 跳高一點、error 左右抖＋冷汗、thinking 想法泡泡、waiting 問號、blocked 紅牌、reading 拿紙、idle 打瞌睡 z
+ */
 function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false) {
-  const { shirt, hair, hh } = looks(who)
+  const { person, shirt } = lookOf(who)
   const mode = who.mode
   const shake = mode === 'error' ? (frame % 2 ? 0.4 : -0.4) : 0
-  const hop = mode === 'done' && frame % 2 ? -0.9 : 0
+  const bob = (mode === 'typing' || (walkStep !== undefined && walkStep !== 0)) && frame % 2 ? -PX : 0
+  const hop = mode === 'done' && frame % 2 ? -0.9 : bob
   const hx = x + shake
   const hy = y + hop
-  if (walkStep !== undefined) {
-    p.circle(x - 1 + walkStep * 0.6, y + 3.6, 0.6, C.shoe)
-    p.circle(x + 1 - walkStep * 0.6, y + 3.6, 0.6, C.shoe)
-  }
-  // 身體在頭後面
-  p.rect(x - 3, hy + 1.1, 6, 2.6, shirt, 1.2)
-  if (who.isMe) p.circle(hx, hy, 2.55, 'none', C.me, 0.35)
-  p.circle(hx, hy, 2, C.skin)
-  p.path(`M${n(hx - 2)} ${n(hy - 0.25)}A2 2 0 0 1 ${n(hx + 2)} ${n(hy - 0.25)}Z`, hair)
-
-  // 眼睛
-  const blink = mode === 'idle' && (frame + hh) % 8 === 0
-  const ey = hy + (mode === 'thinking' ? -0.05 : mode === 'typing' ? 0.55 : 0.3)
-  const ex = mode === 'reading' ? 0.35 : 0
-  if (blink) p.path(`M${n(hx - 1.1)} ${n(ey)}h0.6M${n(hx + 0.5)} ${n(ey)}h0.6`, undefined, C.text, 0.22)
-  else {
-    p.circle(hx - 0.75 + ex, ey, 0.3, C.text)
-    p.circle(hx + 0.75 + ex, ey, 0.3, C.text)
-  }
-  if (mode === 'done') p.path(`M${n(hx - 0.7)} ${n(hy + 0.95)}q0.7 0.6 1.4 0`, 'none', C.text, 0.2)
-  if (mode === 'error') p.path(`M${n(hx - 0.6)} ${n(hy + 1.25)}q0.6 -0.45 1.2 0`, 'none', C.text, 0.2)
-
-  // 手與道具
-  if (mode === 'typing') {
-    const up = frame % 2
-    p.circle(x - 1.6, hy + 3.4 - up * 0.4, 0.55, C.skin)
-    p.circle(x + 1.6, hy + 3.0 + up * 0.4, 0.55, C.skin)
-  } else if (mode === 'reading') p.rect(x + 1.2, hy + 2.2, 2, 2.2, C.white, 0.2, C.ink, 0.15)
-  else if (mode === 'waiting' || mode === 'blocked') p.circle(x + 3.2, hy - 0.4, 0.6, C.skin)
+  p.sprite(`p${person}s${shirt}` as SpriteId, hx - CELL.headX * PX, hy - CELL.headY * PX, CELL.w * PX, CELL.h * PX)
+  if (who.isMe) p.circle(hx, hy - 0.3, 2.9, 'none', C.me, 0.35)
+  if (mode === 'reading') p.spriteAt('paper', x + 1.4, hy + 2.2, 0.3)
 
   // side：頭上方是名牌（主管桌）→ 泡泡、問號、紅牌改畫在頭的右側
   const ax = side ? hx + 4.2 : hx
@@ -289,6 +321,10 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
       p.rect(ax + 1.8, ay - 4.8, 2.8, 1.8, C.err, 0.2)
     }
   })
+  if (mode === 'idle') {
+    const up = (frame + hash(who.name)) % 4 < 2 ? 0 : 0.5
+    p.text(ax + (side ? 0 : 2.6), ay - 2 - up, 'z', 1.5, SW.slate, { bold: true })
+  }
 }
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
@@ -299,39 +335,35 @@ function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: 
 function carry(p: Pen, at: Step, kind: ErrandKind) {
   const x = at.x + 0.5 + (at.dx !== 0 ? at.dx * 3 : 3)
   const y = at.y + 2.5
-  if (kind === 'mail') p.rect(x - 0.9, y - 1, 1.8, 2.2, C.paper, 0.2, C.ink, 0.15)
-  else if (kind === 'file') p.rect(x - 1, y - 0.9, 2.2, 1.8, C.folder, 0.3)
-  else p.rect(x - 1, y - 1, 2.2, 2.2, C.parcel, 0.3, C.cabinetDark, 0.2)
+  if (kind === 'mail') p.spriteAt('paper', x - 0.9, y - 1.2, 0.3)
+  else if (kind === 'file') p.spriteAt('boxBlue', x - 1.4, y - 0.9, 0.25)
+  else p.spriteAt('boxRed', x - 1.4, y - 1, 0.25)
 }
 
 // ---------- 座位 ----------
 
+/** 員工座位：隔板（partitionRow 畫）→ 人 → 桌子擋住下半身，桌上有螢幕、杯子 */
 function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number) {
-  p.rect(x + 3, y, 5, 5, C.chair, 1.6)
-  p.rect(x + 1, y + 5, 9, 7, C.desk, 0.8)
-  p.rect(x + 1, y + 11, 9, 1, C.deskFront, 0.4)
-  p.rect(x + 1.2, y + 8, 1.8, 2.2, C.paper, 0.2)
-  p.circle(x + 9, y + 9, 0.6, C.mug, C.coffee, 0.25)
-  screen(p, x + 3, y + 9.2, 5, who ? who.mode : null, frame)
-  if (who) {
-    figure(p, x + 5.5, y + 2.2, who, frame)
-    p.rect(x + 4, y + 5.2, 3, 0.8, C.key, 0.2)
-    nameTag(p, x + 5.5, y + 7.7, who, 8.6, 'none')
-  } else p.rect(x + 4, y + 5.2, 3, 0.8, C.key, 0.2)
+  if (who) figure(p, x + 5.5, y + 2.2, who, frame)
+  else p.sprite('chairGray', x + 3.9, y - 0.2, 3.3, 6.6)
+  p.sprite('table', x + 0.5, y + 5, 10)
+  screen(p, x + 3, y + 8.6, 5, who ? who.mode : null, frame)
+  const hh = hash(`${x},${y}`)
+  p.spriteAt(hh % 2 ? 'mug' : 'coffee', x + 8.4, y + 5.6 - (hh % 2 ? 0 : 1.2), 0.25)
+  if (who) nameTag(p, x + 5.5, y + 7.7, who, 8.6, 'none')
 }
 
 function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
-  p.rect(x, y, 14, 6, C.boss, 0.8)
-  p.rect(x + 14, y, 3, 11, C.boss, 0.8)
-  p.rect(x, y, 17, 1, C.bossHi, 0.5)
+  p.sprite('chairWhite', x - 4.2, y + 0.4, 2.6, 5.2, true)
+  if (who) {
+    p.sprite('chairBlue', x + 5.8, y + 5.5, 3.4, 6.8)
+    figure(p, x + 7.5, y + 8.6, who, frame, undefined, true)
+  }
+  p.sprite('tableLong', x, y, 17, 6.8)
   screen(p, x + 4, y + 1.3, 6, who ? who.mode : null, frame)
   p.glowing(() => p.circle(x + 1.5, y + 1.5, 0.6, C.gold))
-  p.rect(x + 14.2, y + 6, 2, 2, C.paper, 0.2)
-  p.rect(x + 3, y + 7, 9, 4.5, C.leather, 1.5)
-  p.rect(x - 4, y + 1, 2, 2, C.chair, 0.6)
-  p.rect(x - 4, y + 4, 2, 2, C.chair, 0.6)
+  p.spriteAt('paper', x + 14.2, y + 0.6, 0.3)
   if (who) {
-    figure(p, x + 7.5, y + 8.6, who, frame, undefined, true)
     const t = fitLabel(`★${who.name}`, 13)
     p.label(x + 7, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
@@ -339,12 +371,13 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
 }
 
 function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
-  p.rect(x, y, DESK_W, 6, C.boss, 0.8)
-  p.rect(x, y, DESK_W, 1, C.bossHi, 0.5)
-  screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
-  p.rect(x, y + 7, 9, 4.5, C.leather, 1.5)
   if (who) {
+    p.sprite('chairBlue', x + 2.8, y + 5.5, 3.4, 6.8)
     figure(p, x + 4.5, y + 8.6, who, frame, undefined, true)
+  }
+  p.sprite('table', x, y, DESK_W, 6)
+  screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
+  if (who) {
     const t = fitLabel(`★${who.name}`, DESK_W + 0.6)
     p.label(x + DESK_W / 2, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
@@ -361,7 +394,7 @@ function plusBadge(p: Pen, cx: number, cy: number, extra: number) {
 
 // ---------- 寵物 ----------
 
-/** (x0, y0)＝跟點陣版同一個 12×8 框的左上角 */
+/** (x0, y0)＝跟點陣版同一個 12×8 框的左上角。貓用素材的黑貓（朝左，往右走就翻面）；寶寶、鳥照舊向量畫 */
 function pet(p: Pen, kind: Pet, x0: number, y0: number, right: boolean, sitting: boolean, frame: number) {
   const s = right ? 1 : -1
   const mid = x0 + CAT_W / 2
@@ -390,21 +423,10 @@ function pet(p: Pen, kind: Pet, x0: number, y0: number, right: boolean, sitting:
     p.circle(mid + s * 1.4, y0 + 3, 0.25, C.catEye)
     return
   }
-  // 貓：身體、頭朝前進方向、三角耳、翹尾巴
-  if (sitting) p.ellipse(mid - s * 0.5, y0 + 5, 2.6, 2.7, C.cat)
-  else {
-    p.ellipse(mid - s * 0.5, y0 + 5.2, 3.8, 2, C.cat)
-    for (const [dx, ph] of [[-2.6, 1], [-1.2, -1], [0.8, 1], [2.2, -1]]) p.rect(mid + dx + ph * step * 0.6, y0 + 6.4, 0.8, 1.6, C.catDark, 0.3)
-  }
-  p.path(`M${n(mid - s * 3.8)} ${n(y0 + 5)}q${-s * 2} -1 ${-s * 1.2} -3.6`, 'none', C.catDark, 0.7)
-  const hx = mid + s * 2.6
-  const hy = y0 + 2.8
-  p.path(`M${n(hx - 1.6)} ${n(hy - 0.6)}l0.4 -1.8 1.1 1.2ZM${n(hx + 1.6)} ${n(hy - 0.6)}l-0.4 -1.8 -1.1 1.2Z`, C.catDark)
-  p.circle(hx, hy, 1.8, C.cat)
-  p.ellipse(hx + s * 0.3, hy + 0.7, 0.9, 0.6, C.catCream)
-  p.circle(hx - 0.6 + s * 0.3, hy - 0.2, 0.25, C.catEye)
-  p.circle(hx + 0.6 + s * 0.3, hy - 0.2, 0.25, C.catEye)
-  p.circle(hx + s * 0.4, hy + 0.5, 0.2, C.catNose)
+  const k = 0.45
+  const [, , cw, ch] = SPRITES.cat
+  const bob = !sitting && frame % 2 ? -k : 0
+  p.sprite('cat', mid - (cw * k) / 2, y0 + CAT_H - ch * k + bob, cw * k, ch * k, right)
 }
 
 function hearts(p: Pen, x: number, y: number) {
@@ -413,13 +435,14 @@ function hearts(p: Pen, x: number, y: number) {
 
 // ---------- 組合（跟 drawScene 同一套判斷） ----------
 
-export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions = {}): VectorScene {
+/** opts.clock：後牆時鐘顯示的字（例如現在時間 "14:05"）；沒給就照素材原圖 12:00 */
+export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string } = {}): VectorScene {
   crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
   const L = layout(width, rows)
   const p = new Pen(opts.night === true)
   const bosses = bossSeating(crew, width, rows, seating)
   const seatedCount = bosses.order.filter(b => b !== undefined).length
-  building(p, L, width, frame, seatedCount < 2 || L.bossDesks[seatedCount - 1].x >= L.officeX + 6)
+  building(p, L, width, frame, seatedCount < 2 || L.bossDesks[seatedCount - 1].x >= L.officeX + 6, opts.clock ?? '12:00')
 
   teamZones(bosses.leads, crew, L.cols).forEach((lead, z) => {
     const col = L.cols - 1 - z
@@ -427,7 +450,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     L.clusters.forEach((k, i) => {
       if (i % L.cols !== col) return
       const rw = CLUSTER_W + 4
-      p.rect(k.x - 2, k.y - 4, rw, CLUSTER_H + 6, look.rug, 1.5, look.edge, 0.7)
+      p.rect(k.x - 2, k.y - 4, rw, GEOM.CLUSTER_H + 6, look.rug, 1.5, look.edge, 0.7)
       if (i === col) {
         const t = fitText(`TEAM ${lead.name}`, rw - 3, 1.7)
         const tw = textWidth(t, 1.7) + 1.2
@@ -436,7 +459,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
       }
     })
   })
-  for (const k of L.clusters) partitions(p, k)
+  for (const k of L.clusters) for (const dy of [0, UNIT_H + 2 + ROW_SPLIT]) partitionRow(p, k.x, k.y + dy)
 
   const moving = new Map<string, Step>()
   const errandOut = new Map<string, ErrandKind>()
@@ -457,6 +480,9 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   const queued = new Map((opts.queue ?? []).map((id, i) => [id, i]))
   for (const id of queued.keys()) if (!moving.has(id)) moving.set(id, { ...queueSpot(width, rows, queued.get(id)!), dx: 0, dy: 1 })
 
+  // 主管的柯基：趴在主管室右下角
+  p.spriteAt('corgi', width - WALL - 9.5, WALL + TOP_H - 4.2, 0.32)
+
   const desks = [...placed].filter(([, pl]) => pl.kind === 'boss').sort((a, b) => a[1].slot - b[1].slot)
   const at = (id: string) => (!moving.has(id) ? byId.get(id) ?? null : null)
   if (desks.length <= 1) bossDesk(p, L.manager.x, L.manager.y, desks[0] ? at(desks[0][0]) : null, frame, bosses.extra)
@@ -466,13 +492,18 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   for (const [id, pl] of placed) if (pl.kind === 'staff' && !moving.has(id)) sitting.set(`${pl.seat.x},${pl.seat.y}`, byId.get(id)!)
   for (const s of L.seats) unit(p, s.x, s.y, sitting.get(`${s.x},${s.y}`) ?? null, frame)
 
-  for (const [id, pl] of placed) {
-    const who = byId.get(id)
-    if (pl.kind !== 'meet' || moving.has(id) || !who) continue
-    const top = pl.slot % 2 === 0
-    figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame)
-    const above = pl.seat.y - 1.2
-    nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
+  // 會議室：上排坐在桌子後面（先畫人再補畫桌面蓋住下半身），下排坐在桌前
+  const meet = [...placed].filter(([id, pl]) => pl.kind === 'meet' && !moving.has(id) && byId.has(id))
+  const { cx: tx, cy: ty, a } = meetTable(L.officeX)
+  for (const top of [true, false]) {
+    for (const [id, pl] of meet) {
+      if ((pl.slot % 2 === 0) !== top) continue
+      const who = byId.get(id)!
+      figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame)
+      const above = pl.seat.y - 1.2
+      nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
+    }
+    if (top) longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
   }
 
   for (const [id, step] of moving) {
@@ -537,6 +568,12 @@ const xml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 function shapeSvg(s: Shape): string {
   const paint = (x: { fill?: Paint; stroke?: Paint; sw?: number; op?: number }) =>
     `${x.fill !== undefined ? ` fill="${hex(x.fill)}"` : ' fill="none"'}${x.stroke !== undefined ? ` stroke="${hex(x.stroke)}" stroke-width="${n(x.sw ?? 0.3)}" stroke-linecap="round"` : ''}${x.op !== undefined ? ` opacity="${x.op}"` : ''}`
+  if (s.k === 'sprite') {
+    const [sx, sy, sw, sh] = s.src
+    const fit = Math.abs(s.w / s.h - sw / sh) > 0.01 ? ' preserveAspectRatio="none"' : ''
+    const flip = s.flip ? ` transform="matrix(-1 0 0 1 ${2 * sx + sw} 0)"` : ''
+    return `<svg x="${n(s.x)}" y="${n(s.y)}" width="${n(s.w)}" height="${n(s.h)}" viewBox="${sx} ${sy} ${sw} ${sh}"${fit}><use href="#S"${flip}/></svg>`
+  }
   if (s.k === 'rect') return `<rect x="${n(s.x)}" y="${n(s.y)}" width="${n(s.w)}" height="${n(s.h)}"${s.r ? ` rx="${n(s.r)}"` : ''}${paint(s)}/>`
   if (s.k === 'circle') return `<circle cx="${n(s.cx)}" cy="${n(s.cy)}" r="${n(s.r)}"${paint(s)}/>`
   if (s.k === 'ellipse') return `<ellipse cx="${n(s.cx)}" cy="${n(s.cy)}" rx="${n(s.rx)}" ry="${n(s.ry)}"${paint(s)}/>`
@@ -547,12 +584,16 @@ function shapeSvg(s: Shape): string {
     return `<rect x="${n(x)}" y="${n(s.y - s.size * 0.85)}" width="${n(w)}" height="${n(s.size * 1.1)}" rx="0.4" fill="${hex(s.bg)}"/>`
   })() : ''
   const halo = s.halo !== undefined ? ` stroke="${hex(s.halo)}" stroke-width="0.5" stroke-linejoin="round" paint-order="stroke"` : ''
-  return `${bg}<text x="${n(s.x)}" y="${n(s.y)}" font-size="${s.size}" fill="${hex(s.fill)}"${halo}${s.anchor === 'middle' ? ' text-anchor="middle"' : ''}${s.bold ? ' font-weight="bold"' : ''}>${xml(s.text)}</text>`
+  const mono = s.mono ? ' font-family="Consolas,Menlo,monospace"' : ''
+  return `${bg}<text x="${n(s.x)}" y="${n(s.y)}" font-size="${s.size}" fill="${hex(s.fill)}"${halo}${mono}${s.anchor === 'middle' ? ' text-anchor="middle"' : ''}${s.bold ? ' font-weight="bold"' : ''}>${xml(s.text)}</text>`
 }
 
-/** 形狀清單 → SVG（跟 encodeSvg 同樣一單位一像素、寬高放大 pxSize 倍）；夜裡在中間蓋一層暗幕，發光的畫在暗幕之上 */
+/** 地板：素材的藍色長磚（一列錯半塊） */
+const FLOOR = `<pattern id="tile" width="12" height="5" patternUnits="userSpaceOnUse"><rect width="12" height="5" fill="${hex(SW.sky)}"/><path d="M0 0.2H12M0 2.7H12" stroke="${hex(SW.cyan)}" stroke-width="0.3"/><path d="M0 2.35H12M0 4.85H12M0.15 0V2.5M6.15 2.5V5" stroke="${hex(SW.blue)}" stroke-width="0.3"/></pattern>`
+
+/** 形狀清單 → SVG（一單位一像素、寬高放大 pxSize 倍）；素材表只嵌一次。夜裡在中間蓋一層暗幕，發光的畫在暗幕之上 */
 export function vectorSvg(v: VectorScene, pxSize = 8): string {
-  const defs = `<defs><pattern id="tile" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="${hex(C.tileB)}"/><rect width="6" height="6" fill="${hex(C.tileA)}"/><rect x="6" y="6" width="6" height="6" fill="${hex(C.tileA)}"/></pattern></defs>`
+  const defs = `<defs><image id="S" width="${SHEET_W}" height="${SHEET_H}" href="data:image/png;base64,${SHEET_PNG}" style="image-rendering:pixelated"/>${FLOOR}</defs>`
   const body = v.shapes.map(shapeSvg).join('')
   const dark = v.night ? `<rect width="${v.width}" height="${v.h}" fill="#050a1e" opacity="0.66"/>${v.glow.map(shapeSvg).join('')}` : ''
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${v.width} ${v.h}" width="${v.width * pxSize}" height="${v.h * pxSize}" font-family="${FONT}">${defs}${body}${dark}${v.labels.map(shapeSvg).join('')}</svg>`

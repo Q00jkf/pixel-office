@@ -1382,17 +1382,19 @@ export const register: Register = on => {
         )
       }
       svgOpen = true
-      // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 4.7 萬字元（2026-10-26 實測），在 Svg 上限 131072 內；超過就縮小再畫
+      // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 4.9 萬字元（2026-10-27 實測，含素材表 1.4 萬），在 Svg 上限 131072 內；超過就縮小再畫
       let sw = sceneWidth(e.props.bodyColumns)
       let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
       let svg = ''
+      const t = new Date(await $.clock.now())
+      const clock = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` // 牆上時鐘：本機時區
       for (let tries = 0; tries < 4; tries++) {
         if (width !== sw || rows !== sr) {
           width = sw
           rows = sr
         }
         lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
-        svg = vectorSvg(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts())) // Desktop 畫向量（圓頭小人、中文名牌）；終端機照舊點陣
+        svg = vectorSvg(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock })) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)

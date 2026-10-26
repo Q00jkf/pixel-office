@@ -163,7 +163,8 @@ test('desktop draws the office as an SVG under the size limit, with all buttons'
   await ui.unmount()
 })
 
-test('desktop keeps a text line for the head count (old behaviour)', async $ => {
+test('desktop keeps a text line for the head count (old behaviour)', async ($, on) => {
+  on('clock.now', () => ({ value: 1_000_000 })) // 0.15.0 起 Desktop 畫牆上時鐘要讀時間
   const ui = await $.ui.mount({
     plugin: 'pixel-office',
     surface: 'desktop',

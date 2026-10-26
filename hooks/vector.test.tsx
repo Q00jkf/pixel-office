@@ -32,7 +32,7 @@ test('the SVG is well formed: only svg, defs, pattern and text have closing tags
     const s = svgOf(c)
     for (const tag of ['svg', 'defs', 'pattern', 'text']) expect((s.match(new RegExp(`<${tag}[ >]`, 'g')) ?? []).length).toBe((s.match(new RegExp(`</${tag}>`, 'g')) ?? []).length)
     expect(s).not.toMatch(/NaN|undefined|Infinity/)
-    expect(s.replace(/<(svg|defs|pattern|text)[ >][^]*?>|<\/(svg|defs|pattern|text)>|<(rect|circle|ellipse|path)\b[^<>]*\/>/g, '').replace(/[^<>]+/g, '')).toBe('')
+    expect(s.replace(/<(svg|defs|pattern|text)[ >][^]*?>|<\/(svg|defs|pattern|text)>|<(rect|circle|ellipse|path|image|use)\b[^<>]*\/>/g, '').replace(/[^<>]+/g, '')).toBe('')
   }
 })
 
@@ -57,18 +57,17 @@ test('every seated or standing person gets exactly one nameplate', () => {
 })
 
 const one = (mode: Coworker['mode'], frame = 0) => drawVector([{ id: 'x', name: 'x', mode, tool: '', isMe: false, role: 'staff' }], frame, 60, 44).shapes
-const heads = (shapes: Shape[]) => shapes.filter((s): s is Extract<Shape, { k: 'circle' }> => s.k === 'circle' && s.r === 2)
+type Sprite = Extract<Shape, { k: 'sprite' }>
+const people = (shapes: Shape[]) => shapes.filter((s): s is Sprite => s.k === 'sprite' && /^p\ds\d$/.test(s.id))
 
-test('faces: waiting has a question mark, error sweats and shakes, thinking looks up with a bubble, done hops, idle blinks', () => {
+test('faces: waiting has a question mark, error sweats and shakes, thinking has a bubble, done hops, typing bobs, idle dozes', () => {
   expect(one('waiting').some(s => s.k === 'text' && s.text === '?')).toBe(true)
   expect(one('error').some(s => s.k === 'path' && s.fill === 0x4fc3f7)).toBe(true)
-  expect(heads(one('error', 0))[0].cx).not.toBe(heads(one('error', 1))[0].cx)
-  expect(heads(one('done', 1))[0].cy).toBeLessThan(heads(one('done', 0))[0].cy)
-  const eyes = (shapes: Shape[]) => shapes.filter((s): s is Extract<Shape, { k: 'circle' }> => s.k === 'circle' && s.r === 0.3)
-  expect(eyes(one('thinking'))[0].cy).toBeLessThan(eyes(one('typing'))[0].cy)
+  expect(people(one('error', 0))[0].x).not.toBe(people(one('error', 1))[0].x)
+  expect(people(one('done', 1))[0].y).toBeLessThan(people(one('done', 0))[0].y)
+  expect(people(one('typing', 1))[0].y).toBeLessThan(people(one('typing', 0))[0].y) // 素材沒有動畫格：打字上下輕跳
   expect(one('thinking').filter(s => s.k === 'ellipse' && s.fill === 0xffffff).length).toBeGreaterThan(0)
-  const blinks = Array.from({ length: 8 }, (_, f) => eyes(one('idle', f)).length === 0)
-  expect(blinks.filter(Boolean)).toHaveLength(1) // 8 格眨一次
+  expect(one('idle').some(s => s.k === 'text' && s.text === 'z')).toBe(true)
 })
 
 test('night puts a dark veil over the office and keeps screens and question marks above it', () => {
@@ -139,4 +138,58 @@ test('meeting-room nameplates stay inside the room, below the wall', () => {
   }
   const big = cases().find(c => c.name === 'max-112-0')!
   expect(svgOf(big)).toContain('實作16') // 開會的人真的在會議室（情境帶了開會座位）
+})
+
+// ---- 0.15.0：2dPig 素材 ----
+import { SHEET_PNG, SPRITES } from './sheet'
+import { lookOf } from './vector'
+
+const sprites = (v: ReturnType<typeof drawVector>) => v.shapes.concat(v.glow).filter((s): s is Sprite => s.k === 'sprite')
+
+test('the sprite sheet is embedded exactly once and every sprite is a cropped <use> of it', () => {
+  for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('empty'))) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const s = vectorSvg(v)
+    expect(s.split(SHEET_PNG).length).toBe(2)
+    expect((s.match(/<use href="#S"/g) ?? []).length).toBe(sprites(v).length)
+    for (const sp of sprites(v)) {
+      const [x, y, w, h] = SPRITES[sp.id]
+      expect(sp.src[0] >= x && sp.src[1] >= y && sp.src[0] + sp.src[2] <= x + w && sp.src[1] + sp.src[3] <= y + h).toBe(true)
+    }
+  }
+})
+
+test('the largest case stays under the Svg limit (2026-10-27: about 4.9 萬 characters incl. the 1.4 萬 sheet)', () => {
+  for (const name of ['max-112-0', 'max-112-7']) {
+    const len = svgOf(cases().find(c => c.name === name)!).length
+    expect(len).toBeLessThan(SVG_MAX)
+    expect(len).toBeLessThan(80000)
+  }
+})
+
+test('looks: one of 5 people by name hash, shirt colour varies beyond 5, managers wear the suit, stable across frames', () => {
+  const crew = Array.from({ length: 30 }, (_, i) => ({ name: `peer-${i}`, role: 'staff' as const }))
+  const looks = crew.map(lookOf)
+  expect(new Set(looks.map(l => l.person)).size).toBe(5)
+  expect(new Set(looks.map(l => `${l.person}/${l.shirt}`)).size).toBeGreaterThan(10)
+  expect(looks.every(l => l.shirt < 7)).toBe(true)
+  expect(lookOf({ name: 'office', role: 'manager' }).shirt).toBe(7)
+  expect(lookOf({ name: '實作4', role: 'staff' })).toEqual(lookOf({ name: '實作4', role: 'staff' }))
+  const who: Coworker = { id: 'a', name: 'peer-3', mode: 'idle', tool: '', isMe: false, role: 'staff' }
+  const id = (f: number) => people(drawVector([who], f, 60, 44).shapes)[0].id
+  expect(id(0)).toBe(id(5))
+})
+
+test('pets: the cat is the black-cat sprite (flipped when walking right), a corgi naps in the office; baby and bird stay vector', () => {
+  const cat = (f: number) => sprites(drawVector([], f, 80, 50)).filter(s => s.id === 'cat')
+  expect(cat(0)).toHaveLength(1)
+  expect(new Set(Array.from({ length: 40 }, (_, f) => cat(f)[0].flip === true)).size).toBe(2)
+  expect(sprites(drawVector([], 0, 80, 50)).some(s => s.id === 'corgi')).toBe(true)
+  for (const pet of ['baby', 'bird'] as const) expect(sprites(drawVector([], 0, 80, 50, [], undefined, { pet })).some(s => s.id === 'cat')).toBe(false)
+})
+
+test('the wall clock shows the time it is given', () => {
+  const texts = (v: ReturnType<typeof drawVector>) => v.shapes.filter((s): s is T => s.k === 'text').map(s => s.text)
+  expect(texts(drawVector([], 0, 112, 80, [], undefined, { clock: '09:41' }))).toContain('09:41')
+  expect(texts(drawVector([], 0, 112, 80))).toContain('12:00')
 })

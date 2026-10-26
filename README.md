@@ -79,7 +79,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - **開會**：llm-wiki 開會（說「開會」，skill `wiki-collabteam`）時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；不設期限，主持人散會（`action=end`）或參與者全都離線就清空；只是畫面，討論本身由 `wiki-collabteam` 的 `meet.md` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
 - **對外動作會跑腿**：寄信（Gmail 寄送／回覆／轉寄／草稿）拿著紙走去影印機；上傳文件（Google Drive、Notion 建立／更新）拿資料夾走去檔案櫃；`git push` 拿包裹走去大門口的郵筒；成功才算，走完回座位
 - 員工座位坐不下時左上角顯示 `+N`
-- 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 畫向量 SVG（`hooks/vector.ts`：圓頭小人、依狀態換表情 —— 思考眼睛往上、出錯冒汗、完成跳一下、等核准頭上問號、閒著會眨眼；名牌與門牌可以是中文），每 0.5 秒更新一次（約每秒 2 格），按鈕相同。兩邊座位、走路、貓、紙飛機用同一套計算
+- 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 畫 SVG（`hooks/vector.ts`）：人、家具、黑貓、柯基用 2dPig 素材圖（白牆窗戶、藍磚地板、隔間桌；5 個人物依名字固定分配，再依名字換上衣顏色，主管穿深藍西裝），名牌、狀態泡泡（思考、出錯冒汗、等核准問號、紅牌、打瞌睡 z）、螢幕、團隊地毯、寶寶與鳥用向量畫；走路、打字上下輕跳；名牌與門牌可以是中文；員工區牆上時鐘顯示現在時間（本機時區），每 0.5 秒更新一次（約每秒 2 格），按鈕相同。兩邊座位、走路、貓、紙飛機用同一套計算
 
 面板最少要 46 列高（場景 44 列＋預留 1 列＋按鈕 1 列）（上排房間＋一排座位群＋走廊），寬 56 欄以上員工區排兩欄。
 
@@ -93,6 +93,11 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 決定寫到 `decisions/<session>.json`，等的那方比對 session、這次呼叫的 id、單上的隨機 nonce、**自己手上指令全文的 SHA-256** 四項全對才採用；不符就丟棄並記一行 log
 - 不接手、直接交給終端機的情況：auto 等不問人的模式、subagent、沒有人開著面板且核准開啟、對不上是哪一次呼叫、檔案壞掉、截止前沒人按、預算剩不到約 3.5 秒、使用者中斷或終端機先按了。處理完兩個檔覆寫成 `{"state":"done"}`（不留指令內容）
 - 🔴 **限制**：這兩個檔是本機共用檔，同一個使用者帳號下的其他程式（包括別的 Claude session 跑的 Bash）理論上讀得到 nonce、也寫得出決定。這個機制防的是**誤按與配錯**（看錯單、按到別人的、按到舊的、單被換字），**不防本機惡意程式**
+
+### 圖素：2dPig Pixel Office（CC0）
+
+Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office」](https://2dpig.itch.io/pixel-office)（CC0，原檔與授權在 `assets/2dpig/`）。
+`assets/build_sheet.py` 從原素材表去掉天空、加上換色人物，產生 `assets/office-sheet.png` 與 `hooks/sheet.ts`（base64＋裁切框）；改素材或換色就重跑，兩個產物都進 repo。SVG 裡素材表只嵌一次，每個圖素是巢狀 `<svg viewBox>` 以 `<use>` 裁切引用。
 
 ## 運作方式
 
