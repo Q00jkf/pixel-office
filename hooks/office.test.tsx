@@ -1359,10 +1359,12 @@ import { bossSeating, counterSpot, teamZones } from './scene'
 
 const boss = (id: string, name: string, agent: string): Coworker => ({ ...P(id, name, 'idle', false, 'manager'), agent })
 
-test('the manager office holds up to 3 desks at full width, 2 at 90 columns, 1 when narrow; the 4th manager is +1', () => {
+test('the manager office holds up to 3 desks from 80 columns, 2 from 60 (the real pane is 50~80), 1 when narrower; the 4th manager is +1', () => {
   expect(layout(112, 60).bossDesks).toHaveLength(3)
-  expect(layout(90, 60).bossDesks).toHaveLength(2)
-  expect(layout(60, 44).bossDesks).toHaveLength(1)
+  expect(layout(90, 60).bossDesks).toHaveLength(3)
+  expect(layout(80, 44).bossDesks).toHaveLength(3)
+  expect(layout(60, 44).bossDesks).toHaveLength(2)
+  expect(layout(59, 44).bossDesks).toHaveLength(1)
   const four = [boss('a', 'aa', 'm-a'), boss('b', 'bb', 'm-b'), boss('c', 'cc', 'm-c'), boss('d', 'dd', 'm-d')]
   const L = layout(112, 60)
   const lines = cellText(encode(drawScene(four, 0, 112, 60)), 112, 60)
@@ -1372,10 +1374,12 @@ test('the manager office holds up to 3 desks at full width, 2 at 90 columns, 1 w
   expect(plates).toContain('+1*') // 最後一張桌（最左）帶 +1
   expect(lines.join('\n')).not.toContain('dd')
   expect(bossSeating(four, 112, 60).extra).toBe(1)
-  // 每張桌在主管室裡、彼此不重疊、不碰盆栽
-  const xs = L.bossDesks.map(d => d.x).sort((a, b) => a - b)
-  expect(xs[0]).toBeGreaterThanOrEqual(L.officeX + 6)
-  for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[0 + i - 1]).toBeGreaterThanOrEqual(10)
+  // 每張桌在主管室裡、彼此不重疊（桌寬 8＋椅子 9）
+  for (const w of [60, 80, 112]) {
+    const xs = layout(w, 60).bossDesks.map(d => d.x).sort((a, b) => a - b)
+    expect(xs[0]).toBeGreaterThanOrEqual(layout(w, 60).officeX + 1)
+    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(9)
+  }
 })
 
 test('a second manager arriving does not make the first one get up (same stand), and seats stay sticky', () => {
@@ -1448,4 +1452,45 @@ test('the counter sits right of the front door when there is room, labelled YOU 
     expect(text[43].slice(qx, qx + 3)).toBe('YOU')
   }
   expect(cellText(encode(drawScene([], 0, 48, 44)), 48, 44).join('\n')).not.toContain('YOU')
+})
+
+test('someone walking the bottom corridor past the counter never covers it (counter sits against the wall)', () => {
+  for (const w of [60, 80, 112]) {
+    const r = 44, h = r * 2
+    const spot = counterSpot(w, r)!
+    const qx = spot.x - 3
+    const walker = P('w', 'w', 'working')
+    const empty = drawScene([walker], 0, w, r).px
+    const y = h - 2 - 10 // 底部走廊
+    const path = [{ x: qx - 12, y }, { x: qx + 18, y }] // 從櫃台上方走過去
+    for (let f = 0; f < 30; f++) {
+      const busy = drawScene([walker], f, w, r, [{ id: 'w', path, start: 0 }]).px
+      expect(busy.some((c, i) => c !== empty[i])).toBe(true) // 人真的畫在走廊上
+      const counter = new Set([0x6d4c41, 0x8d6e63, 0x4e342e]) // 櫃台的木色：這些像素一個都不能被人蓋掉
+      let wood = 0
+      for (let y = h - 2 - 12; y < h - 2; y++)
+        for (let x = qx; x < qx + 7; x++)
+          if (counter.has(empty[y * w + x])) {
+            wood += 1
+            expect(busy[y * w + x]).toBe(empty[y * w + x])
+          }
+      expect(wood).toBeGreaterThan(10)
+    }
+  }
+})
+
+test('a manager without a desk still gets a peer zone and TEAM sign (59 columns: 1 desk, 2 columns)', () => {
+  const w = 59, r = 44
+  expect(layout(w, r).bossDesks).toHaveLength(1)
+  const a = boss('a', 'aa', 'm-a')
+  const b = boss('b', 'bb', 'm-b')
+  const crew = [a, b, { ...P('p1', 'p1'), team: 'm-b' }, P('o', 'o')]
+  expect(bossSeating(crew, w, r).extra).toBe(1)
+  const L = layout(w, r)
+  expect(L.cols).toBe(2)
+  const colOf = (x: number) => L.clusters.findIndex((k, i) => i < L.cols && x >= k.x && x < k.x + 23)
+  const seats = assignSeats(crew, w, r)
+  expect(colOf(seats.get('p1')!.seat.x)).toBe(1) // bb 沒桌子，他的 peer 照樣坐他那區
+  expect(colOf(seats.get('o')!.seat.x)).toBe(0)
+  expect(cellText(encode(drawScene(crew, 0, w, r)), w, r).join('\n')).toContain('TEAM bb')
 })

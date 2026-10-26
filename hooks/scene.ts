@@ -25,8 +25,8 @@ export const OFFICE_DOOR_W = 7
 const MEET_DOOR_W = 7 // 會議室門洞同主管室：人寬 7 才不穿牆
 const WALK_SPEED = 2 // 走路：每格動畫走幾個像素
 const MAX_BOSSES = 3 // 主管室最多幾張桌；再多的主管不畫，最後一張桌的名牌前面加 +N
-const DESK_W = 10 // 兩位以上主管時換成的小主管桌
-const DESK_PITCH = 12
+const DESK_W = 8 // 兩位以上主管時換成的小主管桌（60 欄就排得下兩張）
+const DESK_PITCH = 9
 const COUNTER_W = 7 // 大門右邊的櫃台（第 1 期核准時大家拿紙來這裡排隊）
 const counterX = (width: number) => Math.floor(width / 2) + 4
 
@@ -128,11 +128,11 @@ export function layout(width: number, rows: number) {
   const officeX = width - WALL - officeW
   const manager: Seat = { x: officeX + officeW - BOSS_W - 1, y: WALL + 2 }
   const meetDoor = Math.floor(officeX / 2) - 2
-  // 小主管桌（左上角）：第 0 張的人跟 L 型大桌坐同一點，主管人數變了不必起身走動；往左排到盆栽右邊為止
+  // 小主管桌（左上角）：第 0 張的人跟 L 型大桌坐同一點，主管人數變了不必起身走動；往左排到牆邊（盆栽讓位）
   const bossDesks: Seat[] = []
   for (let i = 0; i < MAX_BOSSES; i++) {
-    const x = officeX + officeW - 16 - i * DESK_PITCH
-    if (i > 0 && x < officeX + 7) break
+    const x = officeX + officeW - 15 - i * DESK_PITCH
+    if (i > 0 && x < officeX + 1) break
     bossDesks.push({ x, y: WALL + 2 })
   }
   return { seats, clusters, manager, bossDesks, officeX, officeW, h, cols, meetDoor, meet: meetingSeats(officeX) }
@@ -157,8 +157,8 @@ export function teamZones(leads: Coworker[], crew: Coworker[], cols: number): Co
   return leads.filter(m => crew.some(c => matchesLead(c, m))).slice(0, cols - 1)
 }
 
-/** 主管室座位：先坐回上次那張桌，新來的依編號補空桌；坐不下的不畫（回傳的 extra） */
-function seatBosses(crew: Coworker[], deskCount: number, previous?: Map<string, Placement>): { order: (Coworker | undefined)[]; extra: number } {
+/** 主管室座位：先坐回上次那張桌，新來的依編號補空桌；坐不下的不畫（overflow，名牌 +N） */
+function seatBosses(crew: Coworker[], deskCount: number, previous?: Map<string, Placement>): { order: (Coworker | undefined)[]; extra: number; leads: Coworker[] } {
   const bosses = crew.filter(c => c.role === 'manager')
   const order: (Coworker | undefined)[] = new Array(deskCount).fill(undefined)
   const rest: Coworker[] = []
@@ -167,13 +167,15 @@ function seatBosses(crew: Coworker[], deskCount: number, previous?: Map<string, 
     if (prev?.kind === 'boss' && prev.slot >= 0 && prev.slot < deskCount && !order[prev.slot]) order[prev.slot] = b
     else rest.push(b)
   }
-  let extra = 0
+  const overflow: Coworker[] = []
   for (const b of rest) {
     const free = order.findIndex(o => o === undefined)
     if (free >= 0) order[free] = b
-    else extra += 1
+    else overflow.push(b)
   }
-  return { order, extra }
+  // 分區的主管順序：有桌的依桌號，沒桌的接在後面 —— 沒桌子的主管，他的 peer 照樣有一區
+  const leads = [...order.filter((b): b is Coworker => b !== undefined), ...overflow]
+  return { order, extra: overflow.length, leads }
 }
 
 /** 主管室有幾位主管坐、坐不下幾位（畫圖與 +N 用） */
@@ -229,13 +231,13 @@ const BUSY = new Set<Coworker['mode']>(['thinking', 'typing', 'reading', 'waitin
 export function assignSeats(crew: Coworker[], width: number, rows: number, previous?: Map<string, Placement>, meeting = false, attendees?: string[]): Map<string, Placement> {
   const L = layout(width, rows)
   const out = new Map<string, Placement>()
-  const { order } = seatBosses(crew, L.bossDesks.length, previous)
+  const { order, leads } = seatBosses(crew, L.bossDesks.length, previous)
   const seated = order.filter((b): b is Coworker => b !== undefined)
   order.forEach((b, slot) => {
     if (!b) return
     // 只有一位主管坐 L 型大桌；兩位以上換小桌。第 0 張兩種桌的站位相同
     const seat = seated.length === 1 ? L.manager : L.bossDesks[slot]
-    const stand = seated.length === 1 ? { x: L.manager.x + 7, y: L.manager.y + 7 } : { x: seat.x + 5, y: seat.y + 7 }
+    const stand = seated.length === 1 ? { x: L.manager.x + 7, y: L.manager.y + 7 } : { x: seat.x + 4, y: seat.y + 7 }
     out.set(b.id, { kind: 'boss', slot, seat, stand, cluster: seat })
   })
   const isBoss = (c: Coworker) => c.role === 'manager' // 坐不下的主管也不排去員工座位（算在最後一張桌的 +N）
@@ -249,7 +251,7 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
   // 分區：從最右欄往左，每位主管的 peer 一欄（teamZones），其餘給其他 session；只有一欄時不分區
   const managers = new Set(crew.filter(c => c.role === 'manager').flatMap(c => [c.agent, c.name].filter(Boolean) as string[]))
   const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
-  const zones = teamZones(seated, crew, L.cols)
+  const zones = teamZones(leads, crew, L.cols)
   const zoneOfPeer = (c: Coworker) => zones.findIndex(m => matchesLead(c, m))
   // 開會：有參與者名單（ListAgents 名稱或名牌，不限 team）就照名單，沒有就是主管的 peer。
   // 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
@@ -420,7 +422,7 @@ function bubble(p: Px, x: number, y: number, frame: number) {
 
 // ---------- 房間 ----------
 
-function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
+function building(p: Px, L: ReturnType<typeof layout>, frame: number, plantInOffice = true) {
   const { officeX, officeW, h } = L
   const w = p.w
   // 員工區：棋盤格磁磚
@@ -506,7 +508,7 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
   }
 
   // 盆栽、影印機
-  plant(p, officeX + 1, WALL + 1)
+  if (plantInOffice) plant(p, officeX + 1, WALL + 1) // 小主管桌排到牆邊時讓位
   plant(p, WALL + 1, h - WALL - 7)
   plant(p, w - WALL - 6, h - WALL - 7)
   const cpx = w - WALL - 16
@@ -532,12 +534,14 @@ function building(p: Px, L: ReturnType<typeof layout>, frame: number) {
 
   // 櫃台（大門右邊）：使用者的位子，第 1 期核准時大家拿紙來這裡排隊；窄面板放不下就不畫
   if (counterSpot(w, h / 2)) {
+    // 貼著下牆、比其他家具矮一格：去影印機的人從它上方走過不會壓到
     const qx = counterX(w)
-    p.rect(qx, cpy, COUNTER_W, 4, C.table)
-    p.rect(qx, cpy, COUNTER_W, 1, C.tableHi)
-    p.rect(qx, cpy + 4, COUNTER_W, 1, C.tableEdge)
-    p.set(qx + 1, cpy + 1, C.gold) // 服務鈴
-    p.rect(qx + 4, cpy + 1, 2, 2, C.paper)
+    const qy = h - WALL - 4
+    p.rect(qx, qy, COUNTER_W, 4, C.table)
+    p.rect(qx, qy, COUNTER_W, 1, C.tableHi)
+    p.rect(qx, qy + 3, COUNTER_W, 1, C.tableEdge)
+    p.set(qx + 1, qy + 1, C.gold) // 服務鈴
+    p.rect(qx + 4, qy + 1, 2, 1, C.paper)
     p.labels.push({ row: (h - WALL) / 2, col: qx, text: 'YOU', fg: C.gold, bg: C.wall }) // 掛在下方外牆，不擋走廊
   }
 }
@@ -718,24 +722,24 @@ function bossDesk(p: Px, x: number, y: number, who: Coworker | null, frame: numb
   }
 }
 
-/** 兩位以上主管時的小桌（10 寬、沒有回桌與訪客椅）：人坐在桌子下方、面向上方的螢幕 */
+/** 兩位以上主管時的小桌（8 寬、沒有回桌與訪客椅）：人坐在桌子下方、面向上方的螢幕 */
 function smallBossDesk(p: Px, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
   const mode = who ? who.mode : null
   p.rect(x + 1, y + 6, DESK_W - 1, 1, shade(C.rug, 0.75))
   p.rect(x, y, DESK_W, 6, C.boss)
   p.rect(x, y, DESK_W, 1, C.bossHi)
   p.rect(x, y + 5, DESK_W, 1, C.bossEdge)
-  p.rect(x + 2, y + 1, 6, 1, C.mon)
-  for (let i = 0; i < 6; i++) p.set(x + 2 + i, y + 2, screenPixel(mode, frame, i))
-  p.rect(x + 3, y + 3, 4, 1, C.key)
+  p.rect(x + 1, y + 1, 6, 1, C.mon)
+  for (let i = 0; i < 6; i++) p.set(x + 1 + i, y + 2, screenPixel(mode, frame, i))
+  p.rect(x + 2, y + 3, 4, 1, C.key)
   p.set(x, y + 1, C.gold)
-  p.rect(x + 1, y + 10, 9, 1, C.leather)
-  p.rect(x + 1, y + 7, 1, 4, C.leather)
-  p.rect(x + 9, y + 7, 1, 4, C.leather)
-  p.set(x + 1, y + 7, C.leatherHi)
-  p.set(x + 9, y + 7, C.leatherHi)
+  p.rect(x, y + 10, 9, 1, C.leather)
+  p.rect(x, y + 7, 1, 4, C.leather)
+  p.rect(x + 8, y + 7, 1, 4, C.leather)
+  p.set(x, y + 7, C.leatherHi)
+  p.set(x + 8, y + 7, C.leatherHi)
   if (who) {
-    person(p, x + 5, y + 7, who, frame, -1)
+    person(p, x + 4, y + 7, who, frame, -1)
     p.labels.push({ row: (y + 4) / 2, col: x, text: `${extra > 0 ? `+${extra}` : ''}*${who.name}`.slice(0, DESK_W), fg: C.gold, bg: C.boss })
   }
 }
@@ -1093,11 +1097,11 @@ export function drawScene(
   crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
   const L = layout(width, rows)
   const p = canvas(width, L.h)
-  building(p, L, frame)
-  // peer 區：每位主管一欄（從最右往左），各一種地毯，上方掛「TEAM <主管名牌>」；排得出兩欄才有
   const bosses = seatBosses(crew, L.bossDesks.length, seating)
-  const seatedBosses = bosses.order.filter((b): b is Coworker => b !== undefined)
-  teamZones(seatedBosses, crew, L.cols).forEach((lead, z) => {
+  const seatedCount = bosses.order.filter(b => b !== undefined).length
+  building(p, L, frame, seatedCount < 2 || L.bossDesks[seatedCount - 1].x >= L.officeX + 6)
+  // peer 區：每位主管一欄（從最右往左，有沒有桌子都算），各一種地毯，上方掛「TEAM <主管名牌>」；排得出兩欄才有
+  teamZones(bosses.leads, crew, L.cols).forEach((lead, z) => {
     const col = L.cols - 1 - z
     const look = TEAM_RUGS[z % TEAM_RUGS.length]
     L.clusters.forEach((k, i) => {
