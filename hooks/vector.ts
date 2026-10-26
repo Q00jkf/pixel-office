@@ -24,8 +24,12 @@ export type Shape =
   | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; halo?: Paint; mono?: boolean }
   | { k: 'sprite'; id: SpriteId; src: Box4; x: number; y: number; w: number; h: number; flip?: boolean }
 
-/** shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它） */
-export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[] }
+/** 點得到的東西（場景單位的框）：家具開選單、寵物與柯基點了有反應；畫面疊按鈕時照這裡放 */
+export type Furniture = 'printer' | 'cabinet' | 'mailbox' | 'calendar' | 'vending' | 'clock' | 'meeting'
+export type Hit = { what: Furniture | 'pet' | 'corgi'; x: number; y: number; w: number; h: number; sitting?: boolean }
+
+/** shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它）；hits＝點得到的東西 */
+export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[]; hits: Hit[] }
 
 /** 素材的 Sweetie 16 色盤：自己畫的牆、地板、螢幕框跟素材同色，才不會一眼看出是兩套 */
 const SW = {
@@ -74,6 +78,7 @@ class Pen {
   shapes: Shape[] = []
   glow: Shape[] = []
   labels: Shape[] = []
+  hits: Hit[] = []
   faces = new Map<string, number>() // 主管的人物造型（同場不重複），沒有就照名字雜湊
   lit = false // true 時畫到 glow（夜裡在暗幕之上：螢幕、問號、火花）
   constructor(readonly night: boolean) {}
@@ -162,7 +167,8 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
 
   // 後牆：會議室＝月曆、窗；主管室＝窗、國旗、畫
   const meetW = officeX - 2 * WALL
-  p.sprite('calendar', WALL + 1, WALL + 0.6, 4.2)
+  const cal = p.sprite('calendar', WALL + 1, WALL + 0.6, 4.2)
+  p.hits.push({ what: 'calendar', x: WALL + 1, y: WALL + 0.6, ...cal })
   windows(p, WALL + 7, WALL + meetW - 1, frame)
   windows(p, officeX + (plantInOffice ? 6 : 1), w - WALL - 1, frame, ['flagUS', 'picSunset'])
 
@@ -186,16 +192,28 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   plant(p, WALL + 1, h - WALL - 7)
   plant(p, w - WALL - 6, h - WALL - 7)
 
-  // 走廊：販賣機、影印桌、紅色郵筒（垃圾桶素材）、櫃台
+  // 走廊：檔案櫃（素材沒有，照色盤畫）、影印桌、販賣機（櫃台與影印桌之間放得下才畫）、紅色郵筒（垃圾桶素材）、櫃台
   const cpx = w - WALL - 16
   const cpy = h - WALL - 7
-  p.sprite('vending', CABINET_X, cpy - 3, 5.4)
+  p.rect(CABINET_X, cpy - 1, 6, 6.6, SW.silver, 0.4, SW.ink, 0.3)
+  for (const dy of [0, 2.1, 4.2]) {
+    p.rect(CABINET_X + 0.5, cpy - 0.5 + dy, 5, 1.7, SW.white, 0.2, SW.slate, 0.2)
+    p.rect(CABINET_X + 2.4, cpy + 0.1 + dy, 1.2, 0.4, SW.dark, 0.15)
+  }
+  p.hits.push({ what: 'cabinet', x: CABINET_X, y: cpy - 1, w: 6, h: 6.6 })
+  const vx = cpx - 7
+  if (vx >= (counterSpot(w, h / 2) ? counterX(w) + COUNTER_W : Math.floor(w / 2) + 3) + 1) {
+    const vm = p.sprite('vending', vx, cpy - 2.5, 5.4)
+    p.hits.push({ what: 'vending', x: vx, y: cpy - 2.5, ...vm })
+  }
   p.sprite('table', cpx, cpy + 0.2, 8)
+  p.hits.push({ what: 'printer', x: cpx, y: cpy - 2.4, w: 8, h: 7.5 })
   p.spriteAt('printer', cpx + 1, cpy - 2.4, 0.4)
   p.spriteAt('paper', cpx + 5, cpy - 1.6, 0.3)
   p.glowing(() => p.circle(cpx + 3.8, cpy - 0.6, 0.35, frame % 4 < 2 ? C.led : SW.slate))
   const mx = mailboxX(w)
-  p.spriteAt('binRed', mx, h - WALL - 6.5, 0.33)
+  const mb = p.spriteAt('binRed', mx, h - WALL - 6.5, 0.33)
+  p.hits.push({ what: 'mailbox', x: mx, y: h - WALL - 6.5, ...mb })
   if (counterSpot(w, h / 2)) {
     const qx = counterX(w)
     const qy = h - WALL - 4
@@ -210,6 +228,7 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   if (room >= 7) {
     const kx = L.meetDoor + MEET_DOOR_W + (room - 6) / 2
     p.rect(kx, WALL + TOP_H + 0.1, 6, 1.8, SW.ink, 0.2, SW.slate, 0.2)
+    p.hits.push({ what: 'clock', x: kx, y: WALL + TOP_H + 0.1, w: 6, h: 1.8 })
     p.glowing(() => p.text(kx + 3, WALL + TOP_H + 1.5, clock, 1.6, p.night ? SW.orange : SW.red, { anchor: 'middle', bold: true, mono: true }))
   }
 }
@@ -283,10 +302,11 @@ export function lookOf(who: Pick<Coworker, 'name' | 'role'>): { person: number; 
 }
 
 /**
- * 人物：(x, y) 是頭的中心。素材沒有動畫格 → 走路、打字上下輕跳 1 個素材像素；
+ * 人物：(x, y) 是頭的中心。走路用 build_sheet.py 產生的走路格：每格換腳（walkStep ±1）＋1 素材像素起伏，
+ * 左右走（dir）換側走格、往右翻面，上下走維持正面；打字上下輕跳；
  * done 跳高一點、error 左右抖＋冷汗、thinking 想法泡泡、waiting 問號、blocked 紅牌、reading 拿紙、idle 打瞌睡 z
  */
-function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false) {
+function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false, dir = 0) {
   const look = lookOf(who)
   const person = p.faces.get(who.id) ?? look.person
   const shirt = look.shirt
@@ -296,7 +316,9 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
   const hop = mode === 'done' && frame % 2 ? -0.9 : bob
   const hx = x + shake
   const hy = y + hop
-  p.sprite(`p${person}s${shirt}` as SpriteId, hx - CELL.headX * PX, hy - CELL.headY * PX, CELL.w * PX, CELL.h * PX)
+  const walking = walkStep !== undefined && walkStep !== 0
+  const pose = walking ? `${dir !== 0 ? 'l' : ''}${walkStep > 0 ? 'a' : 'b'}` : ''
+  p.sprite(`p${person}s${shirt}${pose}` as SpriteId, hx - CELL.headX * PX, hy - CELL.headY * PX, CELL.w * PX, CELL.h * PX, walking && dir > 0)
   if (who.isMe) p.circle(hx, hy - 0.3, 2.9, 'none', C.me, 0.35)
   if (mode === 'reading') p.spriteAt('paper', x + 1.4, hy + 2.2, 0.3)
 
@@ -399,39 +421,16 @@ function plusBadge(p: Pen, cx: number, cy: number, extra: number) {
 
 // ---------- 寵物 ----------
 
-/** (x0, y0)＝跟點陣版同一個 12×8 框的左上角。貓用素材的黑貓（朝左，往右走就翻面）；寶寶、鳥照舊向量畫 */
+/**
+ * (x0, y0)＝跟點陣版同一個 12×8 框的左上角。全部是素材畫風的圖、朝左（往右就翻面），貼框底置中；
+ * 貓與柯基來自 2dPig，寶寶與山雀是 build_sheet.py 照同樣畫法自己畫的。素材沒有動畫格：走動時上下輕跳，山雀走動時翅膀一上一下
+ */
 function pet(p: Pen, kind: Pet, x0: number, y0: number, right: boolean, sitting: boolean, frame: number) {
-  const s = right ? 1 : -1
-  const mid = x0 + CAT_W / 2
-  const step = frame % 2 ? 0.5 : -0.5
-  if (kind === 'bird') {
-    p.ellipse(mid, y0 + 5, 2.6, 2.2, C.birdWhite, C.birdShade, 0.2)
-    p.ellipse(mid - s * 0.8, y0 + 5.3, 1.6, 1.1, C.birdWing)
-    p.path(`M${n(mid - s * 2.4)} ${y0 + 5}l${-s * 2.2} 0.8 ${s * 0.4} -1.4Z`, C.birdTail)
-    p.circle(mid + s * 1.6, y0 + 3.3, 1.5, C.birdWhite)
-    p.path(`M${n(mid + s * 0.2)} ${n(y0 + 3)}A1.5 1.5 0 0 1 ${n(mid + s * 3)} ${n(y0 + 3)}Z`, C.birdWing)
-    p.circle(mid + s * 2.1, y0 + 3.4, 0.25, C.catEye)
-    p.circle(mid + s * 1.3, y0 + 4, 0.35, C.birdBlush)
-    if (!sitting) p.path(`M${mid - 1.5} ${y0 + 4}q1.5 ${-2 - step * 2} 3 0`, 'none', C.birdWing, 0.5)
-    return
-  }
-  if (kind === 'baby') {
-    p.ellipse(mid - s * 0.5, y0 + 5.2, sitting ? 2.6 : 3.4, sitting ? 2.4 : 1.8, C.babySuit)
-    p.ellipse(mid - s * 1.2, y0 + 6, 1.3, 1, C.babyDiaper)
-    if (!sitting) {
-      p.circle(mid - 2.5 + step, y0 + 7, 0.6, C.babySkin)
-      p.circle(mid + 2.5 - step, y0 + 7, 0.6, C.babySkin)
-    }
-    p.circle(mid + s * 2, y0 + 3, 2, C.babySkin)
-    p.path(`M${n(mid + s * 2 - 0.8)} ${n(y0 + 1.2)}q0.8 -0.9 1.6 0`, 'none', C.babyHair, 0.4)
-    p.circle(mid + s * 2.6, y0 + 3, 0.25, C.catEye)
-    p.circle(mid + s * 1.4, y0 + 3, 0.25, C.catEye)
-    return
-  }
   const k = 0.45
-  const [, , cw, ch] = SPRITES.cat
-  const bob = !sitting && frame % 2 ? -k : 0
-  p.sprite('cat', mid - (cw * k) / 2, y0 + CAT_H - ch * k + bob, cw * k, ch * k, right)
+  const id: SpriteId = kind === 'baby' ? (sitting ? 'babySit' : 'babyCrawl') : kind === 'bird' ? (sitting || frame % 2 ? 'birdSit' : 'birdFly') : 'cat'
+  const [, , sw, sh] = SPRITES[id]
+  const bob = !sitting && kind !== 'bird' && frame % 2 ? -k : 0
+  p.sprite(id, x0 + CAT_W / 2 - (sw * k) / 2, y0 + CAT_H - sh * k + bob, sw * k, sh * k, right)
 }
 
 function hearts(p: Pen, x: number, y: number) {
@@ -440,8 +439,8 @@ function hearts(p: Pen, x: number, y: number) {
 
 // ---------- 組合（跟 drawScene 同一套判斷） ----------
 
-/** opts.clock：後牆時鐘顯示的字（例如現在時間 "14:05"）；沒給就照素材原圖 12:00 */
-export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string } = {}): VectorScene {
+/** opts.clock：牆上時鐘顯示的字（例如現在時間 "14:05"）；沒給就照素材原圖 12:00。opts.corgiFed：餵柯基的那一格 */
+export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string; corgiFed?: number } = {}): VectorScene {
   crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
   const L = layout(width, rows)
   const p = new Pen(opts.night === true)
@@ -485,8 +484,10 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   const queued = new Map((opts.queue ?? []).map((id, i) => [id, i]))
   for (const id of queued.keys()) if (!moving.has(id)) moving.set(id, { ...queueSpot(width, rows, queued.get(id)!), dx: 0, dy: 1 })
 
-  // 主管的柯基：趴在主管室右下角
-  p.spriteAt('corgi', width - WALL - 9.5, WALL + TOP_H - 4.2, 0.32)
+  // 主管的柯基：趴在主管室右下角；點了（opts.corgiFed＝那一格）冒愛心
+  const corgi = p.spriteAt('corgi', width - WALL - 9.5, WALL + TOP_H - 4.2, 0.32)
+  p.hits.push({ what: 'corgi', x: width - WALL - 9.5, y: WALL + TOP_H - 4.2, ...corgi })
+  if (opts.corgiFed !== undefined && frame >= opts.corgiFed && frame - opts.corgiFed < TREAT_FRAMES) hearts(p, width - WALL - 5.5, WALL + TOP_H - 5 - (Math.floor((frame - opts.corgiFed) / 2) % 3))
 
   // 主管都穿西裝，造型再撞就認不出誰是誰：依桌號從名字雜湊那個造型起找沒人用的
   const used = new Set<number>()
@@ -517,7 +518,10 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
       const above = pl.seat.y - 1.2
       nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
     }
-    if (top) longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
+    if (top) {
+      longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
+      p.hits.push({ what: 'meeting', x: tx - a, y: ty - 4, w: 2 * a + 1, h: 8 })
+    }
   }
 
   // 寵物先畫、走動與排隊的人後畫：窄面板排隊位置跟貓的路線重疊時人在前面（位置是跟 Raster 共用的計算，不改）
@@ -527,6 +531,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     const x0 = raid.at.x - CAT_W / 2 + lunge
     const y0 = raid.at.y - CAT_H + 1 - (kind === 'bird' ? 2 : 0)
     pet(p, kind, x0, y0, raid.dx > 0, raid.biting, frame)
+    p.hits.push({ what: 'pet', x: x0, y: y0, w: CAT_W, h: CAT_H, sitting: raid.biting })
     if (raid.biting) {
       if (kind === 'baby') hearts(p, x0 + 5, y0 - 1 - (Math.floor(frame / 2) % 3))
       else if (kind === 'bird') p.glowing(() => p.text(x0 + (raid.dx > 0 ? 9 : 1), y0 - (Math.floor(frame / 2) % 3), '♪', 2.4, C.note, { anchor: 'middle' }))
@@ -539,6 +544,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     const x0 = WALL + CAT_START + pose.x
     const y0 = L.h - WALL - CAT_H - CAT_LIFT - (startled ? 2 : 0) - (kind === 'bird' ? 2 : 0)
     pet(p, kind, x0, y0, pose.facingRight, fed || pose.sitting, frame)
+    p.hits.push({ what: 'pet', x: x0, y: y0, w: CAT_W, h: CAT_H, sitting: fed || pose.sitting })
     if (fed) {
       const bx = pose.facingRight ? x0 + CAT_W : x0 - 3
       if (kind === 'baby') p.rect(pose.facingRight ? x0 + CAT_W - 2 : x0 + 1, y0 + 2, 1.6, 3, C.bottle, 0.5, C.catNose, 0.2)
@@ -552,7 +558,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     const who = byId.get(id)
     if (!who) continue
     const standing = queued.has(id) && !walkers.some(w => w.id === id)
-    figure(p, step.x + 0.5, step.y + 1.5, who, frame, standing ? 0 : frame % 2 ? 1 : -1)
+    figure(p, step.x + 0.5, step.y + 1.5, who, frame, standing ? 0 : frame % 2 ? 1 : -1, false, step.dx)
     const kind = errandOut.get(id) ?? (queued.has(id) ? 'mail' : undefined)
     if (kind) carry(p, step, kind)
     if (standing) nameTag(p, step.x + 0.5, step.y - 2.4, who, 8, C.white)
@@ -572,7 +578,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
 
   const extra = crew.length - placed.size - bosses.extra
   if (extra > 0) p.text(WALL + 0.5, 1.6, `+${extra}`, 1.8, C.white, { bold: true })
-  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels }
+  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels, hits: p.hits }
 }
 
 // ---------- SVG ----------

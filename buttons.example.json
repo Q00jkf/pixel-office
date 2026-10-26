@@ -1,6 +1,8 @@
 [
+  { "object": "printer", "label": "查信", "prompt": "用 Gmail 查我最近的未讀信件並摘要" },
+  { "object": "printer", "label": "寫信", "prompt": "幫我寫一封信：先問我收件人與內容，寄出前給我確認" },
+  { "object": "mailbox", "label": "狀態", "prompt": "git status 並用一兩句摘要" },
   { "label": "開工", "prompt": "/llm-wiki:wiki-day 開工" },
   { "label": "收工", "prompt": "/llm-wiki:wiki-day 收工" },
-  { "label": "健康檢查", "prompt": "/llm-wiki:wiki-doctor" },
   { "label": "說明", "url": "https://github.com/Q00jkf/llm-wiki-plugin" }
 ]

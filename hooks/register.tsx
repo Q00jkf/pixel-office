@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
 import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
-import { drawVector, vectorSvg } from './vector'
+import { drawVector, vectorSvg, type Furniture, type Hit } from './vector'
 
 const PANE = 'pixel-office'
 const STALE_MS = 20000 // 超過這麼久沒心跳 = 視窗已關
@@ -188,17 +188,170 @@ export function selfFromListAgents(text: string): { name: string; ref: string } 
 
 const MAX_BUTTONS = 6
 
-/** 檢查設定檔的按鈕：label 1～12 字；url 只收 http(s)；prompt 1～2000 字；最多 6 顆 */
+/** 檢查設定檔的按鈕：label 1～12 字；url 只收 http(s)；prompt 1～2000 字；底下那排最多 6 顆；有 object 的是家具選單項目 */
 export function parseButtons(raw: unknown): CustomButton[] {
   if (!Array.isArray(raw)) return []
   const out: CustomButton[] = []
+  let row = 0
   for (const b of raw) {
     if (!b || typeof b !== 'object') continue
     const label = typeof b.label === 'string' ? b.label.trim() : ''
     if (label.length === 0 || label.length > 12) continue
+    // 家具選單項目（有 object）：只收 prompt，每件家具最多 MAX_MENU 項；底下那排（沒有 object）照舊最多 MAX_BUTTONS 顆
+    if (typeof b.object === 'string') {
+      const object = b.object.trim()
+      if (!(FURNITURE as readonly string[]).includes(object)) continue
+      if (typeof b.prompt !== 'string' || b.prompt.trim().length === 0 || b.prompt.length > 2000) continue
+      if (out.filter(x => x.object === object).length >= MAX_MENU) continue
+      out.push({ label, prompt: b.prompt.trim(), object })
+      continue
+    }
+    if (row >= MAX_BUTTONS) continue
     if (typeof b.url === 'string' && /^https?:\/\//i.test(b.url)) out.push({ label, url: b.url })
     else if (typeof b.prompt === 'string' && b.prompt.trim().length > 0 && b.prompt.length <= 2000) out.push({ label, prompt: b.prompt.trim() })
-    if (out.length >= MAX_BUTTONS) break
+    else continue
+    row++
+  }
+  return out
+}
+
+// ---------- 點家具：小選單，選一項就把 prompt 送進按的這個 session（跟個人按鈕同一套 runButton） ----------
+
+export const FURNITURE = ['printer', 'cabinet', 'mailbox', 'calendar', 'vending', 'clock', 'meeting'] as const satisfies readonly Furniture[]
+const MAX_MENU = 6
+/** 預設選單（主管 office 2026-10-27 轉 jacky 裁示）；buttons.json 有同 object 的項目就整份換成使用者的 */
+export const MENUS: Record<Furniture, { label: string; prompt: string }[]> = {
+  printer: [
+    { label: '查最近信件', prompt: '用 Gmail 查我最近的未讀信件並摘要' },
+    { label: '寫信', prompt: '幫我寫一封信：先問我收件人與內容，寄出前給我確認' },
+    { label: '看草稿', prompt: '列出我的 Gmail 草稿' },
+  ],
+  cabinet: [
+    { label: '列出掛載的來源', prompt: '/llm-wiki:wiki-repo list' },
+    { label: '查知識庫', prompt: '/llm-wiki:wiki-query' },
+    { label: '搜 Google Drive', prompt: '在 Google Drive 搜尋檔案：先問我關鍵字' },
+  ],
+  mailbox: [
+    { label: '狀態', prompt: 'git status 並用一兩句摘要' },
+    { label: 'pull', prompt: 'git pull 目前分支，有衝突先停下來告訴我' },
+    { label: 'push', prompt: 'push 目前分支：先列出要推的 commit 給我確認' },
+    { label: '最近 commit', prompt: 'git log --oneline -10' },
+  ],
+  calendar: [
+    { label: '看日程', prompt: '/llm-wiki:wiki-agenda' },
+    { label: '加日程', prompt: '/llm-wiki:wiki-agenda add' },
+  ],
+  vending: [
+    { label: '健康檢查', prompt: '/llm-wiki:wiki-doctor' },
+    { label: '知識庫現況', prompt: '/llm-wiki:wiki' },
+  ],
+  clock: [
+    { label: '開工', prompt: '/llm-wiki:wiki-day 開工' },
+    { label: '收工', prompt: '/llm-wiki:wiki-day 收工' },
+  ],
+  meeting: [{ label: '開會', prompt: '/llm-wiki:wiki-collabteam 開會' }],
+}
+
+/** 某件家具的選單：使用者在 buttons.json 有寫這件家具就整份用他的，沒有就用預設 */
+export function menuFor(object: Furniture, mine: CustomButton[]): { label: string; prompt: string }[] {
+  const own = mine.filter(b => b.object === object && b.prompt)
+  return own.length > 0 ? own.map(b => ({ label: b.label, prompt: b.prompt! })) : MENUS[object]
+}
+
+/**
+ * 場景單位 → 面板字元格（疊按鈕用）。終端機 Raster 一格＝1 單位寬、2 單位高（精確）；
+ * Desktop 的 Svg 撐滿面板寬：一欄＝1 單位、一列＝2.5 單位（2026-10-27 Desktop 實測，office-calib 0.0.2，四個十字都對準）。
+ * k＝面板欄數／場景寬：場景比面板寬（Svg 被縮小）或窄（被放大）時，一單位就不是一欄，乘上 k 換算
+ */
+export const CELL_UNITS = { terminal: { col: 1, row: 2 }, desktop: { col: 1, row: 2.5 } }
+export function cellAt(x: number, y: number, surface: 'terminal' | 'desktop', k = 1): { top: number; left: number } {
+  const u = CELL_UNITS[surface]
+  return { top: Math.max(0, Math.floor((y * k) / u.row)), left: Math.max(0, Math.floor((x * k) / u.col)) }
+}
+/** 終端機的按鈕放在東西的中心，往左挪 1 格讓 1～2 格寬的符號置中 */
+export const hitCell = (h: Hit, surface: 'terminal' | 'desktop', k = 1) => cellAt(h.x + h.w / 2 - 1, h.y + h.h / 2, surface, k)
+/** 終端機的 Raster 沒畫柯基、販賣機，月曆與時鐘也不在同一個位置 → 這幾樣只在 Desktop 點得到 */
+export const terminalHits = (hits: Hit[]) => hits.filter(h => !['corgi', 'vending', 'calendar', 'clock'].includes(h.what))
+
+let openMenu: Furniture | null = null // 同時只開一個選單
+let corgiFed: number | undefined
+let lastHits: Hit[] = []
+let petCell = '' // 終端機：寵物按鈕上次畫在哪一格；換格才重畫整個面板（Raster 平時只 blit）
+
+/** 點寵物：停著（正在吃、坐著）→ 換下一隻；走動中 → 貓與寶寶餵、山雀放飛 */
+async function pressPet($: EngineInterface): Promise<string> {
+  if (raid) return PET_WORDS[pet].back
+  if (lastHits.find(h => h.what === 'pet')?.sitting) return setPet($)
+  if (pet === 'bird') return releaseCat()
+  feedCat()
+  return `${PET_WORDS[pet].feed}！`
+}
+
+/**
+ * 疊在場景上的按鈕：寵物、柯基、每件畫出來的家具；選單開著就在那件家具旁邊展開（同時只開一個）。
+ * Desktop：一列一顆 plain、標籤全是空白的按鈕，鋪滿整塊（plain 在 Desktop 只畫字、沒有底框 → 看不見但點得到）；
+ * 終端機：中心一個淡色符號 —— Raster 上的按鈕字會蓋掉底下的格子，鋪滿就把寵物和家具擦掉了
+ */
+function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surface: 'terminal' | 'desktop', mine: CustomButton[], sceneW: number, k: number) {
+  const { Box, Button } = els
+  const toggle = (what: Furniture) => () => {
+    openMenu = openMenu === what ? null : what
+    $.ui.invalidate('ui.render')
+  }
+  const out = hits.map(hit => { // 不能叫 h：JSX 編譯成 h(...)
+    const press =
+      hit.what === 'pet'
+        ? () => void pressPet($).then(t => $.ui.toast(t))
+        : hit.what === 'corgi'
+          ? () => {
+              corgiFed = frame
+              $.ui.toast('🐕 餵柯基！')
+            }
+          : toggle(hit.what)
+    if (surface === 'terminal') {
+      const at = hitCell(hit, surface)
+      return (
+        <Box key={`at-${hit.what}`} position="absolute" top={at.top} left={at.left}>
+          <Button key={`hit-${hit.what}`} plain dimColor label={hit.what === 'pet' || hit.what === 'corgi' ? '♥' : '▾'} onPress={press} />
+        </Box>
+      )
+    }
+    const a = cellAt(hit.x, hit.y, surface, k)
+    const b = cellAt(hit.x + hit.w, hit.y + hit.h, surface, k)
+    const cols = Math.max(1, b.left - a.left)
+    return (
+      <Box key={`at-${hit.what}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
+        {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
+          <Button key={r === 0 ? `hit-${hit.what}` : `hit-${hit.what}-${r}`} plain label={' '.repeat(cols)} onPress={press} />
+        ))}
+      </Box>
+    )
+  })
+  const open = openMenu ? hits.find(h => h.what === openMenu) : undefined
+  if (open && openMenu) {
+    const items = menuFor(openMenu, mine)
+    const at = cellAt(open.x, open.y, surface, k)
+    const right = cellAt(sceneW, 0, surface, k).left
+    const left = at.left + Math.ceil(open.w * k) + 18 > right ? Math.max(0, at.left - 18) : at.left + Math.ceil(open.w * k) + 1
+    const close = () => {
+      openMenu = null
+      $.ui.invalidate('ui.render')
+    }
+    out.push(
+      <Box key="menu" position="absolute" top={Math.max(0, at.top - items.length)} left={left} flexDirection="column">
+        {items.map((it, i) => (
+          <Button
+            key={`menu-${i}`}
+            label={it.label}
+            onPress={() => {
+              close()
+              void runButton($, { label: it.label, prompt: it.prompt })
+            }}
+          />
+        ))}
+        <Button key="menu-cancel" label="取消" onPress={close} />
+      </Box>,
+    )
   }
   return out
 }
@@ -1084,7 +1237,16 @@ export const register: Register = on => {
 
     $.clock.every(250, () => {
       frame += 1
-      if (rasterOpen && width > 0) void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) }).catch(() => undefined)
+      if (rasterOpen && width > 0) {
+        void $.ui.blit({ requestId: PANE, key: 'scene', cells: encode(drawScene(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts())) }).catch(() => undefined)
+        // 寵物按鈕要跟著寵物：Raster 只 blit 不重畫，寵物換格才請面板重畫一次
+        const hit = drawVector(everyone(), frame, width, rows, liveWalkers(), lastPlaced ?? undefined, sceneOpts()).hits.find(h => h.what === 'pet')
+        const cell = hit ? JSON.stringify(hitCell(hit, 'terminal')) : ''
+        if (cell !== petCell) {
+          petCell = cell
+          $.ui.invalidate('ui.render')
+        }
+      }
     })
     $.clock.every(1000, () => void refresh($).catch(() => undefined))
     // Svg 不能像 Raster 那樣 blit，只能整張重畫：每 0.5 秒一次（約每秒 2 格動畫）
@@ -1265,7 +1427,10 @@ export const register: Register = on => {
     }
     if (sub === 'buttons') {
       const list = await loadButtons($)
-      return { text: list.length > 0 ? `已載入 ${list.length} 顆個人按鈕：${list.map(b => b.label).join('、')}` : '沒有個人按鈕：~/.claude/pixel-office/buttons.json 不存在或格式不對。' }
+      if (list.length === 0) return { text: '沒有個人按鈕：~/.claude/pixel-office/buttons.json 不存在或格式不對。' }
+      const row = list.filter(b => !b.object)
+      const objs = [...new Set(list.filter(b => b.object).map(b => b.object))]
+      return { text: [row.length > 0 ? `已載入 ${row.length} 顆個人按鈕：${row.map(b => b.label).join('、')}` : '', objs.length > 0 ? `自訂家具選單：${objs.join('、')}` : ''].filter(Boolean).join('；') }
     }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
@@ -1357,10 +1522,8 @@ export const register: Register = on => {
     const shown = list.length > 0 ? list : everyone()
     nightMode = await read($, night)
     pet = await read($, petRef)
-    const words = { ...PET_WORDS[pet], other: `換${PET_WORDS[nextPet(pet)].name}` }
-    const togglePet = () => setPet($).then(t => $.ui.toast(t))
-    const isBoss = me.role === 'manager'
-    const toggleRole = () => applyProfile($, { role: isBoss ? '員工' : '主管' })
+    // 餵／放／換寵物按鈕 0.16.0 拿掉：改成點寵物（overlay）；/office pet、/office bite 照舊
+    // 升為主管／設為員工按鈕 0.16.0 拿掉（jacky：用不到）；改角色用 /office role
     const toggleNight = () => update($, night, v => !v)
     if (!me.office) void setOffice($, true).catch(() => undefined) // 面板畫得出來＝有人看得到辦公室，等核准的單才會送來
     const now = pending.length > 0 ? await $.clock.now() : 0 // 有單才要算冷卻
@@ -1371,18 +1534,18 @@ export const register: Register = on => {
       const Svg = els.Svg as typeof Box | undefined
       rasterOpen = false // 終端的 blit 只給 Raster 用（版面 width／rows 照常更新，走路與紙飛機才算得出位置）
       const mine = await read($, buttons)
+      const row = mine.filter(b => !b.object) // 有 object 的是家具選單，不畫在底下那排
       if (!Svg) {
         svgOpen = false
         return (
           <Box flexDirection="column">
             <Text bold>像素辦公室：{shown.length} 人在線</Text>
             <Text dimColor>這個介面沒有可以畫圖的元素，只顯示文字。</Text>
-            <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
           </Box>
         )
       }
       svgOpen = true
-      // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 4.9 萬字元（2026-10-27 實測，含素材表 1.4 萬），在 Svg 上限 131072 內；超過就縮小再畫
+      // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 6.6 萬字元（2026-10-27 實測，含素材表與走路格 3.1 萬），在 Svg 上限 131072 內；超過就縮小再畫
       let sw = sceneWidth(e.props.bodyColumns)
       let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
       let svg = ''
@@ -1394,7 +1557,9 @@ export const register: Register = on => {
           rows = sr
         }
         lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
-        svg = vectorSvg(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock })) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
+        const v = drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock, corgiFed }) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
+        svg = vectorSvg(v)
+        lastHits = v.hits
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
@@ -1402,10 +1567,13 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {approvalRows($, els, now)}
-          <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
-          {mine.length > 0 ? (
+          <Box key="stage">
+            <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
+            {overlay($, els, lastHits, 'desktop', mine, width, e.props.bodyColumns / width)}
+          </Box>
+          {row.length > 0 ? (
             <Box flexDirection="row">
-              {mine.map((b, i) =>
+              {row.map((b, i) =>
                 b.url ? (
                   <Link key={`mine-${i}`} href={b.url} label={b.label} />
                 ) : (
@@ -1419,10 +1587,6 @@ export const register: Register = on => {
             </Text>
           )}
           <Box flexDirection="row">
-            <Button key="role" label={isBoss ? '設為員工' : '升為主管'} onPress={toggleRole} />
-            <Button key="cat" label={words.feed} onPress={() => feedCat()} />
-            <Button key="bite" label={words.release} onPress={() => $.ui.toast(releaseCat())} />
-            <Button key="pet" label={words.other} onPress={togglePet} />
             <Button key="night" label={nightMode ? '開燈' : '夜間模式'} onPress={toggleNight} />
           </Box>
         </Box>
@@ -1433,6 +1597,7 @@ export const register: Register = on => {
 
     const { Box, Raster, Button, Text, Link } = $.ui.resolve(e)
     const mine = await read($, buttons)
+    const row = mine.filter(b => !b.object)
     width = sceneWidth(e.props.bodyColumns)
     rows = sceneRows(e.props.scroll?.bodyRows) // 撐滿面板，扣掉預留空白與按鈕列
     lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
@@ -1440,11 +1605,14 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {approvalRows($, $.ui.resolve(e) as Record<string, any>, now)}
-        <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
+        <Box key="stage">
+          <Raster key="scene" columns={width} rows={rows} cells={encode(drawScene(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()))} />
+          {overlay($, $.ui.resolve(e) as Record<string, any>, (lastHits = terminalHits(drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, sceneOpts()).hits)), 'terminal', mine, width, 1)}
+        </Box>
         {/* 預留列：放個人按鈕（~/.claude/pixel-office/buttons.json），沒有就空一列 */}
-        {mine.length > 0 ? (
+        {row.length > 0 ? (
           <Box flexDirection="row">
-            {mine.map((b, i) =>
+            {row.map((b, i) =>
               b.url ? (
                 <Link key={`mine-${i}`} href={b.url} label={`[${b.label}]`} />
               ) : (
@@ -1458,14 +1626,6 @@ export const register: Register = on => {
           </Text>
         )}
         <Box flexDirection="row">
-          <Button key="role" label={isBoss ? '設為員工' : '升為主管'} hotkey="r" onPress={toggleRole} />
-          <Text> </Text>
-          <Button key="cat" label={words.feed} hotkey="c" onPress={() => feedCat()} />
-          <Text> </Text>
-          <Button key="bite" label={words.release} hotkey="b" onPress={() => $.ui.toast(releaseCat())} />
-          <Text> </Text>
-          <Button key="pet" label={words.other} hotkey="p" onPress={togglePet} />
-          <Text> </Text>
           <Button key="night" label={nightMode ? '開燈' : '夜間模式'} hotkey="n" onPress={toggleNight} />
         </Box>
       </Box>

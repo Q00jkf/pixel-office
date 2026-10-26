@@ -32,13 +32,13 @@ SPRITES = {
     'vending': (159, 123, 24, 34), 'fridge': (184, 126, 24, 31),
 }
 
-# 人物：裁切框、腿的中線（框內 x）、上衣所在列（框內，含頭尾）、上衣的 主色／暗色／亮色（Sweetie 16 色）
+# 人物：裁切框、腿的中線（框內 x）、上衣所在列（框內，含頭尾）、上衣的 主色／暗色／亮色（Sweetie 16 色）、腿從第幾列起
 PEOPLE = [
-    ((2, 105, 15, 23), 7, (13, 17), {'94b0c2': 'base', '566c86': 'dark', 'f4f4f4': 'light'}),
-    ((19, 104, 19, 24), 7, (14, 18), {'f4f4f4': 'base', '94b0c2': 'dark'}),
-    ((40, 107, 13, 21), 6, (11, 15), {'f4f4f4': 'base', '94b0c2': 'dark'}),
-    ((3, 132, 17, 23), 9, (12, 17), {'41a6f6': 'base', '3b5dc9': 'dark'}),
-    ((22, 132, 17, 23), 9, (12, 17), {'b13e53': 'base', '5d275d': 'dark'}),
+    ((2, 105, 15, 23), 7, (13, 17), {'94b0c2': 'base', '566c86': 'dark', 'f4f4f4': 'light'}, 19),
+    ((19, 104, 19, 24), 7, (14, 18), {'f4f4f4': 'base', '94b0c2': 'dark'}, 19),
+    ((40, 107, 13, 21), 6, (11, 15), {'f4f4f4': 'base', '94b0c2': 'dark'}, 16),
+    ((3, 132, 17, 23), 9, (12, 17), {'41a6f6': 'base', '3b5dc9': 'dark'}, 20),
+    ((22, 132, 17, 23), 9, (12, 17), {'b13e53': 'base', '5d275d': 'dark'}, 20),
 ]
 # 第 0 種＝原色；不用橘、黃（會跟膚色糊在一起）；最後一種是主管的深藍西裝（vector.ts 的 SUIT）
 SHIRTS = [
@@ -53,12 +53,110 @@ SHIRTS = [
 ]
 
 
+# 自己畫的寵物（2dPig 素材沒有）：跟素材的黑貓、柯基同一種畫法 —— 1 像素 #1a1c2c 描邊、Sweetie 16 色、朝左（往右走時翻面）
+PET_COLORS = {
+    'k': '1a1c2c', 'w': 'f4f4f4', 'g': '94b0c2', 'd': '333c57', 'o': 'ef7d57', 'r': 'b13e53',
+    's': 'ffcd75', 'c': 'ef7d57', 'h': '5d275d', 'u': '41a6f6', 'U': '3b5dc9',
+}
+PETS = {
+    # 山雀（シマエナガ風）：白圓身、背上黑翅、長尾、小黑眼
+    'birdSit': [
+        '......kkkk......',
+        '....kkwwwwkk....',
+        '...kwwwwwwwwk...',
+        '..kwkwwwwwwwwk..',
+        '.kkwwwwwwwggdk..',
+        '..kwwowwwwgdddkkk',
+        '..kwwwwwwwdddddddk',
+        '..kgwwwwwwwdddkkkk',
+        '...kgwwwwwwwgk....',
+        '....kkkkkkkkk.....',
+        '......k...k.......',
+    ],
+    'birdFly': [
+        '.........kk.......',
+        '........kddk......',
+        '......kkkdddk.....',
+        '....kkwwwkddk.....',
+        '...kwwwwwwkdk.....',
+        '..kwkwwwwwwwk.....',
+        '.kkwwwwwwwggk.....',
+        '..kwwowwwwgddkkk..',
+        '..kgwwwwwwddddddk.',
+        '...kgwwwwwwgkkkkk.',
+        '....kkkkkkkk......',
+    ],
+    # 寶寶：藍色連身衣、白尿布
+    'babySit': [
+        '....kkkk.....',
+        '...khhhhk....',
+        '..kssssssk...',
+        '.kssssssssk..',
+        '.kskssssksk..',
+        '.kcssssssck..',
+        '..kssrrssk...',
+        '...kkkkkk....',
+        '..kuuuuuuk...',
+        '.ksuuuuuusk..',
+        '.kkUuuuuUkk..',
+        '..kwwwwwwk...',
+        '.kssk..kssk..',
+        '..kk....kk...',
+    ],
+    'babyCrawl': [
+        '....kkkk..........',
+        '...khhhhk.........',
+        '..kssssssk........',
+        '.kssssssssk.......',
+        '.kskssssksk.......',
+        '.kcssssssck.kkkkk.',
+        '..kssrrssk.kuuuuuk',
+        '...kkkkkkkkuuuuwwk',
+        '....kuuuuuuuuuwwwk',
+        '....kuuuuuuUUUwwwk',
+        '....kssk.kUUk.kssk',
+        '.....kk...kk...kk.',
+    ],
+}
+
+
+def pet_image(rows):
+    w = max(len(r) for r in rows)
+    im = Image.new('RGBA', (w, len(rows)))
+    for j, r in enumerate(rows):
+        for i, ch in enumerate(r):
+            if ch in PET_COLORS:
+                im.putpixel((i, j), rgb(PET_COLORS[ch]) + (255,))
+    return im
+
+
 def rgb(h: str):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def person(src: Image.Image, spec, shirt) -> Image.Image:
-    (x, y, w, h), mid, (r0, r1), roles = spec
+# 走路格（素材只有站姿）：'' 站立、a／b 正面左／右腳抬起（那一側的腿少一列）、la／lb 同上再把頭往左偏 1 像素（側走，往右走時整張翻面）
+FRAMES = ['', 'a', 'b', 'la', 'lb']
+
+
+def step(crop: Image.Image, leg: int, mid: int, frame: str, head_end: int) -> Image.Image:
+    if not frame:
+        return crop
+    out = crop.copy()
+    src, px = crop.load(), out.load()
+    w, h = crop.size
+    lifted = range(0, mid) if frame.endswith('a') else range(mid, w)
+    for i in lifted:
+        for j in range(leg, h):
+            px[i, j] = src[i, j + 1] if j + 1 < h else (0, 0, 0, 0)
+    if frame.startswith('l'):
+        for j in range(0, head_end):
+            for i in range(w):
+                px[i, j] = src[i + 1, j] if i + 1 < w else (0, 0, 0, 0)
+    return out
+
+
+def person(src: Image.Image, spec, shirt, frame: str = '') -> Image.Image:
+    (x, y, w, h), mid, (r0, r1), roles, leg = spec
     crop = src.crop((x, y, x + w, y + h))
     if shirt:
         px = crop.load()
@@ -68,6 +166,7 @@ def person(src: Image.Image, spec, shirt) -> Image.Image:
                 role = roles.get('%02x%02x%02x' % (r, g, b)) if a else None
                 if role:
                     px[i, j] = rgb(shirt.get(role, shirt['base'])) + (a,)
+    crop = step(crop, leg, mid, frame, r0)
     cell = Image.new('RGBA', (CELL_W, CELL_H))
     cell.alpha_composite(crop, (CELL_W // 2 - mid, CELL_H - h))
     return cell
@@ -77,15 +176,25 @@ def main():
     src = Image.open(SRC).convert('RGBA')
     body = src.crop((0, TOP, src.width, src.height))
     per_row = src.width // CELL_W
-    cells = [(c, v) for v in range(len(SHIRTS)) for c in range(len(PEOPLE))]
+    cells = [(c, v, f) for v in range(len(SHIRTS)) for c in range(len(PEOPLE)) for f in FRAMES]
     rows = -(-len(cells) // per_row)
     sheet = Image.new('RGBA', (src.width, body.height + rows * CELL_H))
     sheet.alpha_composite(body, (0, 0))
     boxes = {k: (x, y - TOP, w, h) for k, (x, y, w, h) in SPRITES.items()}
-    for n, (c, v) in enumerate(cells):
+    for n, (c, v, f) in enumerate(cells):
         px, py = (n % per_row) * CELL_W, body.height + (n // per_row) * CELL_H
-        sheet.alpha_composite(person(src, PEOPLE[c], SHIRTS[v]), (px, py))
-        boxes[f'p{c}s{v}'] = (px, py, CELL_W, CELL_H)
+        sheet.alpha_composite(person(src, PEOPLE[c], SHIRTS[v], f), (px, py))
+        boxes[f'p{c}s{v}{f}'] = (px, py, CELL_W, CELL_H)
+    # 寵物接在人物格最後一列的空位後面（放不下就另起一列）
+    used = len(cells) % per_row
+    px, py = used * CELL_W + 2, body.height + (rows - 1) * CELL_H
+    pets = {k: pet_image(v) for k, v in PETS.items()}
+    if px + sum(im.width + 2 for im in pets.values()) > sheet.width:
+        raise SystemExit('寵物放不下：要加一列')
+    for k, im in pets.items():
+        sheet.alpha_composite(im, (px, py + CELL_H - im.height))
+        boxes[k] = (px, py + CELL_H - im.height, im.width, im.height)
+        px += im.width + 2
     out = io.BytesIO()
     sheet.save(out, 'PNG', optimize=True)
     png = out.getvalue()

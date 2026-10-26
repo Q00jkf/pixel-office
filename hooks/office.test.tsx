@@ -159,7 +159,8 @@ test('desktop draws the office as an SVG under the size limit, with all buttons'
   expect(src.length).toBeLessThanOrEqual(131072)
   expect(src).toContain('Microsoft JhengHei') // 0.14.0 起 Desktop 畫向量（vector.ts），不是點陣
   expect(String(svg!.props.alt)).toContain('人在線')
-  for (const key of ['role', 'cat', 'night']) expect(await ui.find({ key })).toBeDefined()
+  for (const key of ['night', 'hit-pet', 'hit-printer', 'hit-corgi']) expect(await ui.find({ key })).toBeDefined()
+  expect(await ui.find({ key: 'role' })).toBeUndefined() // 0.16.0 拿掉升為主管按鈕
   await ui.unmount()
 })
 
@@ -286,20 +287,17 @@ const PANE_PROPS = {
   viewport: { columns: 140, rows: 46 },
 } as any
 
-test('buttons: promote toggles my role, night toggles its label, feeding the cat works', async ($, on) => {
+test('buttons: no promote or pet buttons below (role is /office role, pets are clicked), night toggles its label, feeding the cat works', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
   const ui = await $.ui.mount(PANE_PROPS)
-  expect((await ui.find({ key: 'role' }))?.text).toBe('升為主管')
-  await ui.press({ key: 'role' })
-  expect(JSON.parse(writes[writes.length - 1]).role).toBe('manager')
-  expect((await ui.find({ key: 'role' }))?.text).toBe('設為員工')
+  for (const key of ['role', 'cat', 'bite', 'pet']) expect(await ui.find({ key })).toBeUndefined()
 
   expect((await ui.find({ key: 'night' }))?.text).toBe('夜間模式')
   await ui.press({ key: 'night' })
   expect((await ui.find({ key: 'night' }))?.text).toBe('開燈')
 
-  await ui.press({ key: 'cat' })
+  await ui.press({ key: 'hit-pet' })
   await ui.unmount()
 })
 
@@ -479,7 +477,8 @@ test('the scene fills the pane height and leaves one reserved row above the butt
   expect((raster!.props as any).rows).toBe(48)
   const tree: any = await ui.drawn()
   // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
-  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Text', 'Box']) // 沒有個人按鈕：顯示提示
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Box', 'Text', 'Box']) // 辦公室（Raster＋疊上去的按鈕）→ 沒有個人按鈕：顯示提示 → 按鈕列
+  expect(tree.children[0].children[0].type).toBe('Raster')
   expect((await ui.find({ type: 'Text', text: /buttons\.json/ }))?.text).toContain('個人按鈕')
   await ui.unmount()
 })
@@ -647,7 +646,7 @@ test('the reserved row shows personal buttons; a slash prompt runs as a command,
   expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('3 顆')
   const ui = await $.ui.mount({ ...PANE_PROPS, props: { ...PANE_PROPS.props, scroll: { offset: 0, bodyRows: 50 } } })
   const tree: any = await ui.drawn()
-  expect(tree.children.map((c: any) => c.type)).toEqual(['Raster', 'Box', 'Box'])
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Box', 'Box', 'Box'])
   expect((await ui.find({ type: 'Link' }))?.props.href).toBe('http://localhost:8088')
   await ui.press({ key: 'mine-0' })
   expect(ran.some(e => e.command === 'llm-wiki:wiki-collab' && e.args === 'status')).toBe(true)
@@ -1033,12 +1032,12 @@ test('while biting, the prey shakes with a red mark and the boss cannot be the p
   expect([...boss.px]).toEqual([...calm.px])
 })
 
-test('the release button and /office bite: needs the pane first, then sends the cat', async ($, on) => {
+test('/office bite needs the pane first, then sends the cat; a second one says it is still out', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
+  expect(String(((await $.command.run({ command: 'office', args: 'bite' } as any)) as any).text)).toContain('先輸入 /office')
   const ui = await $.ui.mount(PANE_PROPS)
-  expect((await ui.find({ key: 'bite' }))?.text).toBe('放貓')
-  await ui.press({ key: 'bite' }) // 只有自己（員工）：咬自己
+  await $.command.run({ command: 'office', args: 'bite' } as any) // 只有自己（員工）：咬自己
   const again = await $.command.run({ command: 'office', args: 'bite' } as any)
   expect(String((again as any).text)).toContain('貓還在外面')
   await ui.unmount()
@@ -1083,7 +1082,7 @@ test('the baby replaces the cat in the drawing: baby colours instead of orange, 
   expect(count(hug, 0xff4081)).toBeGreaterThan(0)
 })
 
-test('/office pet switches cat and baby, relabels the buttons and remembers the choice', async ($, on) => {
+test('/office pet switches cat, baby and bird in order and remembers the choice', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
   const kept: Record<string, unknown> = {}
@@ -1093,33 +1092,19 @@ test('/office pet switches cat and baby, relabels the buttons and remembers the 
     return { value: undefined } as any
   })
   const ui = await $.ui.mount(PANE_PROPS)
-  expect((await ui.find({ key: 'cat' }))?.text).toBe('餵貓')
-  expect((await ui.find({ key: 'pet' }))?.text).toBe('換寶寶')
   const r1 = await $.command.run({ command: 'office', args: 'pet' } as any)
   expect(String((r1 as any).text)).toContain('小寶寶')
   expect(kept.pet).toBe('baby')
-  await ui.unmount()
-  const ui2 = await $.ui.mount(PANE_PROPS)
-  expect((await ui2.find({ key: 'cat' }))?.text).toBe('餵奶')
-  expect((await ui2.find({ key: 'bite' }))?.text).toBe('放寶寶')
-  expect((await ui2.find({ key: 'pet' }))?.text).toBe('換山雀') // 依序：貓 → 寶寶 → 山雀 → 貓
-  await ui2.unmount()
   const r2 = await $.command.run({ command: 'office', args: 'pet' } as any)
-  expect(String((r2 as any).text)).toContain('山雀')
+  expect(String((r2 as any).text)).toContain('山雀') // 依序：貓 → 寶寶 → 山雀 → 貓
   expect(kept.pet).toBe('bird')
-  const ui3 = await $.ui.mount(PANE_PROPS)
-  expect((await ui3.find({ key: 'cat' }))?.text).toBe('餵小米')
-  expect((await ui3.find({ key: 'bite' }))?.text).toBe('放山雀')
-  expect((await ui3.find({ key: 'pet' }))?.text).toBe('換貓')
-  await ui3.unmount()
   await $.command.run({ command: 'office', args: 'pet 銀喉長尾山雀' } as any)
   expect(kept.pet).toBe('bird')
-  const ui2b = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: 'pet cat' } as any)
   expect(kept.pet).toBe('cat')
   const bad = await $.command.run({ command: 'office', args: 'pet dog' } as any)
   expect(String((bad as any).text)).toContain('用法')
-  await ui2b.unmount()
+  await ui.unmount()
 })
 
 // ---------- 會議：參與者名單（不限 team） ----------
@@ -1939,4 +1924,135 @@ test('the Allow label is as wide while cooling down as when ready, so Deny never
   const w = (t: string) => [...t].reduce((n, ch) => n + (/[⺀-￯]/.test(ch) ? 2 : 1), 0)
   expect(w(ALLOW_WAIT)).toBe(w(ALLOW_READY))
   expect(ALLOW_WAIT.length).toBe(ALLOW_READY.length)
+})
+
+// ---------- 0.16.0：點寵物、點家具開選單 ----------
+
+import { FURNITURE, MENUS, cellAt, menuFor } from './register'
+
+const DESKTOP = (bodyColumns = 112, bodyRows = 80) =>
+  ({
+    plugin: 'pixel-office',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'pixel-office',
+    props: { title: '像素辦公室', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows }, view: undefined },
+  }) as any
+
+test('furniture menus: every object has its default menu; buttons.json with the same object replaces it; old entries stay in the row', () => {
+  expect(MENUS.printer.map(i => i.label)).toEqual(['查最近信件', '寫信', '看草稿'])
+  expect(MENUS.cabinet.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-repo list', '/llm-wiki:wiki-query', '在 Google Drive 搜尋檔案：先問我關鍵字'])
+  expect(MENUS.mailbox.map(i => i.label)).toEqual(['狀態', 'pull', 'push', '最近 commit'])
+  expect(MENUS.calendar.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-agenda', '/llm-wiki:wiki-agenda add'])
+  expect(MENUS.vending.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-doctor', '/llm-wiki:wiki'])
+  expect(MENUS.clock.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-day 開工', '/llm-wiki:wiki-day 收工'])
+  expect(MENUS.meeting).toEqual([{ label: '開會', prompt: '/llm-wiki:wiki-collabteam 開會' }])
+  for (const f of FURNITURE) expect(MENUS[f].length).toBeGreaterThan(0)
+
+  const mine = parseButtons([
+    { object: 'printer', label: '查信', prompt: '查信' },
+    { object: 'printer', label: '網址不收', url: 'https://x.com' },
+    { object: 'sofa', label: '沒這件', prompt: 'x' },
+    { label: '開工', prompt: '/llm-wiki:wiki-collab status' },
+    ...Array.from({ length: 8 }, (_, i) => ({ object: 'clock', label: `c${i}`, prompt: 'x' })),
+  ])
+  expect(menuFor('printer', mine)).toEqual([{ label: '查信', prompt: '查信' }]) // 整份取代
+  expect(menuFor('mailbox', mine)).toEqual(MENUS.mailbox) // 沒寫的家具照預設
+  expect(menuFor('clock', mine)).toHaveLength(6) // 每件最多 6 項
+  expect(mine.filter(b => !b.object)).toEqual([{ label: '開工', prompt: '/llm-wiki:wiki-collab status' }])
+  // 家具項目不佔底下那排的 6 顆名額
+  const both = parseButtons([...Array.from({ length: 6 }, (_, i) => ({ object: 'printer', label: `p${i}`, prompt: 'x' })), ...Array.from({ length: 6 }, (_, i) => ({ label: `b${i}`, prompt: 'x' }))])
+  expect(both.filter(b => !b.object)).toHaveLength(6)
+})
+
+test('scene units to cells: terminal 1×2, desktop 1×2.5 (2026-10-27 measured); k scales a shrunk Svg', () => {
+  expect(cellAt(40, 30, 'terminal')).toEqual({ top: 15, left: 40 })
+  expect(cellAt(40, 30, 'desktop')).toEqual({ top: 12, left: 40 })
+  expect(cellAt(112, 50, 'desktop', 0.5)).toEqual({ top: 10, left: 56 })
+})
+
+test('desktop: clicking furniture opens its menu beside it, one at a time; choosing sends the prompt and closes; 取消 closes', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ran: any[] = []
+  const submitted: any[] = []
+  on('command.run', (_$, e: any) => {
+    if (e.command === 'office') return undefined as any
+    ran.push(e)
+    return { text: 'ok' } as any
+  })
+  on('prompt.submit', (_$, e: any) => {
+    submitted.push(e)
+    return { text: e.text } as any
+  })
+  const ui = await $.ui.mount(DESKTOP())
+  for (const f of ['printer', 'cabinet', 'mailbox', 'calendar', 'clock', 'meeting']) expect(await ui.find({ key: `hit-${f}` })).toBeDefined()
+  expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  await ui.press({ key: 'hit-printer' })
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('查最近信件')
+  expect((await ui.find({ key: 'menu-cancel' }))?.text).toBe('取消')
+  await ui.press({ key: 'hit-mailbox' }) // 換一件：同時只開一個
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('狀態')
+  expect(await ui.find({ key: 'menu-4' })).toBeUndefined()
+  await ui.press({ key: 'menu-0' })
+  expect(submitted.some(e => e.text === 'git status 並用一兩句摘要')).toBe(true)
+  expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  await ui.press({ key: 'hit-calendar' })
+  await ui.press({ key: 'menu-0' }) // 斜線開頭：當指令跑
+  expect(ran.some(e => e.command === 'llm-wiki:wiki-agenda')).toBe(true)
+  await ui.press({ key: 'hit-clock' })
+  await ui.press({ key: 'menu-cancel' })
+  expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  await ui.press({ key: 'hit-meeting' })
+  await ui.press({ key: 'hit-meeting' }) // 再點同一件：收起來
+  expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('desktop: a user menu from buttons.json replaces the default; old-format entries still draw in the row', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('fs.read', () => ({ value: JSON.stringify([{ object: 'printer', label: '查信', prompt: '查信件' }, { label: '說嗨', prompt: 'hi there' }]) }))
+  const submitted: any[] = []
+  on('prompt.submit', (_$, e: any) => {
+    submitted.push(e)
+    return { text: e.text } as any
+  })
+  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('自訂家具選單：printer')
+  const ui = await $.ui.mount(DESKTOP())
+  expect((await ui.find({ key: 'mine-0' }))?.text).toBe('說嗨')
+  expect(await ui.find({ key: 'mine-1' })).toBeUndefined() // 家具項目不在底下那排
+  await ui.press({ key: 'hit-printer' })
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('查信')
+  expect(await ui.find({ key: 'menu-1' })).toBeUndefined()
+  await ui.press({ key: 'menu-0' })
+  expect(submitted.some(e => e.text === '查信件')).toBe(true)
+  await ui.unmount()
+})
+
+test('desktop: the hit area covers the whole thing with blank plain buttons; at 48 columns the clock is not drawn and has no menu', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount(DESKTOP())
+  const pr: any = await ui.find({ key: 'hit-printer' })
+  expect(pr.props.plain).toBe(true)
+  expect(String(pr.props.label).trim()).toBe('')
+  expect(String(pr.props.label).length).toBeGreaterThanOrEqual(6)
+  expect(await ui.find({ key: 'hit-printer-1' })).toBeDefined() // 不只一列
+  await ui.unmount()
+  const narrow = await $.ui.mount(DESKTOP(48, 80))
+  expect(await narrow.find({ key: 'hit-clock' })).toBeUndefined()
+  expect(await narrow.find({ key: 'hit-pet' })).toBeDefined()
+  await narrow.unmount()
+})
+
+test('terminal: the pet, printer, cabinet, mailbox and meeting table get a one-cell button; desktop-only things do not', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  const ui = await $.ui.mount(PANE_PROPS)
+  for (const k of ['hit-pet', 'hit-printer', 'hit-cabinet', 'hit-mailbox']) expect(await ui.find({ key: k })).toBeDefined()
+  for (const k of ['hit-corgi', 'hit-vending', 'hit-clock', 'hit-calendar']) expect(await ui.find({ key: k })).toBeUndefined()
+  await ui.press({ key: 'hit-mailbox' })
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('狀態')
+  await ui.unmount()
 })

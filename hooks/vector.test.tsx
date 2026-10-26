@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { drawScene, encode } from './scene'
+import { PALETTE as C, drawScene, encode } from './scene'
 import { cases, fnv } from './scenarios'
 
 // 用 git show 9fe6804（0.13.2）的 scene.ts 對同一份 scenarios.ts 算出來的，不是拿現在的程式碼自己產生
@@ -24,7 +24,7 @@ test('every case, up to 30 people + cat + planes + meeting + queue at 112x80, st
     expect(s.length).toBeLessThanOrEqual(SVG_MAX)
     biggest = Math.max(biggest, s.length)
   }
-  expect(biggest).toBeLessThan(SVG_MAX / 2) // 2026-10-26 實測最大約 4.7 萬字元，留一倍以上餘裕
+  expect(biggest).toBeLessThan(90000) // 2026-10-27 實測最大 65,971 字元（0.16.0：素材表含走路格 3.1 萬）；至少留 4 萬給上限 131072
 })
 
 test('the SVG is well formed: only svg, defs, pattern and text have closing tags, all balanced', () => {
@@ -58,7 +58,7 @@ test('every seated or standing person gets exactly one nameplate', () => {
 
 const one = (mode: Coworker['mode'], frame = 0) => drawVector([{ id: 'x', name: 'x', mode, tool: '', isMe: false, role: 'staff' }], frame, 60, 44).shapes
 type Sprite = Extract<Shape, { k: 'sprite' }>
-const people = (shapes: Shape[]) => shapes.filter((s): s is Sprite => s.k === 'sprite' && /^p\ds\d$/.test(s.id))
+const people = (shapes: Shape[]) => shapes.filter((s): s is Sprite => s.k === 'sprite' && /^p\ds\d(l?[ab])?$/.test(s.id))
 
 test('faces: waiting has a question mark, error sweats and shakes, thinking has a bubble, done hops, typing bobs, idle dozes', () => {
   expect(one('waiting').some(s => s.k === 'text' && s.text === '?')).toBe(true)
@@ -159,11 +159,11 @@ test('the sprite sheet is embedded exactly once and every sprite is a cropped <u
   }
 })
 
-test('the largest case stays under the Svg limit (2026-10-27: about 4.9 萬 characters incl. the 1.4 萬 sheet)', () => {
+test('the largest case stays under the Svg limit (2026-10-27: 65,971 characters incl. the 3.1 萬 sheet)', () => {
   for (const name of ['max-112-0', 'max-112-7']) {
     const len = svgOf(cases().find(c => c.name === name)!).length
     expect(len).toBeLessThan(SVG_MAX)
-    expect(len).toBeLessThan(80000)
+    expect(len).toBeLessThan(90000)
   }
 })
 
@@ -180,12 +180,11 @@ test('looks: one of 5 people by name hash, shirt colour varies beyond 5, manager
   expect(id(0)).toBe(id(5))
 })
 
-test('pets: the cat is the black-cat sprite (flipped when walking right), a corgi naps in the office; baby and bird stay vector', () => {
+test('pets: the cat is the black-cat sprite (flipped when walking right), a corgi naps in the office', () => {
   const cat = (f: number) => sprites(drawVector([], f, 80, 50)).filter(s => s.id === 'cat')
   expect(cat(0)).toHaveLength(1)
   expect(new Set(Array.from({ length: 40 }, (_, f) => cat(f)[0].flip === true)).size).toBe(2)
   expect(sprites(drawVector([], 0, 80, 50)).some(s => s.id === 'corgi')).toBe(true)
-  for (const pet of ['baby', 'bird'] as const) expect(sprites(drawVector([], 0, 80, 50, [], undefined, { pet })).some(s => s.id === 'cat')).toBe(false)
 })
 
 test('the wall clock shows the time it is given', () => {
@@ -221,7 +220,7 @@ test('B2: cups on the desks stay clear of the nameplates', () => {
 
 test('B3: managers wear the suit but each has a different face', () => {
   for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('night'))) {
-    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id).filter(id => id.endsWith('s7'))
+    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id.replace(/l?[ab]$/, '')).filter(id => id.endsWith('s7'))
     expect(ids.length).toBeGreaterThan(0)
     expect(new Set(ids).size).toBe(ids.length)
   }
@@ -235,4 +234,42 @@ test('B4: people queuing at the counter are drawn in front of the pet', () => {
     expect(order.indexOf('cat')).toBeGreaterThanOrEqual(0)
     expect(order.findLastIndex(id => queueIds.has(id))).toBeGreaterThan(order.indexOf('cat'))
   }
+})
+
+// ---- 0.16.0：寶寶與山雀也是素材畫風、人物走路格 ----
+test('baby and bird are pixel sprites in the same style: crawl/sit, hop/flap, flipped by direction, no vector drawing left', () => {
+  for (const pet of ['baby', 'bird'] as const) {
+    const ids = new Set<string>()
+    const flips = new Set<boolean>()
+    for (let f = 0; f < 60; f++) {
+      const v = drawVector([], f, 80, 50, [], undefined, { pet })
+      const mine = sprites(v).filter(s => s.id.startsWith(pet))
+      expect(mine).toHaveLength(1)
+      ids.add(mine[0].id)
+      flips.add(mine[0].flip === true)
+      expect(sprites(v).some(s => s.id === 'cat')).toBe(false)
+      expect(v.shapes.some(s => (s.k === 'ellipse' || s.k === 'circle') && [C.babySuit, C.birdWhite].includes(s.fill as number))).toBe(false)
+    }
+    expect(ids.size).toBe(2) // 寶寶爬／坐、山雀拍翅／停
+    expect(flips.size).toBe(2)
+  }
+  const fed = drawVector([], 12, 80, 50, [], undefined, { pet: 'baby', treatFrame: 10 })
+  expect(sprites(fed).some(s => s.id === 'babySit')).toBe(true) // 餵奶時坐著
+})
+
+test('walking: legs alternate every frame, side frames and a flip when going left or right, front frames going up or down', () => {
+  const who: Coworker = { id: 'w', name: 'peer-3', mode: 'idle', tool: '', isMe: false, role: 'staff' }
+  const walk = (path: { x: number; y: number }[], f: number) => people(drawVector([who], f, 80, 50, [{ id: 'w', path, start: 0 }]).shapes)[0]
+  const across = [{ x: 10, y: 70 }, { x: 70, y: 70 }]
+  const back = [{ x: 70, y: 70 }, { x: 10, y: 70 }]
+  const down = [{ x: 30, y: 30 }, { x: 30, y: 90 }]
+  expect(walk(across, 1).id).toMatch(/la$/)
+  expect(walk(across, 2).id).toMatch(/lb$/)
+  expect(walk(across, 1).flip).toBe(true) // 往右走：側走格翻面
+  expect(walk(back, 1).flip).toBeUndefined() // 往左走：素材側走格本來就朝左
+  expect(walk(down, 1).id).toMatch(/\d[ab]$/) // 上下走：正面
+  expect(walk(down, 1).id).not.toBe(walk(down, 2).id)
+  expect(walk(down, 1).y).not.toBe(walk(down, 2).y) // 1 素材像素起伏
+  const seated = people(drawVector([{ ...who, mode: 'typing' }], 1, 80, 50).shapes)[0]
+  expect(seated.id).toMatch(/s\d$/) // 坐著打字不用走路格
 })

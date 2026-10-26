@@ -56,7 +56,8 @@ export type Coworker = {
 }
 
 /** 個人按鈕（~/.claude/pixel-office/buttons.json）：prompt 送給這個視窗，url 用瀏覽器開 */
-export type CustomButton = { label: string; prompt?: string; url?: string }
+/** 個人按鈕：沒有 object 的畫成面板底下一排；有 object 的取代那件家具的預設選單（object 見 FURNITURE） */
+export type CustomButton = { label: string; prompt?: string; url?: string; object?: string }
 
 declare module 'claude-code' {
   interface PluginState {
