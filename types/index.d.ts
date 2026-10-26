@@ -18,6 +18,18 @@ export type Coworker = {
   role: Role
   /** 職稱（自由填寫，例如 IT、查證）；不畫在像素圖上，可用中文 */
   title?: string
+  /** title 是辦公室自動帶的（session 名稱或使用者指令前 16 字），不是模型／使用者手動設的；名單標「(自動)」 */
+  titleAuto?: boolean
+  /** title 最後一次設定的時間（ms）：自動帶的放超過 30 分鐘、又來新指令才換 */
+  titleAt?: number
+  /** 最新一則使用者指令：前 16 字與時間（ms）；手動 title 過期時名單附在「目前」欄 */
+  prompt?: { text: string; at: number }
+  /** 目前 mode 從什麼時候開始（ms）：名單算「等核准 N 秒」 */
+  since?: number
+  /** 最後一次出錯：摘要（一行、最多 80 字）與時間（ms） */
+  lastError?: { text: string; at: number }
+  /** 回信位址（uds:<CLAUDE_CODE_MESSAGING_SOCKET>）：沒有 ListAgents 名稱時，SendMessage 的 to 填它也送得到 */
+  addr?: string
   /** 自己宣告的權限模式：true＝auto（ask 交給分類器，不等人），不會舉手等核准 */
   auto?: boolean
   /** 被 auto 模式分類器擋下、等使用者在這個視窗說「放行」：工具名與時間（ms）；使用者下一次輸入時清除 */

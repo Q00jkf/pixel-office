@@ -425,7 +425,7 @@ test('the roster lists manager first, with title, role, ListAgents name and what
   expect(lines[3]).toContain('協作主管')
   expect(lines[3]).toContain('user-30')
   expect(text).toContain('▶ IT')
-  expect(text).toContain('等待核准權限（Bash）')
+  expect(text).toContain('🟡 等核准（Bash）') // 0.11.0：等核准與等輸入分開；沒有 since 就不報秒數
   expect(text).toContain('未登記')
 })
 
@@ -1235,4 +1235,108 @@ test('the silver-throated bushtit: its own colours, hops on the ground, flies st
   expect(count(sing, NOTE)).toBeGreaterThan(0)
   expect(count(calm, NOTE)).toBe(0)
   expect(count(sing, 0xe53935)).toBe(count(calm, 0xe53935)) // 沒有咬痕、被找的人不冒紅
+})
+
+// ---------- 0.11.0：狀態細分、title 自動帶、回信位址 ----------
+
+import { autoTitleDue, isUserPrompt, promptHead, summarizeError, titleStale } from './register'
+
+const MIN = 60000
+
+test('the roster tells waiting-for-approval (with seconds) from waiting-for-input', () => {
+  const NOW = 10 * MIN
+  const crew: Coworker[] = [
+    { ...P('a', 'w', 'waiting'), tool: 'Bash', since: NOW - 42000 },
+    { ...P('b', 'i', 'idle'), since: NOW - 5 * MIN },
+    { ...P('c', 'd', 'done'), since: NOW - 1000 },
+    { ...P('e', 'fresh', 'idle'), since: NOW - 5000 },
+  ]
+  const text = roster(crew, NOW)
+  expect(text).toContain('🟡 等核准 42 秒（Bash）')
+  expect(text).toContain('| 等輸入（5 分） |')
+  expect(text).toContain('剛完成，等輸入')
+  expect(text).toContain('| 等輸入 |') // 不到 1 分鐘不報分鐘數
+})
+
+test('an error keeps a one-line summary of at most 80 characters, shown in the roster for 10 minutes', () => {
+  expect(summarizeError('\n  Exit code 1\n  stack...')).toBe('Exit code 1')
+  expect(summarizeError('a   b\tc')).toBe('a b c')
+  expect([...summarizeError('錯'.repeat(100))]).toHaveLength(80)
+  const NOW = 20 * MIN
+  const err = { text: 'Exit code 1', at: NOW - 2 * MIN }
+  expect(roster([{ ...P('a', 'x', 'error'), tool: 'Bash', lastError: err }], NOW)).toContain('出錯（Bash）：Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: err }], NOW)).toContain('思考中・上次出錯 2 分前：Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: { ...err, at: 0 } }], NOW)).not.toContain('上次出錯')
+})
+
+test('a failing tool writes its error summary and the mode start time to the status file', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  on('tool.call', (_$, e) => (String(e.tool) === 'Bash' ? ({ result: 'x', isError: true, text: 'Exit code 2\nfatal: not a git repository' } as any) : undefined))
+  await $.tool.call({ tool: 'Bash', command: 'git status' } as any).catch(() => undefined)
+  const last = JSON.parse(writes[writes.length - 1])
+  expect(last.mode).toBe('error')
+  expect(last.lastError.text).toBe('Exit code 2')
+  expect(typeof last.since).toBe('number')
+})
+
+test('auto titles: only the user\'s own prompts count; slash commands and blanks give no title', () => {
+  expect(isUserPrompt('composer')).toBe(true)
+  expect(isUserPrompt('bridge')).toBe(true)
+  expect(isUserPrompt('peer')).toBe(false)
+  expect(isUserPrompt('task-notification')).toBe(false)
+  expect(promptHead('  幫我把請購單\n整理成表格，然後寄給採購部門的同事')).toBe('幫我把請購單 整理成表格，然後寄')
+  expect(promptHead('/office who')).toBeUndefined()
+  expect(promptHead('   ')).toBeUndefined()
+})
+
+test('an empty or stale automatic title is replaced; a manual one never is', () => {
+  const NOW = 100 * MIN
+  expect(autoTitleDue({}, NOW)).toBe(true)
+  expect(autoTitleDue({ title: '請購單', titleAuto: true, titleAt: NOW - 10 * MIN }, NOW)).toBe(false)
+  expect(autoTitleDue({ title: '請購單', titleAuto: true, titleAt: NOW - 31 * MIN }, NOW)).toBe(true)
+  expect(autoTitleDue({ title: '協作主管', titleAt: NOW - 90 * MIN }, NOW)).toBe(false) // 手動設的永遠不蓋
+})
+
+test('the roster marks automatic titles, and flags a stale manual title with the latest prompt', () => {
+  const NOW = 100 * MIN
+  const auto = { ...P('a', 'a'), title: '幫我把請購單', titleAuto: true, titleAt: NOW }
+  const fresh = { ...P('b', 'b'), title: 'FOG 論文', titleAt: NOW - 40 * MIN, prompt: { text: '查一下陀螺儀', at: NOW - 35 * MIN } } // 設完 5 分鐘內的指令不算
+  const stale = { ...P('c', 'c'), title: '請購單', titleAt: NOW - 40 * MIN, prompt: { text: '改辦公室的貓', at: NOW - MIN } }
+  expect(titleStale(fresh)).toBe(false)
+  expect(titleStale(stale)).toBe(true)
+  const text = roster([auto, fresh, stale], NOW)
+  expect(text).toContain('| 幫我把請購單 (自動) |')
+  expect(text).toContain('| FOG 論文 |')
+  expect(text).toContain('| 請購單（40 分前設） |')
+  expect(text).toContain('・最新指令「改辦公室的貓」')
+})
+
+test('/office title is manual: it records when it was set and is not marked automatic', async ($, on) => {
+  const writes: string[] = []
+  MOCKS(on, writes)
+  await $.command.run({ command: 'office', args: 'title 系統管理' } as any)
+  const last = JSON.parse(writes[writes.length - 1])
+  expect(last.titleAuto).toBeUndefined()
+  expect(last.titleAt).toBe(1_000_000)
+})
+
+test('each session publishes its own reply address; the roster offers it when there is no ListAgents name', async ($, on) => {
+  const writes: string[] = []
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDE_CODE_MESSAGING_SOCKET' ? '/tmp/cc-msg-abc' : 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.write', (_$: any, e: any) => {
+    writes.push(e.text)
+    return { value: undefined }
+  })
+  await $.command.run({ command: 'office', args: 'title x' } as any)
+  expect(JSON.parse(writes[writes.length - 1]).addr).toBe('uds:/tmp/cc-msg-abc')
+
+  const crew: Coworker[] = [{ ...P('a', 'nameless'), addr: 'uds:/tmp/cc-msg-abc' }, { ...P('b', 'named'), agent: 'user-30', addr: 'uds:x' }, P('c', 'old')]
+  const text = roster(crew, 0)
+  expect(text).toContain('（沒有名稱）SendMessage 用 to=uds:/tmp/cc-msg-abc')
+  expect(text).toContain('| user-30 |') // 有名稱就照舊顯示名稱
+  expect(text).toContain('（未登記，傳訊息找不到）') // 舊版沒有位址
+  expect(findRecipient(crew, 'uds:/tmp/cc-msg-abc')?.id).toBe('a') // 寄到位址也畫得出紙飛機
 })

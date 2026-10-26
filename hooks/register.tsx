@@ -239,8 +239,8 @@ async function runButton($: EngineInterface, b: CustomButton) {
 
 /** 讀自己上一次寫的狀態檔（重載後找回名牌、職稱、agent） */
 /** 會跨熱重載保存的個人設定；新增欄位只要加在這裡和 PROFILE_KEYS */
-export type Profile = { role?: Role; name?: string; agent?: string; ref?: string; title?: string; auto?: boolean; team?: string }
-const PROFILE_KEYS = ['role', 'name', 'agent', 'ref', 'title', 'auto', 'team'] as const
+export type Profile = { role?: Role; name?: string; agent?: string; ref?: string; title?: string; titleAuto?: boolean; titleAt?: number; auto?: boolean; team?: string }
+const PROFILE_KEYS = ['role', 'name', 'agent', 'ref', 'title', 'titleAuto', 'titleAt', 'auto', 'team'] as const
 
 /** 合併兩份設定：$.store 有值就用它的，沒有才用狀態檔的。逐欄通用處理，新增欄位不會被漏掉 */
 export function mergeProfile(saved: Profile | undefined, own: Profile | undefined): Profile | undefined {
@@ -255,7 +255,7 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), titleAuto: s.titleAuto === true ? true : undefined, titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined, auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
   } catch {
     return undefined
   }
@@ -282,7 +282,10 @@ async function adopt($: EngineInterface, id: string) {
   const savedTeam = (saved as { team?: unknown } | undefined)?.team
   if (typeof savedTeam === 'string' && savedTeam.length > 0) me = { ...me, team: savedTeam }
   const savedTitle = (saved as { title?: unknown } | undefined)?.title
-  if (typeof savedTitle === 'string' && savedTitle.length > 0) me = { ...me, title: savedTitle }
+  if (typeof savedTitle === 'string' && savedTitle.length > 0) {
+    // 舊版沒記設定時間：從現在起算，30 分鐘後才算過期
+    me = { ...me, title: savedTitle, titleAuto: saved?.titleAuto === true ? true : undefined, titleAt: typeof saved?.titleAt === 'number' ? saved.titleAt : await $.clock.now() }
+  }
 }
 
 /** /resume、/clear 後 process 換到新的 session 編號，但不會再跑 session.start：舊檔標離開，改用新編號的身分 */
@@ -313,11 +316,18 @@ async function setMeeting($: EngineInterface, input: { action?: unknown; topic?:
 }
 
 // 把自己的狀態寫到共用資料夾：一個 session 一個檔，不會互相覆蓋
+let ownAddr = ''
 async function publish($: EngineInterface, left: boolean) {
   const d = await sharedDir($)
+  // 自己的回信位址：舊版 Claude Code 沒有這個變數，名單照舊顯示「未登記」；讀到才快取
+  if (!ownAddr) {
+    const sock = await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET')
+    if (sock) ownAddr = `uds:${sock}`
+  }
+  if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -354,18 +364,57 @@ function clashNotes(list: Coworker[]): string[] {
   return out
 }
 
+const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
+const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
+
+/** 錯誤訊息 → 名單用的一行摘要：第一個非空行、空白壓成一格、最多 80 字 */
+export function summarizeError(text: string): string {
+  const line = text.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).find(l => l.length > 0) ?? ''
+  return [...line].slice(0, 80).join('')
+}
+
+/** 使用者指令 → 前 16 字（換行壓成空白）；slash 指令與空白不算，回 undefined */
+export function promptHead(text: string): string | undefined {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length === 0 || t.startsWith('/')) return undefined
+  return [...t].slice(0, 16).join('')
+}
+
+/** 只有使用者自己打的（終端機 Enter、Remote Control）算指令；peer 訊息、排程、通知不算 */
+export const isUserPrompt = (kind: string) => kind === 'composer' || kind === 'bridge'
+
+/** 收到新指令時 title 要不要自動換：沒有 title，或自動帶的已放超過 30 分鐘；手動設的永遠不換（主管 2026-10-26 裁示） */
+export function autoTitleDue(c: Pick<Coworker, 'title' | 'titleAuto' | 'titleAt'>, now: number): boolean {
+  if (!c.title) return true
+  return c.titleAuto === true && now - (c.titleAt ?? 0) > TITLE_STALE_MS
+}
+
+/** 手動 title 過期：超過 30 分鐘沒更新，之後又收到新指令（名單標「N 分前設」並附最新指令） */
+export function titleStale(c: Pick<Coworker, 'title' | 'titleAuto' | 'titleAt' | 'prompt'>): boolean {
+  return !!c.title && !c.titleAuto && c.titleAt !== undefined && c.prompt !== undefined && c.prompt.at - c.titleAt > TITLE_STALE_MS
+}
+
+/** 名單「目前」欄：等核准幾秒、等輸入、出錯附摘要 */
+function doingText(c: Coworker, now: number): string {
+  if (c.blocked) return `🔴 被擋（${c.blocked.tool}），已等 ${Math.max(0, Math.round((now - c.blocked.at) / 60000))} 分，要使用者在它的視窗說「放行」`
+  const secs = c.since !== undefined ? Math.max(0, Math.round((now - c.since) / 1000)) : undefined
+  if (c.mode === 'waiting') return `🟡 等核准${secs !== undefined ? ` ${secs} 秒` : ''}（${c.tool}）`
+  if (c.mode === 'idle' || c.mode === 'done') return `${c.mode === 'done' ? '剛完成，' : ''}等輸入${c.mode === 'idle' && secs !== undefined && secs >= 60 ? `（${Math.round(secs / 60)} 分）` : ''}`
+  if (c.mode === 'error') return `出錯（${c.tool}）${c.lastError ? `：${c.lastError.text}` : ''}`
+  const base = c.mode === 'typing' || c.mode === 'reading' ? `${MODE_LABEL[c.mode]}（${c.tool}）` : MODE_LABEL[c.mode] ?? c.mode
+  return c.lastError && now - c.lastError.at < ERROR_SHOWN_MS ? `${base}・上次出錯 ${Math.round((now - c.lastError.at) / 60000)} 分前：${c.lastError.text}` : base
+}
+
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
 export function roster(list: Coworker[], now: number): string {
   if (list.length === 0) return '辦公室目前沒有人。'
   const sorted = [...list].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
   const rows = sorted.map(c => {
-    const doing = c.blocked
-      ? `🔴 被擋（${c.blocked.tool}），已等 ${Math.max(0, Math.round((now - c.blocked.at) / 60000))} 分，要使用者在它的視窗說「放行」`
-      : c.mode === 'typing' || c.mode === 'reading' || c.mode === 'waiting'
-        ? `${MODE_LABEL[c.mode]}（${c.tool}）`
-        : MODE_LABEL[c.mode] ?? c.mode
-    const agent = c.agent ?? '（未登記，傳訊息找不到）'
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${c.title ?? '—'} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
+    const stale = titleStale(c)
+    const doing = doingText(c, now) + (stale ? `・最新指令「${c.prompt!.text}」` : '')
+    const title = !c.title ? '—' : c.titleAuto ? `${c.title} (自動)` : stale ? `${c.title}（${Math.round((now - c.titleAt!) / 60000)} 分前設）` : c.title
+    const agent = c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 to=${c.addr}` : '（未登記，傳訊息找不到）')
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const head = [
@@ -388,7 +437,7 @@ export function waitsForApproval(decision: string, toolUseId: string | undefined
 /** 收件者名稱 → 辦公室裡的人：比對大家登記的 agent（ListAgents 名稱） */
 export function findRecipient(list: Coworker[], to: string): Coworker | undefined {
   const want = to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '') // 去掉可能附帶的 [ref]
-  return list.find(c => c.agent !== undefined && c.agent === want)
+  return list.find(c => (c.agent !== undefined && c.agent === want) || (c.addr !== undefined && c.addr === want))
 }
 
 // 送信 → 紙飛機＋收件者信封；只收到（寄件者不在辦公室）→ 只有信封；有人開始等核准 → toast
@@ -470,6 +519,12 @@ async function refresh($: EngineInterface) {
           agent: typeof s.agent === 'string' ? s.agent : undefined,
           ref: typeof s.ref === 'string' ? s.ref : undefined,
           title: typeof s.title === 'string' ? s.title : undefined,
+          titleAuto: s.titleAuto === true ? true : undefined,
+          titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined,
+          addr: typeof s.addr === 'string' && s.addr.startsWith('uds:') ? s.addr : undefined,
+          since: typeof s.since === 'number' ? s.since : undefined,
+          lastError: s.lastError && typeof s.lastError.text === 'string' && typeof s.lastError.at === 'number' ? { text: s.lastError.text, at: s.lastError.at } : undefined,
+          prompt: s.prompt && typeof s.prompt.text === 'string' && typeof s.prompt.at === 'number' ? { text: s.prompt.text, at: s.prompt.at } : undefined,
           auto: s.auto === true ? true : undefined,
           team: typeof s.team === 'string' && s.team.length > 0 ? s.team : undefined,
           blocked: s.blocked && typeof s.blocked.tool === 'string' && typeof s.blocked.at === 'number' ? { tool: s.blocked.tool, at: s.blocked.at } : undefined,
@@ -505,7 +560,8 @@ async function refresh($: EngineInterface) {
 
 async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
   seq += 1
-  me = { ...me, mode: next, tool: name ?? me.tool }
+  const since = next === me.mode && me.since !== undefined ? me.since : await $.clock.now()
+  me = { ...me, mode: next, tool: name ?? me.tool, since }
   await showCrew($)
   await publish($, false).catch(() => undefined)
 }
@@ -546,10 +602,14 @@ async function applyProfile(
   let agent = me.agent
   let ref = me.ref
   let title = me.title
+  let titleAuto = me.titleAuto
+  let titleAt = me.titleAt
   if (input.title !== undefined) {
     const t = input.title.trim()
     if (t.length > 16) return `職稱「${input.title}」太長：最多 16 字。`
     title = t.length > 0 ? t : undefined
+    titleAuto = undefined // 手動設的：以後不自動蓋
+    titleAt = title ? await $.clock.now() : undefined
     notes.push(title ? `職稱＝${title}` : '職稱已清除')
   }
   if (input.ref !== undefined) {
@@ -588,11 +648,38 @@ async function applyProfile(
     notes.push(`名牌＝${name}`)
   }
   if (notes.length === 0) return '沒有要改的：請給 role（主管／員工）、name（英數字）、title（職稱）、agent（ListAgents 名稱）、auto（true／false）或 team（主管名稱）。'
-  me = { ...me, role, name, agent, ref, title, auto, team }
-  await $.store.set(`profile:${me.id}`, { role, name, agent, ref, title, auto, team }).catch(() => undefined) // 存不了只是重開後不記得
+  me = { ...me, role, name, agent, ref, title, titleAuto, titleAt, auto, team }
+  await saveProfile($)
   await showCrew($)
   await publish($, false).catch(() => undefined)
   return `已設定：${notes.join('、')}。`
+}
+
+async function saveProfile($: EngineInterface) {
+  const { role, name, agent, ref, title, titleAuto, titleAt, auto, team } = me
+  await $.store.set(`profile:${me.id}`, { role, name, agent, ref, title, titleAuto, titleAt, auto, team }).catch(() => undefined) // 存不了只是重開後不記得
+}
+
+let sessionTitle: string | undefined // classic SessionStart／UserPromptSubmit 帶的 session_title（--name 或自動標題）
+
+/** 自動帶 title：有 session_title 就用，沒有用指令前 16 字；手動設過的不動 */
+async function autoTitle($: EngineInterface, head: string | undefined, now: number) {
+  const t = sessionTitle ? [...sessionTitle.trim()].slice(0, 16).join('') : head
+  if (!t || !autoTitleDue(me, now) || t === me.title) return
+  me = { ...me, title: t, titleAuto: true, titleAt: now }
+  await saveProfile($)
+}
+
+// classic hook 帶的 session_title：記下來，title 是自動帶的就換成它
+async function noteSessionTitle($: EngineInterface, e: unknown) {
+  const t = (e as { session_title?: unknown }).session_title
+  if (typeof t !== 'string' || t.trim().length === 0 || t === sessionTitle) return
+  sessionTitle = t
+  if (!me.title || me.titleAuto) {
+    me = { ...me, title: undefined }
+    await autoTitle($, undefined, await $.clock.now())
+    await publish($, false)
+  }
 }
 
 // 暫時狀態：ms 後若沒被別的狀態蓋掉，就切回 to
@@ -681,7 +768,7 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；名單顯示你的職稱過期（N 分前設）時，請更新 title；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
@@ -826,9 +913,25 @@ export const register: Register = on => {
     return { result: `${text}（目前：${ROLE_LABEL[me.role]}，名牌 ${me.name}，session ${me.id.slice(0, 8)}）` }
   })
 
+  on('classic.SessionStart', async ($, e, next) => {
+    await noteSessionTitle($, e).catch(() => undefined)
+    return next(e)
+  })
+
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    await noteSessionTitle($, e).catch(() => undefined)
+    return next(e)
+  })
+
   on('prompt.submit', async ($, e, next) => {
     try {
       me = { ...me, blocked: undefined } // 使用者在這個視窗輸入了（例如說放行），紅牌放下
+      if (isUserPrompt(e.origin.kind)) {
+        const now = await $.clock.now()
+        const head = promptHead(e.text)
+        if (head) me = { ...me, prompt: { text: head, at: now } }
+        await autoTitle($, head, now)
+      }
       await setMode($, 'thinking')
     } catch {}
 
@@ -842,11 +945,14 @@ export const register: Register = on => {
     } catch {}
     const ran = await next(e)
     try {
-      if (classifierBlocked(ran as { deny?: string; isError?: boolean; text?: string })) {
+      const r = ran as { deny?: string; isError?: boolean; text?: string }
+      if (classifierBlocked(r)) {
         me = { ...me, blocked: { tool: name, at: await $.clock.now() } }
         await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else if (ran.deny !== undefined || ran.isError === true) {
+        const text = summarizeError(r.deny ?? r.text ?? '')
+        me = { ...me, lastError: { text: text || '（沒有錯誤訊息）', at: await $.clock.now() } }
         await setMode($, 'error', name)
         revertLater($, 2500, 'thinking')
       } else {

@@ -25,7 +25,7 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | `/office role 主管` ／ `/office role 員工` | 設定這個 session 的角色；角色變了人會走進／走出主管室 |
 | `/office name <英數字>` | 桌上名牌（1～12 字，中文在像素畫寬兩格放不下） |
 | `/office title <職稱>` | 職稱（最多 16 字，可中文；不畫在圖上，名單裡看得到） |
-| `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態 |
+| `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態（見下方「名單」） |
 | `/office agent <名稱>` | 登記 ListAgents 名稱，別人傳訊息給你時才畫得出紙飛機 |
 | `/office buttons` | 重讀個人按鈕設定（`~/.claude/pixel-office/buttons.json`，見下方「個人按鈕」） |
 | `/office team <主管名稱>｜off` | 登記你是哪位主管的 peer（填主管的 ListAgents 名稱）；peer 坐最右邊那一區，其他人坐左邊 |
@@ -36,6 +36,12 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | 面板按鈕「升為主管／設為員工」(`r`)、「餵貓／餵奶／餵小米」(`c`)、「放貓／放寶寶／放山雀」(`b`)、「換寶寶／換山雀／換貓」(`p`)、「夜間模式」(`n`) | 互動；快捷鍵要先點面板或 ctrl+x tab 讓面板取得焦點 |
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。
+
+## 名單（`/office who`、工具 `office_roster`）
+
+- **目前**：「🟡 等核准 N 秒（工具）」與「等輸入（N 分）」分開；出錯時附錯誤第一行（最多 80 字），之後 10 分鐘內在狀態後面標「上次出錯 N 分前」
+- **職稱**：沒設時，收到使用者指令就用 session 標題（有的話）或指令前 16 字自動帶，標「(自動)」；自動帶的放超過 30 分鐘再來新指令才換。模型或 `/office title` 手動設的永遠不自動蓋，但超過 30 分鐘沒更新又來新指令時標「（N 分前設）」，「目前」欄附最新指令，讓主管看出職稱跟實際工作對不上
+- **ListAgents 名稱**：沒登記名稱的人，若這版 Claude Code 有 `CLAUDE_CODE_MESSAGING_SOCKET`，改顯示「SendMessage 用 to=uds:…」，照填就送得到
 
 ## 個人按鈕（不進 repo）
 
