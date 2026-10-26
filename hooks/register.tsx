@@ -399,9 +399,14 @@ function doingText(c: Coworker, now: number): string {
   if (c.blocked) return `🔴 被擋（${c.blocked.tool}），已等 ${Math.max(0, Math.round((now - c.blocked.at) / 60000))} 分，要使用者在它的視窗說「放行」`
   const secs = c.since !== undefined ? Math.max(0, Math.round((now - c.since) / 1000)) : undefined
   if (c.mode === 'waiting') return `🟡 等核准${secs !== undefined ? ` ${secs} 秒` : ''}（${c.tool}）`
-  if (c.mode === 'idle' || c.mode === 'done') return `${c.mode === 'done' ? '剛完成，' : ''}等輸入${c.mode === 'idle' && secs !== undefined && secs >= 60 ? `（${Math.round(secs / 60)} 分）` : ''}`
   if (c.mode === 'error') return `出錯（${c.tool}）${c.lastError ? `：${c.lastError.text}` : ''}`
-  const base = c.mode === 'typing' || c.mode === 'reading' ? `${MODE_LABEL[c.mode]}（${c.tool}）` : MODE_LABEL[c.mode] ?? c.mode
+  // 出錯後停下來等人（done → idle）最需要看到錯誤：等輸入也附上次出錯
+  const base =
+    c.mode === 'idle' || c.mode === 'done'
+      ? `${c.mode === 'done' ? '剛完成，' : ''}等輸入${c.mode === 'idle' && secs !== undefined && secs >= 60 ? `（${Math.round(secs / 60)} 分）` : ''}`
+      : c.mode === 'typing' || c.mode === 'reading'
+        ? `${MODE_LABEL[c.mode]}（${c.tool}）`
+        : MODE_LABEL[c.mode] ?? c.mode
   return c.lastError && now - c.lastError.at < ERROR_SHOWN_MS ? `${base}・上次出錯 ${Math.round((now - c.lastError.at) / 60000)} 分前：${c.lastError.text}` : base
 }
 
@@ -413,7 +418,7 @@ export function roster(list: Coworker[], now: number): string {
     const stale = titleStale(c)
     const doing = doingText(c, now) + (stale ? `・最新指令「${c.prompt!.text}」` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (自動)` : stale ? `${c.title}（${Math.round((now - c.titleAt!) / 60000)} 分前設）` : c.title
-    const agent = c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 to=${c.addr}` : '（未登記，傳訊息找不到）')
+    const agent = c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
@@ -768,7 +773,7 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；名單顯示你的職稱過期（N 分前設）時，請更新 title；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
+        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；名單顯示你的職稱過期（N 分前設）時，請更新 title；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單；沒有名稱的人照抄名單上的 to=uds:…（Windows 開頭是兩個反斜線，少一個會報 no-key）。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }

@@ -1335,8 +1335,18 @@ test('each session publishes its own reply address; the roster offers it when th
 
   const crew: Coworker[] = [{ ...P('a', 'nameless'), addr: 'uds:/tmp/cc-msg-abc' }, { ...P('b', 'named'), agent: 'user-30', addr: 'uds:x' }, P('c', 'old')]
   const text = roster(crew, 0)
-  expect(text).toContain('（沒有名稱）SendMessage 用 to=uds:/tmp/cc-msg-abc')
+  expect(text).toContain('（沒有名稱）SendMessage 用 `to=uds:/tmp/cc-msg-abc`') // code 格式：模型照抄才不會吃掉反斜線
   expect(text).toContain('| user-30 |') // 有名稱就照舊顯示名稱
   expect(text).toContain('（未登記，傳訊息找不到）') // 舊版沒有位址
   expect(findRecipient(crew, 'uds:/tmp/cc-msg-abc')?.id).toBe('a') // 寄到位址也畫得出紙飛機
+})
+
+test('an error stays visible in the roster after the turn ends (error → done → idle)', () => {
+  const NOW = 20 * MIN
+  const lastError = { text: 'Exit code 1', at: NOW - 3 * MIN }
+  const done = roster([{ ...P('a', 'x', 'done'), lastError }], NOW)
+  const idle = roster([{ ...P('a', 'x', 'idle'), since: NOW - 2 * MIN, lastError }], NOW)
+  expect(done).toContain('剛完成，等輸入・上次出錯 3 分前：Exit code 1')
+  expect(idle).toContain('等輸入（2 分）・上次出錯 3 分前：Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'idle'), lastError: { ...lastError, at: 0 } }], NOW)).not.toContain('上次出錯') // 10 分鐘後收掉
 })
