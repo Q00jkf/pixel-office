@@ -2348,6 +2348,20 @@ test('claude -p with --name: classic SessionStart first leaves no me.json, then 
   expect(files['sessions/me.json']).toBeUndefined()
 })
 
+test('a Claude Desktop session (SDK, isInteractive false) is an employee again once the desktop app attaches', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW)
+  G4_START(on, files, 'd1')
+  on('session.attach', (_$: any, e: any) => ({ clientId: e.clientId }) as any)
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
+  expect(JSON.parse(files['sessions/d1.json']).oneshot).toBe(true)
+  await ($ as any).session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  const mine = JSON.parse(files['sessions/d1.json'])
+  expect(mine.oneshot).toBeUndefined()
+  expect(mine.left).toBe(false)
+})
+
 test('an interactive session started with --name gets it as its plate instead of the folder name; not marked one-shot', async ($, on) => {
   const NOW = 1_000_000
   const files: Record<string, string> = {}

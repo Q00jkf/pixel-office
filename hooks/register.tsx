@@ -950,6 +950,20 @@ async function saveProfile($: EngineInterface) {
 let sessionTitle: string | undefined // classic SessionStart／UserPromptSubmit 帶的 session_title（--name 或自動標題）
 let launchName: string | undefined // 啟動時的 --name（classic SessionStart、source＝startup 的 session_title）
 let oneshotRun = false // session.start 的 isInteractive＝false：claude -p 或 SDK
+let attached = false // Desktop／手機／VS Code 接上過
+
+/**
+ * 有 Desktop／手機／VS Code 接上＝有人在用，不是一次性對話：Desktop 的 session 也走 SDK，isInteractive 一樣是 false
+ * （jacky 2026-10-27：0.19.0 後 Desktop 的員工都消失）
+ */
+async function attend($: EngineInterface) {
+  attached = true
+  oneshotRun = false
+  if (!me.oneshot) return
+  const { oneshot: _o, label: _l, ...rest } = me
+  me = rest
+  if (me.id !== 'me') await publish($, false)
+}
 
 /** --name → 預設名牌：去掉非 ASCII、截到 12 字，至少 2 字才用（名牌只能 ASCII，Raster 畫不出中文） */
 export function launchPlate(name: string | undefined): string | undefined {
@@ -1338,7 +1352,7 @@ export const register: Register = on => {
       instance = crypto.randomUUID()
       await update($, instanceRef, () => instance)
     }
-    oneshotRun = e.isInteractive === false
+    oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
     if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
@@ -1498,6 +1512,11 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('session.attach', async ($, e, next) => {
+    if (e.surface !== 'terminal') await attend($).catch(() => undefined)
+    return next(e)
+  })
+
   on('session.end', async ($, e, next) => {
     // session.start 沒跑完就結束時還沒有 session 編號（仍是預設的 'me'）：不寫，免得留下 me.json 垃圾檔
     if (me.id !== 'me') await publish($, true).catch(() => undefined)
@@ -1653,6 +1672,7 @@ export const register: Register = on => {
     const now = pending.length > 0 ? await $.clock.now() : 0 // 有單才要算冷卻
 
     if (e.surface !== 'terminal') {
+      if (me.oneshot) await attend($).catch(() => undefined)
       const els = $.ui.resolve(e) as Record<string, unknown>
       const { Box, Text, Button, Link } = $.ui.resolve(e)
       const Svg = els.Svg as typeof Box | undefined
