@@ -244,13 +244,15 @@ test('baby and bird are pixel sprites in the same style: crawl/sit, hop/flap, fl
     for (let f = 0; f < 60; f++) {
       const v = drawVector([], f, 80, 50, [], undefined, { pet })
       const mine = sprites(v).filter(s => s.id.startsWith(pet))
-      expect(mine).toHaveLength(1)
-      ids.add(mine[0].id)
+      const flying = mine.some(s => s.id === 'birdFly')
+      expect(mine).toHaveLength(flying ? 2 : 1) // 飛：上拍＋下拍兩格疊著，一格看得見、一格透明，SVG 動畫交替
+      if (flying) expect(mine.map(s => s.flap).sort()).toEqual([0, 1])
+      for (const s of mine) ids.add(s.id)
       flips.add(mine[0].flip === true)
       expect(sprites(v).some(s => s.id === 'cat')).toBe(false)
       expect(v.shapes.some(s => (s.k === 'ellipse' || s.k === 'circle') && [C.babySuit, C.birdWhite].includes(s.fill as number))).toBe(false)
     }
-    expect(ids.size).toBe(2) // 寶寶爬／坐、山雀拍翅／停
+    expect(ids.size).toBe(pet === 'bird' ? 3 : 2) // 寶寶爬／坐；山雀上拍、下拍／停
     expect(flips.size).toBe(2)
   }
   const fed = drawVector([], 12, 80, 50, [], undefined, { pet: 'baby', treatFrame: 10 })
@@ -312,4 +314,12 @@ test('G3: glass floors, navy boss rug, white desks, one F1 frame per team with c
     expect(frames.length).toBe(tags.length) // 同一隊上下相連的座位群只畫一個框
     expect(v.shapes.some(s => s.k === 'rect' && [0xeadfc8, 0xdbe7ef, 0xe2ecd8].includes(s.fill as number))).toBe(false) // 地毯底色拿掉了
   }
+})
+
+test('the flying bird flaps between two frames with an SMIL animation, and still alternates by frame if the animation does not run', () => {
+  const svgAt = (f: number) => vectorSvg(drawVector([], f, 80, 50, [], undefined, { pet: 'bird' }))
+  const f = Array.from({ length: 60 }, (_, i) => i).find(i => svgAt(i).includes('<animate'))!
+  expect(f).toBeDefined()
+  expect(svgAt(f)).toContain('values="1;0"')
+  expect(svgAt(f)).toContain('values="0;1"')
 })

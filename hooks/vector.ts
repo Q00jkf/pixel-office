@@ -22,7 +22,7 @@ export type Shape =
   | { k: 'ellipse'; cx: number; cy: number; rx: number; ry: number; fill: Paint; stroke?: Paint; sw?: number }
   | { k: 'path'; d: string; fill?: Paint; stroke?: Paint; sw?: number; op?: number }
   | { k: 'text'; x: number; y: number; text: string; size: number; fill: Paint; anchor?: 'start' | 'middle'; bold?: boolean; bg?: Paint; halo?: Paint; mono?: boolean }
-  | { k: 'sprite'; id: SpriteId; src: Box4; x: number; y: number; w: number; h: number; flip?: boolean }
+  | { k: 'sprite'; id: SpriteId; src: Box4; x: number; y: number; w: number; h: number; flip?: boolean; flap?: 0 | 1 }
 
 /** 點得到的東西（場景單位的框）：家具開選單、寵物與柯基點了有反應；畫面疊按鈕時照這裡放 */
 export type Furniture = 'printer' | 'cabinet' | 'mailbox' | 'calendar' | 'vending' | 'clock' | 'meeting'
@@ -442,9 +442,18 @@ function plusBadge(p: Pen, cx: number, cy: number, extra: number) {
  */
 function pet(p: Pen, kind: Pet, x0: number, y0: number, right: boolean, sitting: boolean, frame: number) {
   const k = 0.45
-  const id: SpriteId = kind === 'baby' ? (sitting ? 'babySit' : 'babyCrawl') : kind === 'bird' ? (sitting || frame % 2 ? 'birdSit' : 'birdFly') : 'cat'
+  if (kind === 'bird' && !sitting) {
+    // 飛：上拍、下拍兩格疊在同一處，SVG 動畫每 0.15 秒交替（Desktop 每 0.5 秒才重畫，只靠重畫會像在飄）；動畫不跑時照 frame 交替
+    const [, , sw, sh] = SPRITES.birdFly
+    for (const [id, phase] of [['birdFly', frame % 2], ['birdFlap', (frame + 1) % 2]] as const) {
+      p.sprite(id, x0 + CAT_W / 2 - (sw * k) / 2, y0 + CAT_H - sh * k - 1, sw * k, sh * k, right)
+      ;(p.shapes[p.shapes.length - 1] as Extract<Shape, { k: 'sprite' }>).flap = phase as 0 | 1
+    }
+    return
+  }
+  const id: SpriteId = kind === 'baby' ? (sitting ? 'babySit' : 'babyCrawl') : kind === 'bird' ? 'birdSit' : 'cat'
   const [, , sw, sh] = SPRITES[id]
-  const bob = !sitting && kind !== 'bird' && frame % 2 ? -k : 0
+  const bob = !sitting && frame % 2 ? -k : 0
   p.sprite(id, x0 + CAT_W / 2 - (sw * k) / 2, y0 + CAT_H - sh * k + bob, sw * k, sh * k, right)
 }
 
@@ -672,7 +681,9 @@ function shapeSvg(s: Shape): string {
     const [sx, sy, sw, sh] = s.src
     const fit = Math.abs(s.w / s.h - sw / sh) > 0.01 ? ' preserveAspectRatio="none"' : ''
     const flip = s.flip ? ` transform="matrix(-1 0 0 1 ${2 * sx + sw} 0)"` : ''
-    return `<svg x="${n(s.x)}" y="${n(s.y)}" width="${n(s.w)}" height="${n(s.h)}" viewBox="${sx} ${sy} ${sw} ${sh}"${fit}><use href="#S"${flip}/></svg>`
+    const flap = s.flap === undefined ? '' : ` opacity="${s.flap ? 0 : 1}"`
+    const anim = s.flap === undefined ? '' : `<animate attributeName="opacity" values="${s.flap ? '0;1' : '1;0'}" dur="0.3s" calcMode="discrete" repeatCount="indefinite"/>`
+    return `<svg x="${n(s.x)}" y="${n(s.y)}" width="${n(s.w)}" height="${n(s.h)}" viewBox="${sx} ${sy} ${sw} ${sh}"${fit}${flap}>${anim}<use href="#S"${flip}/></svg>`
   }
   if (s.k === 'rect') return `<rect x="${n(s.x)}" y="${n(s.y)}" width="${n(s.w)}" height="${n(s.h)}"${s.r ? ` rx="${n(s.r)}"` : ''}${paint(s)}/>`
   if (s.k === 'circle') return `<circle cx="${n(s.cx)}" cy="${n(s.cy)}" r="${n(s.r)}"${paint(s)}/>`

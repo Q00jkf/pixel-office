@@ -85,6 +85,24 @@ PETS = {
         '..kgwwwwwwddddddk.',
         '...kgwwwwwwgkkkkk.',
         '....kkkkkkkk......',
+        '..................',
+        '..................',
+    ],
+    # 翅膀往下拍（跟 birdFly 同大小 18×13、身體高 1 像素＝下拍時身體往上）：飛的時候兩格快速交替才像在拍翅
+    'birdFlap': [
+        '..................',
+        '..................',
+        '....kkkkkkk.......',
+        '...kwwwwwwwk......',
+        '..kwkwwwwwwwk.....',
+        '.kkwwwwwwwggk.....',
+        '..kwwowwwwgddkkk..',
+        '..kgwwwwkdddddddk.',
+        '...kgwwkdddkkkkk..',
+        '....kkkddddk......',
+        '.......kdddk......',
+        '........kddk......',
+        '.........kk.......',
     ],
     # 寶寶：藍色連身衣、白尿布
     'babySit': [
