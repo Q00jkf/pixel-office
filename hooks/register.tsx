@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { GEOM, isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, walkerPos } from './scene'
-import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
+import { GEOM, isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, rejoin, walkerPos } from './scene'
+import type { CatRaid, Notice, Placement, Plane, SceneOptions, Seat, Walker } from './scene'
 import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
 
 const PANE = 'pixel-office'
@@ -118,12 +118,18 @@ function trackMoves(list: Coworker[]) {
     for (const [id, pl] of now) {
       const old = lastPlaced.get(id)
       if (old && (old.kind !== pl.kind || old.slot !== pl.slot)) {
-        walkers = walkers.filter(w => w.id !== id)
-        walkers.push({ id, path: route(old, pl, width, rows), start: frame })
+        walkTo(id, route(old, pl, width, rows))
       }
     }
   }
   lastPlaced = now
+}
+
+// 換路線：還在走的人從現在的位置接上，不跳回起點或跳到終點
+function walkTo(id: string, path: Seat[]) {
+  const old = walkers.find(w => w.id === id)
+  walkers = walkers.filter(w => w.id !== id)
+  walkers.push({ id, path: rejoin(old, path, frame), start: frame })
 }
 
 function liveWalkers(): Walker[] {
@@ -715,8 +721,7 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
       if (pl && width > 0 && rows > 0) {
         const spot = queueSpot(width, rows, Math.max(0, queueOrder(list).indexOf(c.id)))
         const go = corridorRoute(pl, spot, width, rows)
-        walkers = walkers.filter(w => w.id !== c.id)
-        walkers.push({ id: c.id, path: approvalAt !== undefined ? go : [...go].reverse(), start: frame })
+        walkTo(c.id, approvalAt !== undefined ? go : [...go].reverse())
       }
     }
     seenApproval.set(c.id, approvalAt)

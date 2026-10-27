@@ -210,7 +210,7 @@ test('the model can set its own role through the office_profile tool', async ($,
 
 // ---------- 固定座位與升遷走路 ----------
 
-import { assignSeats, isAttendee, route, walkerPos } from './scene'
+import { GEOM, assignSeats, corridorRoute, isAttendee, pathLength, rejoin, route, walkerPos } from './scene'
 
 test('seats are sticky: someone leaving does not shuffle everyone else', () => {
   const a = P('alpha', 'a'), b = P('bravo', 'b'), c = P('charlie', 'c')
@@ -245,6 +245,33 @@ test('a promotion walks from the desk, along the hall, through the office door, 
   // 途中真的有轉向：同時出現左右走與上下走
   expect([...dirs].some(d => d.endsWith(',0') && d !== '0,0')).toBe(true)
   expect([...dirs].some(d => d.startsWith('0,') && d !== '0,0')).toBe(true)
+})
+
+test('changing route mid-walk never teleports: turn back to the counter queue, or back to the seat then on to the new one', () => {
+  const staff = P('zed', 'z', 'idle', false, 'staff')
+  const pl = assignSeats([staff], 112, 50).get('zed')!
+  const go = corridorRoute(pl, queueSpot(112, 50, 0), 112, 50)
+  const boss = assignSeats([{ ...staff, role: 'manager' as const }], 112, 50).get('zed')!
+  // 走去排隊 6 格後：核准了（回程）／升主管（新路線從座位出發）／從櫃台再去別處（新路線從舊終點出發）
+  const fromCounter = [go[go.length - 1], { x: go[go.length - 1].x + 10, y: go[go.length - 1].y }]
+  for (const next of [[...go].reverse(), route(pl, boss, 112, 50), fromCounter]) {
+    const old = { id: 'zed', path: go, start: 0 }
+    const here = walkerPos(old, 6)!
+    const w = { id: 'zed', path: rejoin(old, next, 6), start: 6 }
+    expect(w.path[w.path.length - 1]).toEqual(next[next.length - 1])
+    let prev = here
+    for (let f = 6; f < 400; f++) {
+      const at = walkerPos(w, f)
+      if (!at) break
+      expect(Math.abs(at.x - prev.x) + Math.abs(at.y - prev.y)).toBeLessThanOrEqual(GEOM.WALK_SPEED)
+      prev = at
+    }
+  }
+  // 核准時直接掉頭：路程只有已走的 12 像素
+  const old = { id: 'zed', path: go, start: 0 }
+  expect(pathLength(rejoin(old, [...go].reverse(), 6))).toBe(12)
+  // 沒在走路就照新路線
+  expect(rejoin(undefined, go, 6)).toEqual(go)
 })
 
 

@@ -425,6 +425,31 @@ export function walkerPos(w: Walker, frame: number): Step | null {
   return null // 到了
 }
 
+/**
+ * 走到一半換路線：從現在的位置接上新路線，不瞬移（jacky 2026-10-27：排隊走到一半就核准，人會跳到櫃台再走回來）。
+ * 新路線回到舊起點 → 原地掉頭；從舊起點出發 → 掉頭回起點再出發；從舊終點出發 → 先走完舊路線；都接不上才照新路線
+ */
+export function rejoin(old: Walker | undefined, path: Seat[], frame: number): Seat[] {
+  const at = old && walkerPos(old, frame)
+  if (!old || !at) return path
+  let d = Math.max(0, (frame - old.start) * WALK_SPEED)
+  let i = 0
+  for (; i < old.path.length - 2; i++) {
+    const len = Math.abs(old.path[i + 1].x - old.path[i].x) + Math.abs(old.path[i + 1].y - old.path[i].y)
+    if (d <= len) break
+    d -= len
+  }
+  const here = { x: at.x, y: at.y }
+  const same = (a: Seat, b: Seat) => a.x === b.x && a.y === b.y
+  const home = old.path[0]
+  const end = old.path[old.path.length - 1]
+  const back = [here, ...old.path.slice(0, i + 1).reverse()]
+  if (same(path[path.length - 1], home)) return back
+  if (same(path[0], home)) return [...back, ...path.slice(1)]
+  if (same(path[0], end)) return [here, ...old.path.slice(i + 1), ...path.slice(1)]
+  return path
+}
+
 // ---------- 小物件 ----------
 
 function screenPixel(mode: OfficeMode | null, frame: number, i: number): number {
