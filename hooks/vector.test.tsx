@@ -31,7 +31,7 @@ test('the SVG is well formed: only svg, defs, pattern and text have closing tags
   for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('night'))) {
     const s = svgOf(c)
     for (const tag of ['svg', 'defs', 'pattern', 'text']) expect((s.match(new RegExp(`<${tag}[ >]`, 'g')) ?? []).length).toBe((s.match(new RegExp(`</${tag}>`, 'g')) ?? []).length)
-    expect(s).not.toMatch(/NaN|undefined|Infinity/)
+    expect(s.replace(/base64,[^"]*/, '')).not.toMatch(/NaN|undefined|Infinity/) // 素材表的 base64 可能剛好含這幾個字
     expect(s.replace(/<(svg|defs|pattern|text)[ >][^]*?>|<\/(svg|defs|pattern|text)>|<(rect|circle|ellipse|path|image|use)\b[^<>]*\/>/g, '').replace(/[^<>]+/g, '')).toBe('')
   }
 })
@@ -298,5 +298,17 @@ test('chairs face their desks: front chairs behind desks and the top meeting row
       const i = shapes.indexOf(b)
       expect(shapes.slice(i + 1).some(s => s.k === 'sprite' && s.id.startsWith('chairBack'))).toBe(true) // 背對的人之後一定畫背面椅
     }
+  }
+})
+
+test('G3: glass floors, navy boss rug, white desks, one F1 frame per team with clear inside', () => {
+  const svg = vectorSvg(drawVector(cases()[0].crew, 0, 112, 80))
+  for (const id of ['tile', 'glassRoom', 'navyRug']) expect(svg).toContain(`<pattern id="${id}"`)
+  for (const c of cases().filter(c => c.name.startsWith('max'))) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const tags = v.labels.filter(s => s.k === 'text' && s.text.startsWith('TEAM '))
+    const frames = v.shapes.filter(s => s.k === 'rect' && s.fill === 'none' && s.sw === 0.3 && s.h > 20)
+    expect(frames.length).toBe(tags.length) // 同一隊上下相連的座位群只畫一個框
+    expect(v.shapes.some(s => s.k === 'rect' && [0xeadfc8, 0xdbe7ef, 0xe2ecd8].includes(s.fill as number))).toBe(false) // 地毯底色拿掉了
   }
 })

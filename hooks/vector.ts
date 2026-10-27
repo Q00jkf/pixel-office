@@ -41,6 +41,10 @@ const SW = {
   ink: 0x1a1c2c, plum: 0x5d275d, red: 0xb13e53, orange: 0xef7d57, yellow: 0xffcd75, lime: 0xa7f070, green: 0x38b764, teal: 0x257179,
   navy: 0x29366f, blue: 0x3b5dc9, sky: 0x41a6f6, cyan: 0x73eff7, white: 0xf4f4f4, silver: 0x94b0c2, slate: 0x566c86, dark: 0x333c57,
 }
+const TEAM_TAG_BG = 0x0d1320
+const FLOOR_BASE = 0xe4eef6 // 大廳玻璃磚底色：門洞、大門用同色
+const GLASS_EDGE = 0x3fc6e0
+const GOLD_SOFT = 0xe2cd85 // 主管室內圈金邊（金色淡一階）
 const PX = 0.3 // 人物素材一個像素＝0.3 單位：20×25 的人物格畫成 6×7.5，跟原本的圓頭小人一樣大
 
 const FONT = "'Microsoft JhengHei','PingFang TC','Noto Sans TC','Noto Sans CJK TC',sans-serif"
@@ -150,13 +154,12 @@ function backWall(p: Pen, x: number, w: number) {
 function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number, plantInOffice: boolean, clock: string) {
   const { officeX, officeW, h } = L
   p.rect(0, 0, w, h, 'url(#tile)')
-  // 會議室木地板、主管室紅地毯
-  p.rect(WALL, WALL, officeX - 2 * WALL, TOP_H, SW.yellow)
-  let planks = ''
-  for (let y = WALL + 3; y < WALL + TOP_H; y += 3) planks += `M${WALL} ${y + 0.5}H${officeX - WALL}`
-  p.path(planks, undefined, 0xe8b25f, 0.3)
-  p.rect(officeX, WALL, w - WALL - officeX, TOP_H, SW.plum)
-  p.rect(officeX + 1, WALL + 1, w - WALL - officeX - 2, TOP_H - 2, SW.red, 1)
+  // 會議室淡藍玻璃（內圈青線像玻璃隔間）、主管室深藍地毯＋雙層金邊（jacky 2026-10-27 選 X）
+  p.rect(WALL, WALL, officeX - 2 * WALL, TOP_H, 'url(#glassRoom)')
+  p.rect(WALL + 0.6, WALL + 0.6, officeX - 2 * WALL - 1.2, TOP_H - 1.2, 'none', 0, GLASS_EDGE, 0.3)
+  p.rect(officeX, WALL, w - WALL - officeX, TOP_H, 'url(#navyRug)')
+  p.rect(officeX + 1, WALL + 1, w - WALL - officeX - 2, TOP_H - 2, 'none', 1, C.gold, 0.35)
+  p.rect(officeX + 1.8, WALL + 1.8, w - WALL - officeX - 3.6, TOP_H - 3.6, 'none', 0.8, GOLD_SOFT, 0.2)
   backWall(p, WALL, officeX - 2 * WALL)
   backWall(p, officeX, w - WALL - officeX)
 
@@ -181,11 +184,11 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
 
   // 門洞（地板色）＋門框
   for (const [x, dw] of [[L.meetDoor, MEET_DOOR_W], [officeX + OFFICE_DOOR_X, OFFICE_DOOR_W]]) {
-    p.rect(x, WALL + TOP_H, dw, WALL, SW.sky)
+    p.rect(x, WALL + TOP_H, dw, WALL, FLOOR_BASE)
     p.rect(x - 0.4, WALL + TOP_H, 0.4, WALL, SW.ink)
     p.rect(x + dw, WALL + TOP_H, 0.4, WALL, SW.ink)
   }
-  p.rect(Math.floor(w / 2) - 3, h - WALL, 6, WALL, SW.sky)
+  p.rect(Math.floor(w / 2) - 3, h - WALL, 6, WALL, FLOOR_BASE)
 
   // 門牌（向量版可以寫中文）
   const signY = WALL + TOP_H + 1.5
@@ -463,17 +466,21 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   teamZones(bosses.leads, crew, L.cols).forEach((lead, z) => {
     const col = L.cols - 1 - z
     const look = TEAM_RUGS[z % TEAM_RUGS.length]
-    L.clusters.forEach((k, i) => {
-      if (i % L.cols !== col) return
-      const rw = CLUSTER_W + 4
-      p.rect(k.x - 2, k.y - 4, rw, GEOM.CLUSTER_H + 6, look.rug, 1.5, look.edge, 0.7)
-      if (i === col) {
-        const t = fitText(`TEAM ${lead.name}`, rw - 3, 1.7)
-        const tw = textWidth(t, 1.7) + 1.2
-        p.labelRect(k.x - 2 + (rw - tw) / 2, k.y - 4.6, tw, 2.2, look.edge, 1)
-        p.labels.push({ k: 'text', x: k.x - 2 + rw / 2, y: k.y - 3, text: t, size: 1.7, fill: look.text, anchor: 'middle', bold: true })
-      }
-    })
+    // F1（jacky 2026-10-27 選）：底透明、同一欄的座位群併成一個框；四角 L 形＋細線，名牌深底團隊色字壓在左上
+    const ks = L.clusters.filter((_, i) => i % L.cols === col)
+    if (ks.length === 0) return
+    const x = ks[0].x - 2
+    const top = ks[0].y - 4
+    const rw = CLUSTER_W + 4
+    const bottom = ks[ks.length - 1].y + GEOM.CLUSTER_H + 2
+    p.rect(x, top, rw, bottom - top, 'none', 0, look.edge, 0.3)
+    const arm = 3
+    for (const [cx, cy, dx, dy] of [[x, top, 1, 1], [x + rw, top, -1, 1], [x, bottom, 1, -1], [x + rw, bottom, -1, -1]]) p.path(`M${n(cx + dx * arm)} ${n(cy)}H${n(cx)}V${n(cy + dy * arm)}`, undefined, look.edge, 0.7)
+    const t = fitText(`TEAM ${lead.name}`, rw - 5, 1.7)
+    const tw = textWidth(t, 1.7) + 1.6
+    p.labelRect(x + 2, top - 1.2, tw, 2.4, TEAM_TAG_BG, 0.3)
+    p.labels.push({ k: 'rect', x: x + 2, y: top - 1.2, w: tw, h: 2.4, r: 0.3, fill: 'none', stroke: look.edge, sw: 0.3 })
+    p.labels.push({ k: 'text', x: x + 2.8, y: top + 0.6, text: t, size: 1.7, fill: look.edge, bold: true })
   })
   for (const k of L.clusters) for (const dy of [0, UNIT_H + 2 + ROW_SPLIT]) partitionRow(p, k.x, k.y + dy)
 
@@ -681,8 +688,14 @@ function shapeSvg(s: Shape): string {
   return `${bg}<text x="${n(s.x)}" y="${n(s.y)}" font-size="${s.size}" fill="${hex(s.fill)}"${halo}${mono}${s.anchor === 'middle' ? ' text-anchor="middle"' : ''}${s.bold ? ' font-weight="bold"' : ''}>${xml(s.text)}</text>`
 }
 
-/** 地板：素材的藍色長磚（一列錯半塊） */
-const FLOOR = `<pattern id="tile" width="12" height="5" patternUnits="userSpaceOnUse"><rect width="12" height="5" fill="${hex(SW.sky)}"/><path d="M0 0.2H12M0 2.7H12" stroke="${hex(SW.cyan)}" stroke-width="0.3"/><path d="M0 2.35H12M0 4.85H12M0.15 0V2.5M6.15 2.5V5" stroke="${hex(SW.blue)}" stroke-width="0.3"/></pattern>`
+/** 地板（jacky 2026-10-27 選 J 霧白玻璃）：大廳 16×8 玻璃磚＋兩道斜反光＋青色細縫；會議室淡藍玻璃；主管室深藍地毯 */
+const FLOOR =
+  '<pattern id="tile" width="16" height="8" patternUnits="userSpaceOnUse"><rect width="16" height="8" fill="#e4eef6"/>' +
+  '<path d="M0 8L8 0H10.5L2.5 8Z" fill="#ffffff" fill-opacity="0.6"/><path d="M4 8L12 0H12.8L4.8 8Z" fill="#ffffff" fill-opacity="0.6"/>' +
+  '<path d="M0 0.1H16M0.1 0V8" stroke="#3fc6e0" stroke-opacity="0.55" stroke-width="0.22"/><path d="M8.1 0V8" stroke="#d2e0ec" stroke-width="0.12"/></pattern>' +
+  '<pattern id="glassRoom" width="10" height="5" patternUnits="userSpaceOnUse"><rect width="10" height="5" fill="#cfe3f1"/>' +
+  '<path d="M0 5L5 0H6.5L1.5 5Z" fill="#ffffff" fill-opacity="0.5"/><path d="M0 0.1H10M0.1 0V5" stroke="#7cc8e0" stroke-opacity="0.6" stroke-width="0.18"/></pattern>' +
+  '<pattern id="navyRug" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#24305a"/><rect width="1" height="1" fill="#283666"/></pattern>'
 
 /** 形狀清單 → SVG（一單位一像素、寬高放大 pxSize 倍）；素材表只嵌一次。夜裡在中間蓋一層暗幕，發光的畫在暗幕之上 */
 export function vectorSvg(v: VectorScene, pxSize = 8): string {

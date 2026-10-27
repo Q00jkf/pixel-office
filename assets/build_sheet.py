@@ -153,6 +153,22 @@ CHAIR_BACK = [
     '..ad.......da..',
     '..aa.......aa..',
 ]
+# 桌子 T1（jacky 2026-10-27 選）：素材的橘桌換成白桌面、淺灰邊、灰腳；只換桌子的框，人物膚色也有 #ef7d57
+DESK_COLORS = {(0xef, 0x7d, 0x57): (0xf4, 0xf7, 0xfa), (0xb1, 0x3e, 0x53): (0xc3, 0xcf, 0xdc), (0x5d, 0x27, 0x5d): (0x56, 0x6c, 0x86)}
+DESKS = ['table', 'tableLong']
+
+
+def recolor_desks(body: Image.Image):
+    px = body.load()
+    for k in DESKS:
+        x, y, w, h = SPRITES[k]
+        for j in range(y - TOP, y - TOP + h):
+            for i in range(x, x + w):
+                r, g, b, a = px[i, j]
+                if a and (r, g, b) in DESK_COLORS:
+                    px[i, j] = DESK_COLORS[(r, g, b)] + (a,)
+
+
 CHAIR_COLORS = ['Red', 'Yellow', 'Green', 'Blue', 'White', 'Gray']
 
 
@@ -246,6 +262,7 @@ def person(src: Image.Image, spec, shirt, frame: str = '') -> Image.Image:
 def main():
     src = Image.open(SRC).convert('RGBA')
     body = src.crop((0, TOP, src.width, src.height))
+    recolor_desks(body)
     per_row = src.width // CELL_W
     cells = [(c, v, f) for v in range(len(SHIRTS)) for c in range(len(PEOPLE)) for f in FRAMES]
     rows = -(-len(cells) // per_row)
