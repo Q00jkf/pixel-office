@@ -122,6 +122,15 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 不接手、直接交給終端機的情況：auto 等不問人的模式、subagent、沒有人開著面板且核准開啟、對不上是哪一次呼叫、檔案壞掉、截止前沒人按、預算剩不到約 3.5 秒、使用者中斷或終端機先按了。處理完兩個檔覆寫成 `{"state":"done"}`（不留指令內容）
 - 🔴 **限制**：這兩個檔是本機共用檔，同一個使用者帳號下的其他程式（包括別的 Claude session 跑的 Bash）理論上讀得到 nonce、也寫得出決定。這個機制防的是**誤按與配錯**（看錯單、按到別人的、按到舊的、單被換字），**不防本機惡意程式**
 
+## 手機版（第 3 期，0.20.0 起：只看）
+
+`remote/server.ts` 是獨立的本機伺服器（bun），讀同一個共用資料夾、用 `scene.ts`／`vector.ts` 畫同一間辦公室，手機瀏覽器或「加到主畫面」打開。不靠任何 session 開著面板。
+
+- 設定 `~/.claude/pixel-office/remote.json`（不進 repo）：`{ "port": 8767, "owner": "<Cloudflare Access 登入的 email>" }`
+- 啟動：`bun <plugin>/remote/server.ts`，只聽 `127.0.0.1`
+- 對外：Cloudflare Tunnel 加一個 public hostname 指到 `http://localhost:8767`，前面掛 Cloudflare Access（只允許 owner）。經 Cloudflare 進來的要求沒有 Access 驗過的 owner email 一律 403；本機直連放行
+- 測試：`bun test plugins/pixel-office/remote`（檔名 `.spec.ts`：`claude plugin test` 會載入所有 `.test.ts`）
+
 ### 圖素：2dPig Pixel Office（CC0）
 
 Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office」](https://2dpig.itch.io/pixel-office)（CC0，原檔與授權在 `assets/2dpig/`）。
