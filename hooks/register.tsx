@@ -278,6 +278,7 @@ const terminalScene = (v: { hits: Hit[]; fixed: Rect[] }) => {
 export const menuOthers = (open: Hit, hits: Hit[], fixed: Rect[]): Rect[] => [...hits.filter(h => h !== open && h.what !== 'pet'), ...fixed]
 
 let openMenu: Furniture | null = null // 同時只開一個選單
+let showHits = false // /office hits：Desktop 校準用，Svg 畫紅框＝東西真正的位置，按鈕填 ▒＝點得到的地方
 let corgiFed: number | undefined
 let lastHits: Hit[] = []
 let lastFixed: Rect[] = []
@@ -334,7 +335,7 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
       return (
         <Box key={`at-${id}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
           {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
-            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={' '.repeat(cols)} onPress={() => void update($, night, v => !v)} />
+            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={(showHits ? '▒' : ' ').repeat(cols)} onPress={() => void update($, night, v => !v)} />
           ))}
         </Box>
       )
@@ -368,7 +369,7 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
     return (
       <Box key={`at-${hit.what}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
         {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
-          <Button key={r === 0 ? `hit-${hit.what}` : `hit-${hit.what}-${r}`} plain label={' '.repeat(cols)} onPress={press} />
+          <Button key={r === 0 ? `hit-${hit.what}` : `hit-${hit.what}-${r}`} plain label={(showHits ? '▒' : ' ').repeat(cols)} onPress={press} />
         ))}
       </Box>
     )
@@ -1500,11 +1501,16 @@ export const register: Register = on => {
       const objs = [...new Set(list.filter(b => b.object).map(b => b.object))]
       return { text: [row.length > 0 ? `已載入 ${row.length} 顆個人按鈕：${row.map(b => b.label).join('、')}` : '', objs.length > 0 ? `自訂家具選單：${objs.join('、')}` : ''].filter(Boolean).join('；') }
     }
+    if (sub === 'hits') {
+      showHits = !showHits
+      $.ui.invalidate('ui.render')
+      return { text: showHits ? '校準顯示開：紅框＝東西真正的位置，▒＝點得到的範圍，黃線每 10 單位一條。再打 /office hits 關掉' : '校準顯示關' }
+    }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now()) }
     }
-    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office approve on|off（替別人按核准，預設關）｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）' }
+    if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office approve on|off（替別人按核准，預設關）｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）｜/office hits（Desktop 點擊範圍校準顯示）' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -1632,6 +1638,11 @@ export const register: Register = on => {
         svg = vectorSvg(v)
         lastHits = v.hits
         lastFixed = v.fixed
+        if (showHits) {
+          const marks = v.hits.map(h => `<rect x="${h.x}" y="${h.y}" width="${h.w}" height="${h.h}" fill="none" stroke="#ff0000" stroke-width="0.4"/>`).join('')
+          const grid = Array.from({ length: Math.floor(v.h / 10) + 1 }, (_, i) => `<line x1="0" y1="${i * 10}" x2="${v.width}" y2="${i * 10}" stroke="#ffff00" stroke-width="0.2"/><text x="0.5" y="${i * 10 + 2}" font-size="2" fill="#ffff00">${i * 10}</text>`).join('')
+          svg = svg.replace(/<\/svg>$/, `${grid}${marks}</svg>`)
+        }
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
