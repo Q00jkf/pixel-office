@@ -221,11 +221,11 @@ export const FURNITURE = ['printer', 'cabinet', 'mailbox', 'calendar', 'vending'
 const MAX_MENU = 6
 /** Desktop 選單標題用的家具名 */
 export const FURNITURE_NAMES: Record<Furniture, string> = { printer: '影印機', cabinet: '檔案櫃', mailbox: '郵筒', calendar: '月曆', vending: '販賣機', clock: '時鐘', meeting: '會議桌' }
-// 素材色盤（vector.ts 的 SW）：ink 底、yellow 框與標題、white 字、silver 取消
-const MENU_BG = '#1a1c2c'
-const MENU_EDGE = '#ffcd75'
-const MENU_TEXT = '#f4f4f4'
-const MENU_DIM = '#94b0c2'
+// 素材色盤（vector.ts 的 SW）：white 底、金框、ink 字。Desktop 按鈕字一律用原生深色、不吃 Text color（jacky 2026-10-27 實機：深底上看不見），所以底只能用淺色
+const MENU_BG = '#f4f4f4'
+const MENU_EDGE = '#c9a227'
+const MENU_TEXT = '#1a1c2c'
+const MENU_DIM = '#566c86'
 /** 預設選單（主管 office 2026-10-27 轉 jacky 裁示）；buttons.json 有同 object 的項目就整份換成使用者的 */
 export const MENUS: Record<Furniture, { label: string; prompt: string }[]> = {
   printer: [
@@ -362,10 +362,10 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
       $.ui.invalidate('ui.render')
     }
     if (surface === 'desktop') {
-      // 深色不透明底＋金色圓角框＋標題列：一眼看得出是選單、跟場景分開；字自己指定白色，不靠主題（深底上主題的深字會看不見）
+      // 淺色不透明底＋金色圓角框＋標題列：一眼看得出是選單、跟場景分開
       out.push(
         <Box key="menu" position="absolute" top={at.top} left={at.left} flexDirection="column" backgroundColor={MENU_BG} borderStyle="round" borderColor={MENU_EDGE} paddingX={1}>
-          <Text key="menu-title" bold color={MENU_EDGE}>{`▾ ${FURNITURE_NAMES[openMenu]}`}</Text>
+          <Text key="menu-title" bold color={MENU_TEXT}>{`▾ ${FURNITURE_NAMES[openMenu]}`}</Text>
           {items.map((it, i) => (
             <Button
               key={`menu-${i}`}

@@ -2197,12 +2197,12 @@ test('desktop: a tall pane spreads the extra height between desk clusters, the t
   expect(layout(112, 90).clusters.map(k => k.y)).toEqual(plain) // 畫過 Desktop，測試這邊的版面照舊
 })
 
-test('desktop: the furniture menu is an opaque framed box with a title and white labels', async ($, on) => {
+test('desktop: the furniture menu is an opaque framed box with a title and dark labels on a light card (Desktop buttons ignore Text color)', async ($, on) => {
   MOCKS(on, [])
   const ui = await $.ui.mount(DESK_PANE(64))
   await ui.press({ key: 'hit-vending' })
   const menu: any = await ui.find({ key: 'menu' })
-  expect(menu.props.backgroundColor).toBe('#1a1c2c')
+  expect(menu.props.backgroundColor).toBe('#f4f4f4')
   expect(menu.props.borderStyle).toBe('round')
   expect((await ui.find({ type: 'Text', text: /販賣機/ }))).toBeDefined()
   expect((await ui.find({ key: 'menu-0' }))).toBeDefined()
