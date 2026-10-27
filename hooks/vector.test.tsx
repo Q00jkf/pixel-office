@@ -58,7 +58,7 @@ test('every seated or standing person gets exactly one nameplate', () => {
 
 const one = (mode: Coworker['mode'], frame = 0) => drawVector([{ id: 'x', name: 'x', mode, tool: '', isMe: false, role: 'staff' }], frame, 60, 44).shapes
 type Sprite = Extract<Shape, { k: 'sprite' }>
-const people = (shapes: Shape[]) => shapes.filter((s): s is Sprite => s.k === 'sprite' && /^p\ds\d(l?[ab])?$/.test(s.id))
+const people = (shapes: Shape[]) => shapes.filter((s): s is Sprite => s.k === 'sprite' && /^p\ds\d(l?[ab]|k)?$/.test(s.id))
 
 test('faces: waiting has a question mark, error sweats and shakes, thinking has a bubble, done hops, typing bobs, idle dozes', () => {
   expect(one('waiting').some(s => s.k === 'text' && s.text === '?')).toBe(true)
@@ -220,7 +220,7 @@ test('B2: cups on the desks stay clear of the nameplates', () => {
 
 test('B3: managers wear the suit but each has a different face', () => {
   for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('night'))) {
-    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id.replace(/l?[ab]$/, '')).filter(id => id.endsWith('s7'))
+    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id.replace(/(l?[ab]|k)$/, '')).filter(id => id.endsWith('s7'))
     expect(ids.length).toBeGreaterThan(0)
     expect(new Set(ids).size).toBe(ids.length)
   }
@@ -283,4 +283,20 @@ test('desktop fills tall panes: 30 people at 112 x 200 rows (about a 2300 px tal
   const s = vectorSvg(drawVector(crew, 0, 112, 200, [], assignSeats(crew, 112, 200), {}))
   setSpread(false)
   expect(s.length).toBeLessThanOrEqual(SVG_MAX) // 2026-10-27 實測 112,638 字元
+})
+
+test('chairs face their desks: front chairs behind desks and the top meeting row, back chairs over people at the bottom row and the boss desks', () => {
+  for (const c of cases().filter(c => c.name.startsWith('max'))) {
+    const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const shapes = v.shapes
+    const ids = sprites(v).map(s => s.id)
+    expect(ids.filter(id => /^chair(Red|Yellow|Green|Blue|White|Gray)$/.test(id)).every(id => id === 'chairWhite')).toBe(true) // 側面椅只剩主管桌旁的訪客椅
+    expect(ids.filter(id => id === 'chairFrontGray').length).toBeGreaterThan(0)
+    const backs = people(shapes).filter(s => s.id.endsWith('k'))
+    expect(backs.length).toBeGreaterThan(0)
+    for (const b of backs) {
+      const i = shapes.indexOf(b)
+      expect(shapes.slice(i + 1).some(s => s.k === 'sprite' && s.id.startsWith('chairBack'))).toBe(true) // 背對的人之後一定畫背面椅
+    }
+  }
 })

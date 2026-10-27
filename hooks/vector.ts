@@ -193,7 +193,8 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   if (L.meetDoor - WALL - 1 >= 7) p.text(WALL + 1, signY, '會議室', 1.7, SW.cyan, { bold: true })
 
   // 會議室椅子（長桌在 drawVector 裡、上排的人之後才畫）
-  for (const [i, s] of L.meet.entries()) p.sprite(CHAIRS[i % CHAIRS.length], s.x + 0.5 - 1.65, s.y + (i % 2 ? -0.6 : -1.2), 3.3, 6.6) // 下排椅腳收在房間下緣 WALL+TOP_H，不伸進牆與門洞
+  // 會議室上排椅子（正面，面向長桌）；下排的背面椅在 drawVector 裡、人之後才畫
+  for (const [i, s] of L.meet.entries()) if (i % 2 === 0) chairFront(p, CHAIRS[i % CHAIRS.length], s.x + 0.5, s.y + 1.5)
 
   if (plantInOffice) plant(p, officeX + 1, WALL + 1)
   plant(p, WALL + 1, h - WALL - 7)
@@ -241,7 +242,13 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   }
 }
 
-const CHAIRS: SpriteId[] = ['chairBlue', 'chairGreen', 'chairRed', 'chairYellow', 'chairWhite']
+const CHAIRS = ['Blue', 'Green', 'Red', 'Yellow', 'White'] as const
+type ChairColor = (typeof CHAIRS)[number] | 'Gray'
+
+/** 正背面椅以人頭中心（figure 的 x, y）定位，像素大小跟人物一樣（PX）。正面：畫在人之前，椅背露在肩後 */
+const chairFront = (p: Pen, color: ChairColor, hx: number, hy: number) => p.sprite(`chairFront${color}`, hx - 7.5 * PX, hy - 1.2, 15 * PX, 16 * PX)
+/** 背面：畫在背對畫面的人之後，椅背從後頸蓋到椅腳；底緣在 hy＋4.5（會議室下排＝房間下緣） */
+const chairBack = (p: Pen, color: ChairColor, hx: number, hy: number) => p.sprite(`chairBack${color}`, hx - 7.5 * PX, hy + 0.9, 15 * PX, 12 * PX)
 
 /** 後牆上的窗戶（夜裡窗玻璃換夜空），中間穿插裝飾 */
 function windows(p: Pen, x0: number, x1: number, frame: number, deco: SpriteId[] = ['picBlue']) {
@@ -315,7 +322,7 @@ export function lookOf(who: Pick<Coworker, 'name' | 'role'>): { person: number; 
  * 左右走（dir）換側走格、往右翻面，上下走維持正面；打字上下輕跳；
  * done 跳高一點、error 左右抖＋冷汗、thinking 想法泡泡、waiting 問號、blocked 紅牌、reading 拿紙、idle 打瞌睡 z
  */
-function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false, dir = 0) {
+function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walkStep?: number, side = false, dir = 0, back = false) {
   const look = lookOf(who)
   const person = p.faces.get(who.id) ?? look.person
   const shirt = look.shirt
@@ -326,7 +333,7 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
   const hx = x + shake
   const hy = y + hop
   const walking = walkStep !== undefined && walkStep !== 0
-  const pose = walking ? `${dir !== 0 ? 'l' : ''}${walkStep > 0 ? 'a' : 'b'}` : ''
+  const pose = back ? 'k' : walking ? `${dir !== 0 ? 'l' : ''}${walkStep > 0 ? 'a' : 'b'}` : ''
   p.sprite(`p${person}s${shirt}${pose}` as SpriteId, hx - CELL.headX * PX, hy - CELL.headY * PX, CELL.w * PX, CELL.h * PX, walking && dir > 0)
   if (who.isMe) p.circle(hx, hy - 0.3, 2.9, 'none', C.me, 0.35)
   if (mode === 'reading') p.spriteAt('paper', x + 1.4, hy + 2.2, 0.3)
@@ -379,8 +386,8 @@ function carry(p: Pen, at: Step, kind: ErrandKind) {
 
 /** 員工座位：隔板（partitionRow 畫）→ 人 → 桌子擋住下半身，桌上有螢幕、杯子 */
 function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number) {
+  chairFront(p, 'Gray', x + 5.5, y + 2.2)
   if (who) figure(p, x + 5.5, y + 2.2, who, frame)
-  else p.sprite('chairGray', x + 3.9, y - 0.2, 3.3, 6.6)
   p.sprite('table', x + 0.5, y + 5, 10)
   screen(p, x + 3, y + 8.6, 5, who ? who.mode : null, frame)
   const hh = hash(`${x},${y}`)
@@ -391,10 +398,8 @@ function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number)
 
 function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
   p.sprite('chairWhite', x - 4.2, y + 0.4, 2.6, 5.2, true)
-  if (who) {
-    p.sprite('chairBlue', x + 5.8, y + 5.5, 3.4, 6.8)
-    figure(p, x + 7.5, y + 8.6, who, frame, undefined, true)
-  }
+  if (who) figure(p, x + 7.5, y + 8.6, who, frame, undefined, true, 0, true) // 坐在桌前、背對畫面看螢幕
+  chairBack(p, 'Blue', x + 7.5, y + 8.6)
   p.sprite('tableLong', x, y, 17, 6.8)
   screen(p, x + 4, y + 1.3, 6, who ? who.mode : null, frame)
   p.glowing(() => p.circle(x + 1.5, y + 1.5, 0.6, C.gold))
@@ -407,10 +412,8 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
 }
 
 function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
-  if (who) {
-    p.sprite('chairBlue', x + 2.8, y + 5.5, 3.4, 6.8)
-    figure(p, x + 4.5, y + 8.6, who, frame, undefined, true)
-  }
+  if (who) figure(p, x + 4.5, y + 8.6, who, frame, undefined, true, 0, true)
+  chairBack(p, 'Blue', x + 4.5, y + 8.6)
   p.sprite('table', x, y, DESK_W, 6)
   screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
   if (who) {
@@ -516,17 +519,20 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   for (const [id, pl] of placed) if (pl.kind === 'staff' && !moving.has(id)) sitting.set(`${pl.seat.x},${pl.seat.y}`, byId.get(id)!)
   for (const s of L.seats) unit(p, s.x, s.y, sitting.get(`${s.x},${s.y}`) ?? null, frame)
 
-  // 會議室：上排坐在桌子後面（先畫人再補畫桌面蓋住下半身），下排坐在桌前
+  // 會議室：上排坐在桌子後面、面向畫面（先畫人再補畫桌面蓋住下半身），下排坐在桌前、背對畫面（人之後畫背面椅）
   const meet = [...placed].filter(([id, pl]) => pl.kind === 'meet' && !moving.has(id) && byId.has(id))
+  const taken = new Set(meet.map(([, pl]) => pl.slot))
   const { cx: tx, cy: ty, a } = meetTable(L.officeX)
   for (const top of [true, false]) {
     for (const [id, pl] of meet) {
       if ((pl.slot % 2 === 0) !== top) continue
       const who = byId.get(id)!
-      figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame)
+      figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame, undefined, false, 0, !top)
+      if (!top) chairBack(p, CHAIRS[pl.slot % CHAIRS.length], pl.seat.x + 0.5, pl.seat.y + 1.5)
       const above = pl.seat.y - 1.2
       nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
     }
+    if (!top) for (const [i, s] of L.meet.entries()) if (i % 2 && !taken.has(i)) chairBack(p, CHAIRS[i % CHAIRS.length], s.x + 0.5, s.y + 1.5)
     if (top) {
       longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
       p.hits.push({ what: 'meeting', x: tx - a, y: ty - 4, w: 2 * a + 1, h: 8 })
