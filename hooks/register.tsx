@@ -278,6 +278,8 @@ const terminalScene = (v: { hits: Hit[]; fixed: Rect[] }) => {
 export const menuOthers = (open: Hit, hits: Hit[], fixed: Rect[]): Rect[] => [...hits.filter(h => h !== open && h.what !== 'pet'), ...fixed]
 
 let openMenu: Furniture | null = null // 同時只開一個選單
+// 看不見的按鈕字：Desktop 會把只有空白的標籤壓掉（jacky 2026-10-27：/office hits 點得到、平常點不到），改用盲文空白 U+2800（不算空白字元、畫出來是空的）
+export const BLANK = '⠀'
 let showHits = false // /office hits：Desktop 校準用，Svg 畫紅框＝東西真正的位置，按鈕填 ▒＝點得到的地方
 let corgiFed: number | undefined
 let lastHits: Hit[] = []
@@ -335,7 +337,7 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
       return (
         <Box key={`at-${id}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
           {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
-            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={(showHits ? '▒' : ' ').repeat(cols)} onPress={() => void update($, night, v => !v)} />
+            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={(showHits ? '▒' : BLANK).repeat(cols)} onPress={() => void update($, night, v => !v)} />
           ))}
         </Box>
       )
@@ -369,7 +371,7 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
     return (
       <Box key={`at-${hit.what}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
         {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
-          <Button key={r === 0 ? `hit-${hit.what}` : `hit-${hit.what}-${r}`} plain label={(showHits ? '▒' : ' ').repeat(cols)} onPress={press} />
+          <Button key={r === 0 ? `hit-${hit.what}` : `hit-${hit.what}-${r}`} plain label={(showHits ? '▒' : BLANK).repeat(cols)} onPress={press} />
         ))}
       </Box>
     )

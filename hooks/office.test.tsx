@@ -2036,7 +2036,7 @@ test('desktop: the hit area covers the whole thing with blank plain buttons; at 
   const ui = await $.ui.mount(DESKTOP())
   const pr: any = await ui.find({ key: 'hit-printer' })
   expect(pr.props.plain).toBe(true)
-  expect(String(pr.props.label).trim()).toBe('')
+  expect(String(pr.props.label)).toMatch(/^⠀+$/) // 盲文空白：看不見，但不像空白會被 Desktop 壓掉
   expect(String(pr.props.label).length).toBeGreaterThanOrEqual(6)
   expect(await ui.find({ key: 'hit-printer-1' })).toBeDefined() // 不只一列
   await ui.unmount()
