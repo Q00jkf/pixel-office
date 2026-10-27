@@ -180,7 +180,7 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   const cal = p.sprite('calendar', WALL + 1, WALL + 0.6, 4.2)
   p.hits.push({ what: 'calendar', x: WALL + 1, y: WALL + 0.6, ...cal })
   windows(p, WALL + 7, WALL + meetW - 1, frame)
-  windows(p, officeX + (plantInOffice ? 6 : 1), w - WALL - 1, frame, ['flagUS', 'picSunset'])
+  windows(p, officeX + (plantInOffice ? 6 : 1), w - WALL - 1, frame, ['flagTW', 'picSunset'])
 
   // 門洞（地板色）＋門框
   for (const [x, dw] of [[L.meetDoor, MEET_DOOR_W], [officeX + OFFICE_DOOR_X, OFFICE_DOOR_W]]) {
@@ -286,7 +286,7 @@ function plant(p: Pen, x: number, y: number) {
 /** 一排兩格的隔間：素材的灰色隔板（中間有立柱），掛點國旗或畫 */
 function partitionRow(p: Pen, x: number, y: number) {
   p.sprite('partition', x, y - 2, CLUSTER_W)
-  const deco: SpriteId[] = ['flagUS', 'flagUK', 'flagIndia', 'picBlue', 'picOrange', 'calendar']
+  const deco: SpriteId[] = ['flagTW', 'picBlue', 'picOrange', 'calendar'] // 國旗一律台灣（jacky 2026-10-27）
   const h = hash(`${x},${y}`)
   if (h % 3 === 0) p.spriteAt(deco[(h >> 3) % deco.length], x + (h % 2 ? 1 : CLUSTER_W - 4.5), y - 1.2, 0.3)
 }

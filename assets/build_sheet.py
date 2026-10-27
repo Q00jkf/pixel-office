@@ -169,6 +169,21 @@ def recolor_desks(body: Image.Image):
                     px[i, j] = DESK_COLORS[(r, g, b)] + (a,)
 
 
+# 中華民國國旗（jacky 2026-10-27：國旗用台灣）：跟素材國旗同大小 12×9、同一種 #333c57 描邊
+FLAG_TW = [
+    'aaaaaaaaaaaa',
+    'aUUwUUddddda',
+    'aUwwwUddddda',
+    'aUUwUUddddda',
+    'aUUUUUddddda',
+    'adddddddddda',
+    'adddddddddda',
+    'adddddddddda',
+    'aaaaaaaaaaaa',
+]
+FLAG_COLORS = {'a': '333c57', 'U': '3b5dc9', 'w': 'f4f4f4', 'd': 'b13e53'}
+
+
 CHAIR_COLORS = ['Red', 'Yellow', 'Green', 'Blue', 'White', 'Gray']
 
 
@@ -275,6 +290,11 @@ def main():
         boxes[f'p{c}s{v}{f}'] = (px, py, CELL_W, CELL_H)
     # 寵物、正背面椅接在人物格最後一列的空位後面，放不下就另起一列
     extras = {k: pet_image(v) for k, v in PETS.items()}
+    flag = Image.new('RGBA', (len(FLAG_TW[0]), len(FLAG_TW)))
+    for j, r in enumerate(FLAG_TW):
+        for i, ch in enumerate(r):
+            flag.putpixel((i, j), rgb(FLAG_COLORS[ch]) + (255,))
+    extras['flagTW'] = flag
     for color in CHAIR_COLORS:
         extras[f'chairFront{color}'] = chair_image(CHAIR_FRONT, src, color)
         extras[f'chairBack{color}'] = chair_image(CHAIR_BACK, src, color)
