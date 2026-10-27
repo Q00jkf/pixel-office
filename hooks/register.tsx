@@ -293,6 +293,24 @@ async function pressPet($: EngineInterface): Promise<string> {
   return `${PET_WORDS[pet].feed}！`
 }
 
+// Desktop 點擊範圍往外放（jacky 2026-10-27：比較好點到）：左右各 2 單位、上下各 2.5 單位（≈1 列）
+export const REACH_X = 2
+export const REACH_Y = 2.5
+/** 放大後的點擊範圍：往外長 REACH，碰到鄰居的原本範圍就停在兩者中間，不搶別人的地盤 */
+export function reach(hit: Rect, hits: Rect[]): Rect {
+  let l = hit.x - REACH_X, r = hit.x + hit.w + REACH_X, t = hit.y - REACH_Y, b = hit.y + hit.h + REACH_Y
+  for (const o of hits) {
+    if (o === hit) continue
+    const rows = o.y < hit.y + hit.h + REACH_Y && hit.y - REACH_Y < o.y + o.h
+    const cols = o.x < hit.x + hit.w + REACH_X && hit.x - REACH_X < o.x + o.w
+    if (rows && o.x + o.w <= hit.x) l = Math.max(l, (o.x + o.w + hit.x) / 2)
+    if (rows && o.x >= hit.x + hit.w) r = Math.min(r, (hit.x + hit.w + o.x) / 2)
+    if (cols && o.y + o.h <= hit.y) t = Math.max(t, (o.y + o.h + hit.y) / 2)
+    if (cols && o.y >= hit.y + hit.h) b = Math.min(b, (hit.y + hit.h + o.y) / 2)
+  }
+  return { x: Math.max(0, l), y: Math.max(0, t), w: r - Math.max(0, l), h: b - Math.max(0, t) }
+}
+
 /**
  * 疊在場景上的按鈕：寵物、柯基、每件畫出來的家具；選單開著就在那件家具旁邊展開（同時只開一個）。
  * Desktop：一列一顆 plain、標籤全是空白的按鈕，鋪滿整塊（plain 在 Desktop 只畫字、沒有底框 → 看不見但點得到）；
@@ -309,8 +327,9 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
     if (hit.what === 'window') {
       // Desktop 的夜間模式：點牆上任何一扇窗切換（第一扇的 key 沿用舊的 night 按鈕）
       const id = win++ === 0 ? 'night' : `night-${win - 1}`
-      const a = cellAt(hit.x, hit.y, surface, k)
-      const b = cellAt(hit.x + hit.w, hit.y + hit.h, surface, k)
+      const z = reach(hit, hits)
+      const a = cellAt(z.x, z.y, surface, k)
+      const b = cellAt(z.x + z.w, z.y + z.h, surface, k)
       const cols = Math.max(1, b.left - a.left)
       return (
         <Box key={`at-${id}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
@@ -342,8 +361,9 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
         </Box>
       )
     }
-    const a = cellAt(hit.x, hit.y, surface, k)
-    const b = cellAt(hit.x + hit.w, hit.y + hit.h, surface, k)
+    const z = reach(hit, hits)
+    const a = cellAt(z.x, z.y, surface, k)
+    const b = cellAt(z.x + z.w, z.y + z.h, surface, k)
     const cols = Math.max(1, b.left - a.left)
     return (
       <Box key={`at-${hit.what}`} position="absolute" top={a.top} left={a.left} flexDirection="column">

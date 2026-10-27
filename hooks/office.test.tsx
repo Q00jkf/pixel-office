@@ -2208,3 +2208,20 @@ test('desktop: the furniture menu is an opaque framed box with a title and dark 
   expect((await ui.find({ key: 'menu-0' }))).toBeDefined()
   await ui.unmount()
 })
+
+import { reach, REACH_X, REACH_Y } from './register'
+import { drawVector as drawV } from './vector'
+import { cases as allCases } from './scenarios'
+
+test('desktop hit areas reach further out but never into a neighbour’s own area', () => {
+  const lone = { x: 20, y: 20, w: 4, h: 4 }
+  expect(reach(lone, [lone])).toEqual({ x: 20 - REACH_X, y: 20 - REACH_Y, w: 4 + 2 * REACH_X, h: 4 + 2 * REACH_Y })
+  for (const c of allCases().filter(c => c.name.startsWith('max'))) {
+    const hits = drawV(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).hits
+    for (const hit of hits) {
+      const z = reach(hit, hits)
+      expect(z.x <= hit.x && z.y <= hit.y && z.x + z.w >= hit.x + hit.w && z.y + z.h >= hit.y + hit.h).toBe(true)
+      for (const o of hits) if (o !== hit) expect(z.x < o.x + o.w && o.x < z.x + z.w && z.y < o.y + o.h && o.y < z.y + z.h && !(hit.x < o.x + o.w && o.x < hit.x + hit.w && hit.y < o.y + o.h && o.y < hit.y + hit.h)).toBe(false)
+    }
+  }
+})
