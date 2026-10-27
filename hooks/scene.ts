@@ -107,6 +107,23 @@ export function sceneRows(bodyRows: number | undefined): number {
   return Math.max(MIN_ROWS, (bodyRows ?? MIN_ROWS + RESERVED_ROWS) - RESERVED_ROWS)
 }
 
+/**
+ * Desktop 面板高度（列）→ 場景列數：Desktop 一列＝2.5／k 單位（k＝面板欄數／場景寬），場景高＝列數×2 單位，
+ * 所以撐滿面板要 bodyRows×1.25／k 列；不扣按鈕列（夜間模式在窗戶上），只扣場景上面另外畫的列（核准列）
+ */
+export function desktopRows(bodyRows: number | undefined, k: number, above = 0): number {
+  return Math.max(MIN_ROWS, Math.floor(((bodyRows ?? MIN_ROWS) - above) * 1.25 / k))
+}
+
+/**
+ * Desktop 撐滿面板時多出來的高度平均分給座位群之間（不全堆在走廊）。只有 Desktop 開：終端機的 Raster 版面不能變，
+ * 而 layout 被座位、路線、排隊共用，全域開關才不必每個函式多傳一個參數（register 畫哪個 surface 前設定）
+ */
+let spread = false
+export function setSpread(on: boolean) {
+  spread = on
+}
+
 export type Seat = { x: number; y: number }
 
 export function layout(width: number, rows: number) {
@@ -115,9 +132,11 @@ export function layout(width: number, rows: number) {
   const total = cols * CLUSTER_W + (cols - 1) * AISLE
   const x0 = Math.floor((width - total) / 2)
   const clusterRows = Math.max(1, Math.floor((h - OPEN_Y - AREA_TOP - BOTTOM + CLUSTER_GAP) / (CLUSTER_H + CLUSTER_GAP)))
+  const left = h - (OPEN_Y + AREA_TOP + clusterRows * (CLUSTER_H + CLUSTER_GAP) - CLUSTER_GAP + BOTTOM)
+  const gap = spread && left > 0 ? Math.floor(left / (clusterRows + 1)) : 0
   const clusters: Seat[] = []
   for (let r = 0; r < clusterRows; r++) {
-    for (let c = 0; c < cols; c++) clusters.push({ x: x0 + c * (CLUSTER_W + AISLE), y: OPEN_Y + AREA_TOP + r * (CLUSTER_H + CLUSTER_GAP) })
+    for (let c = 0; c < cols; c++) clusters.push({ x: x0 + c * (CLUSTER_W + AISLE), y: OPEN_Y + AREA_TOP + gap + r * (CLUSTER_H + CLUSTER_GAP + gap) })
   }
   const seats: Seat[] = []
   for (const k of clusters) {

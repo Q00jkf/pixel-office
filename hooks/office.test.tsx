@@ -1928,7 +1928,7 @@ test('the Allow label is as wide while cooling down as when ready, so Deny never
 
 // ---------- 0.16.0：點寵物、點家具開選單 ----------
 
-import { FURNITURE, MENUS, cellAt, menuFor, menuPlace } from './register'
+import { FURNITURE, MENUS, cellAt, menuFor, menuOthers, menuPlace } from './register'
 
 const DESKTOP = (bodyColumns = 112, bodyRows = 80) =>
   ({
@@ -2060,40 +2060,58 @@ test('terminal: the pet, printer, cabinet, mailbox and meeting table get a one-c
 // ---------- 0.16.1：選單挑放得下、不蓋別的東西的那一側；終端機點寵物留一行 ----------
 
 import { cases } from './scenarios'
-import { cellWidth, drawVector, type Rect } from './vector'
+import { cellWidth, drawVector, menuSize, type Rect } from './vector'
 
 const MENU_LABELS = (f: keyof typeof MENUS) => [...MENUS[f].map(i => i.label), '取消']
 const cellBox = (r: Rect, row: number) => ({ t: Math.floor(r.y / row), l: Math.floor(r.x), b: Math.ceil((r.y + r.h) / row), r: Math.ceil(r.x + r.w) })
 
-test('menus open inside the room of the furniture and avoid other clickable things and standing people, on every case and both surfaces', () => {
+const isFurniture = (h: { what: string }): h is { what: keyof typeof MENUS } & Rect => h.what in MENUS
+
+test('menus open inside the room of the furniture (desktop size includes the frame and title), on every case and both surfaces', () => {
   for (const c of cases()) {
     const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
     for (const surface of ['desktop', 'terminal'] as const) {
       const row = surface === 'desktop' ? 2.5 : 2
       for (const it of v.hits) {
-        if (it.what === 'pet' || it.what === 'corgi') continue
+        if (!isFurniture(it)) continue
         const labels = MENU_LABELS(it.what)
-        const at = menuPlace(it, labels, [...v.hits.filter(h => h !== it), ...v.avoid], surface, 1, c.width)
-        const cw = Math.max(...labels.map(cellWidth)) + 4
+        const at = menuPlace(it, labels, menuOthers(it, v.hits, v.fixed), surface, 1, c.width)
+        const { cw, ch } = menuSize(labels, surface)
         const R = cellBox(it.room!, row)
         const where = `${c.name} ${surface} ${it.what}`
-        expect({ where, ok: at.left >= R.l && at.left + cw <= R.r && at.top >= R.t && at.top + labels.length <= R.b }).toEqual({ where, ok: true })
+        expect({ where, ok: at.left >= R.l && at.left + cw <= R.r && at.top >= R.t && at.top + ch <= R.b }).toEqual({ where, ok: true })
       }
     }
   }
 })
 
-test('48 columns: the printer menu covers no other clickable thing nor the queue (oftest G1)', () => {
-  for (const name of ['max-48-7', 'max-48-0', 'bird-48-7']) {
-    const c = cases().find(k => k.name === name)!
+test('menus stay put: same layout, same place, whoever walks or queues or wherever the pet is (jacky G2b)', () => {
+  for (const c of cases()) {
+    const busy = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
+    const calm = drawVector(c.crew, c.frame + 3, c.width, c.rows, [], c.seating, { ...c.opts, queue: [], raid: undefined })
+    for (const surface of ['desktop', 'terminal'] as const) {
+      for (const it of busy.hits.filter(isFurniture)) {
+        const same = calm.hits.find(h => h.what === it.what)!
+        const labels = MENU_LABELS(it.what)
+        const where = `${c.name} ${surface} ${it.what}`
+        expect({ where, at: menuPlace(it, labels, menuOthers(it, busy.hits, busy.fixed), surface, 1, c.width) }).toEqual({ where, at: menuPlace(same, labels, menuOthers(same, calm.hits, calm.fixed), surface, 1, c.width) })
+      }
+    }
+  }
+})
+
+test('desktop menus avoid the counter and its YOU sign', () => {
+  for (const c of cases()) {
     const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
-    const pr = v.hits.find(h => h.what === 'printer')!
-    const labels = MENU_LABELS('printer')
-    const others = [...v.hits.filter(h => h !== pr), ...v.avoid]
-    const at = menuPlace(pr, labels, others, 'desktop', 1, c.width)
-    const cw = Math.max(...labels.map(cellWidth)) + 4
-    const over = others.map(o => cellBox(o, 2.5)).filter(o => o.l < at.left + cw && at.left < o.r && o.t < at.top + labels.length && at.top < o.b)
-    expect({ name, over: over.length }).toEqual({ name, over: 0 })
+    if (v.fixed.length === 0) continue
+    for (const it of v.hits.filter(isFurniture)) {
+      if (it.room!.y < 20) continue // 上排房間的選單碰不到走廊的櫃台
+      const labels = MENU_LABELS(it.what)
+      const at = menuPlace(it, labels, menuOthers(it, v.hits, v.fixed), 'desktop', 1, c.width)
+      const { cw, ch } = menuSize(labels, 'desktop')
+      const over = v.fixed.map(o => cellBox(o, 2.5)).filter(o => o.l < at.left + cw && at.left < o.r && o.t < at.top + ch && at.top < o.b)
+      expect({ where: `${c.name} ${it.what}`, over: over.length }).toEqual({ where: `${c.name} ${it.what}`, over: 0 })
+    }
   }
 })
 
@@ -2116,5 +2134,77 @@ test('terminal: clicking the pet leaves a line in the button row for about 5 s (
   await new Promise(r => setTimeout(r, 20))
   const note = await ui.find({ type: 'Text', text: /餵|換|小寶寶|山雀|貓/ })
   expect(note).toBeDefined()
+  await ui.unmount()
+})
+
+// ---------- 0.17.0（G2）：Desktop 撐滿面板、夜間模式在窗戶上、選單深色有框且位置固定 ----------
+
+import { desktopRows, setSpread } from './scene'
+
+const DESK_PANE = (bodyRows: number, bodyColumns = 112) => ({
+  plugin: 'pixel-office',
+  surface: 'desktop',
+  component: 'Pane',
+  requestId: 'pixel-office',
+  props: { title: '像素辦公室', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows }, view: undefined },
+}) as any
+const viewH = (src: string) => +src.match(/viewBox="0 0 \d+ (\d+)"/)![1]
+
+test('desktop rows: one desktop row is 2.5/k scene units, so the scene is bodyRows x 1.25 / k rows (at least 44)', () => {
+  expect(desktopRows(64, 1)).toBe(80)
+  expect(desktopRows(64, 1, 2)).toBe(77)
+  expect(desktopRows(100, 1.5)).toBe(83)
+  expect(desktopRows(20, 1)).toBe(44)
+})
+
+test('desktop: the picture fills the pane height, no hint line, no night button below it', async ($, on) => {
+  MOCKS(on, [])
+  const ui = await $.ui.mount(DESK_PANE(100))
+  const tree: any = await ui.drawn()
+  expect(tree.children.map((c: any) => c.type)).toEqual(['Box']) // 只剩場景（Svg＋疊上去的按鈕）
+  expect(viewH(String((await ui.find({ type: 'Svg' }))!.props.source))).toBe(250) // 100 列 × 2.5 單位
+  expect(await ui.find({ type: 'Text', text: /buttons\.json/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /夜間模式|開燈/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('desktop: clicking any window toggles night mode', async ($, on) => {
+  MOCKS(on, [])
+  const ui = await $.ui.mount(DESK_PANE(64))
+  const src = async () => String((await ui.find({ type: 'Svg' }))!.props.source)
+  expect(await src()).not.toContain('#050a1e')
+  expect(await ui.find({ key: 'night-1' })).toBeDefined() // 不只一扇窗
+  await ui.press({ key: 'night' })
+  expect(await src()).toContain('#050a1e')
+  await ui.press({ key: 'night-1' })
+  expect(await src()).not.toContain('#050a1e')
+  await ui.unmount()
+})
+
+test('desktop: a tall pane spreads the extra height between desk clusters, the terminal layout stays as before', async ($, on) => {
+  const plain = layout(112, 90).clusters.map(k => k.y)
+  setSpread(true)
+  const wide = layout(112, 90)
+  setSpread(false)
+  const ys = [...new Set(wide.clusters.map(k => k.y))]
+  const last = ys[ys.length - 1] + 34
+  expect(ys[0]).toBeGreaterThan(plain[0])
+  expect(180 - last - 18).toBeLessThan(2 * (ys[0] - 34)) // 走廊只多出除不盡的零頭，不是全部堆在那
+  expect(layout(112, 90).clusters.map(k => k.y)).toEqual(plain)
+  MOCKS(on, [])
+  const ui = await $.ui.mount(DESK_PANE(72))
+  await ui.unmount()
+  expect(layout(112, 90).clusters.map(k => k.y)).toEqual(plain) // 畫過 Desktop，測試這邊的版面照舊
+})
+
+test('desktop: the furniture menu is an opaque framed box with a title and white labels', async ($, on) => {
+  MOCKS(on, [])
+  const ui = await $.ui.mount(DESK_PANE(64))
+  await ui.press({ key: 'hit-vending' })
+  const menu: any = await ui.find({ key: 'menu' })
+  expect(menu.props.backgroundColor).toBe('#1a1c2c')
+  expect(menu.props.borderStyle).toBe('round')
+  expect((await ui.find({ type: 'Text', text: /販賣機/ }))).toBeDefined()
+  expect((await ui.find({ key: 'menu-0' }))).toBeDefined()
   await ui.unmount()
 })

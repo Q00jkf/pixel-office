@@ -28,13 +28,13 @@ export type Shape =
 export type Furniture = 'printer' | 'cabinet' | 'mailbox' | 'calendar' | 'vending' | 'clock' | 'meeting'
 export type Rect = { x: number; y: number; w: number; h: number }
 /** room＝這件東西所在的房間（選單不能跨出去，例如會議室的選單不壓主管室） */
-export type Hit = Rect & { what: Furniture | 'pet' | 'corgi'; sitting?: boolean; room?: Rect }
+export type Hit = Rect & { what: Furniture | 'pet' | 'corgi' | 'window'; sitting?: boolean; room?: Rect }
 
 /**
  * shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它）；
- * hits＝點得到的東西；avoid＝走動與排隊的人（選單盡量別蓋到）
+ * hits＝點得到的東西（window＝牆上的窗，點了切夜間模式）；avoid＝走動與排隊的人；fixed＝不能點、但選單不要蓋的固定擺設（櫃台＋YOU 牌）
  */
-export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[]; hits: Hit[]; avoid: Rect[] }
+export type VectorScene = { width: number; h: number; night: boolean; shapes: Shape[]; glow: Shape[]; labels: Shape[]; hits: Hit[]; avoid: Rect[]; fixed: Rect[] }
 
 /** 素材的 Sweetie 16 色盤：自己畫的牆、地板、螢幕框跟素材同色，才不會一眼看出是兩套 */
 const SW = {
@@ -85,6 +85,7 @@ class Pen {
   labels: Shape[] = []
   hits: Hit[] = []
   avoid: Rect[] = []
+  fixed: Rect[] = []
   faces = new Map<string, number>() // 主管的人物造型（同場不重複），沒有就照名字雜湊
   lit = false // true 時畫到 glow（夜裡在暗幕之上：螢幕、問號、火花）
   constructor(readonly night: boolean) {}
@@ -227,6 +228,7 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
     p.glowing(() => p.circle(qx + 1.5, qy + 0.8, 0.6, C.gold))
     p.spriteAt('paper2', qx + 4, qy - 0.4, 0.25)
     p.text(qx + COUNTER_W / 2, h - 0.4, 'YOU', 1.7, C.gold, { anchor: 'middle', bold: true })
+    p.fixed.push({ x: qx, y: qy - 0.4, w: COUNTER_W, h: h - qy + 0.4 })
   }
 
   // 時鐘掛在員工區看得到的那面牆（會議室門與隔牆之間，像範例圖掛在門上方）；最後畫，家具蓋不到；太窄放不下就不掛
@@ -246,7 +248,8 @@ function windows(p: Pen, x0: number, x1: number, frame: number, deco: SpriteId[]
   const ww = 6.2
   let i = 0
   for (let x = x0; x + ww <= x1; x += ww + 5, i++) {
-    p.sprite(i % 2 ? 'windowNote' : 'window', x, WALL + 0.1, ww)
+    const wh = p.sprite(i % 2 ? 'windowNote' : 'window', x, WALL + 0.1, ww)
+    p.hits.push({ what: 'window', x, y: WALL + 0.1, ...wh })
     if (p.night) p.glowing(() => {
       p.rect(x + 0.6, WALL + 0.7, ww - 1.2, 3.8, C.nightSky)
       if ((x + frame) % 7 !== 0) p.circle(x + 2, WALL + 1.6, 0.25, C.star)
@@ -591,7 +594,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
   const bossRoom = { x: L.officeX, y: WALL, w: width - WALL - L.officeX, h: TOP_H }
   const floor = { x: WALL, y: top + WALL, w: width - 2 * WALL, h: L.h - top - 2 * WALL }
   for (const hit of p.hits) hit.room = hit.y + hit.h / 2 < top ? (hit.x < L.officeX ? meetRoom : bossRoom) : floor
-  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels, hits: p.hits, avoid: p.avoid }
+  return { width, h: L.h, night: p.night, shapes: p.shapes, glow: p.glow, labels: p.labels, hits: p.hits, avoid: p.avoid, fixed: p.fixed }
 }
 
 // ---------- 點擊：場景單位 → 面板字元格（register.tsx 疊按鈕與選單用） ----------
@@ -610,16 +613,24 @@ export function cellAt(x: number, y: number, surface: 'terminal' | 'desktop', k 
 export const cellWidth = (t: string) => [...t].reduce((n, ch) => n + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1), 0)
 
 /**
+ * 選單佔幾格：按鈕寬＝字寬＋4（含框）、一項一列。Desktop 的選單是深色底框（上下左右框各 1、左右內距各 1）＋一列標題
+ */
+export function menuSize(labels: string[], surface: 'terminal' | 'desktop'): { cw: number; ch: number } {
+  const cw = Math.max(...labels.map(cellWidth)) + 4
+  return surface === 'desktop' ? { cw: cw + 4, ch: labels.length + 3 } : { cw, ch: labels.length }
+}
+
+/**
  * 選單放哪（字元格）：依序試家具的右、左、上、下，選單要整個留在家具所在的房間（會議室的選單不壓主管室），
- * 先挑不蓋到其他點得到的東西與走動、排隊的人的那一側；每一側都會蓋到就挑蓋最少的。按鈕寬＝字寬＋4（含框）
+ * 先挑不蓋到 others 的那一側；每一側都會蓋到就挑蓋最少的。others 只給固定的東西（家具、窗、櫃台），
+ * 不給走動的人與寵物：同一個版面下選單永遠開在同一個位置（jacky 2026-10-27：有人走過就換位置很不舒服）
  */
 export function menuPlace(it: Hit, labels: string[], others: Rect[], surface: 'terminal' | 'desktop', k: number, sceneW: number): { top: number; left: number } {
   const u = CELL_UNITS[surface]
   const box = (r: Rect) => ({ t: Math.floor((r.y * k) / u.row), l: Math.floor((r.x * k) / u.col), b: Math.ceil(((r.y + r.h) * k) / u.row), r: Math.ceil(((r.x + r.w) * k) / u.col) })
   const I = box(it)
   const R = box(it.room ?? { x: 0, y: 0, w: sceneW, h: it.y + it.h })
-  const cw = Math.max(...labels.map(cellWidth)) + 4
-  const ch = labels.length
+  const { cw, ch } = menuSize(labels, surface)
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
   const sideTop = clamp(I.b - ch, R.t, R.b - ch)
   const midLeft = clamp(I.l, R.l, R.r - cw)

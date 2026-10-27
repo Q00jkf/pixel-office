@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, sceneRows, sceneWidth, walkerPos } from './scene'
+import { GEOM, isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Walker } from './scene'
 import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
 
@@ -219,6 +219,13 @@ export function parseButtons(raw: unknown): CustomButton[] {
 
 export const FURNITURE = ['printer', 'cabinet', 'mailbox', 'calendar', 'vending', 'clock', 'meeting'] as const satisfies readonly Furniture[]
 const MAX_MENU = 6
+/** Desktop 選單標題用的家具名 */
+export const FURNITURE_NAMES: Record<Furniture, string> = { printer: '影印機', cabinet: '檔案櫃', mailbox: '郵筒', calendar: '月曆', vending: '販賣機', clock: '時鐘', meeting: '會議桌' }
+// 素材色盤（vector.ts 的 SW）：ink 底、yellow 框與標題、white 字、silver 取消
+const MENU_BG = '#1a1c2c'
+const MENU_EDGE = '#ffcd75'
+const MENU_TEXT = '#f4f4f4'
+const MENU_DIM = '#94b0c2'
 /** 預設選單（主管 office 2026-10-27 轉 jacky 裁示）；buttons.json 有同 object 的項目就整份換成使用者的 */
 export const MENUS: Record<Furniture, { label: string; prompt: string }[]> = {
   printer: [
@@ -262,16 +269,18 @@ export { CELL_UNITS, cellAt, menuPlace } from './vector'
 /** 終端機的按鈕放在東西的中心，往左挪 1 格讓 1～2 格寬的符號置中 */
 export const hitCell = (h: Hit, surface: 'terminal' | 'desktop', k = 1) => cellAt(h.x + h.w / 2 - 1, h.y + h.h / 2, surface, k)
 /** 終端機的 Raster 沒畫柯基、販賣機，月曆與時鐘也不在同一個位置 → 這幾樣只在 Desktop 點得到 */
-export const terminalHits = (hits: Hit[]) => hits.filter(h => !['corgi', 'vending', 'calendar', 'clock'].includes(h.what))
-const terminalScene = (v: { hits: Hit[]; avoid: Rect[] }) => {
-  lastAvoid = v.avoid
+export const terminalHits = (hits: Hit[]) => hits.filter(h => !['corgi', 'vending', 'calendar', 'clock', 'window'].includes(h.what))
+const terminalScene = (v: { hits: Hit[]; fixed: Rect[] }) => {
+  lastFixed = v.fixed
   return (lastHits = terminalHits(v.hits))
 }
+/** 選單要避開的：其他固定的可點東西＋櫃台；寵物會走、走動與排隊的人會換，都不算，選單位置才固定 */
+export const menuOthers = (open: Hit, hits: Hit[], fixed: Rect[]): Rect[] => [...hits.filter(h => h !== open && h.what !== 'pet'), ...fixed]
 
 let openMenu: Furniture | null = null // 同時只開一個選單
 let corgiFed: number | undefined
 let lastHits: Hit[] = []
-let lastAvoid: Rect[] = []
+let lastFixed: Rect[] = []
 let petNote: { text: string; until: number } | undefined // 終端機看不到 toast：點寵物的結果在按鈕列留一行，約 5 秒
 let petCell = '' // 終端機：寵物按鈕上次畫在哪一格；換格才重畫整個面板（Raster 平時只 blit）
 
@@ -290,12 +299,27 @@ async function pressPet($: EngineInterface): Promise<string> {
  * 終端機：中心一個淡色符號 —— Raster 上的按鈕字會蓋掉底下的格子，鋪滿就把寵物和家具擦掉了
  */
 function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surface: 'terminal' | 'desktop', mine: CustomButton[], sceneW: number, k: number) {
-  const { Box, Button } = els
+  const { Box, Button, Text } = els
   const toggle = (what: Furniture) => () => {
     openMenu = openMenu === what ? null : what
     $.ui.invalidate('ui.render')
   }
+  let win = 0
   const out = hits.map(hit => { // 不能叫 h：JSX 編譯成 h(...)
+    if (hit.what === 'window') {
+      // Desktop 的夜間模式：點牆上任何一扇窗切換（第一扇的 key 沿用舊的 night 按鈕）
+      const id = win++ === 0 ? 'night' : `night-${win - 1}`
+      const a = cellAt(hit.x, hit.y, surface, k)
+      const b = cellAt(hit.x + hit.w, hit.y + hit.h, surface, k)
+      const cols = Math.max(1, b.left - a.left)
+      return (
+        <Box key={`at-${id}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
+          {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
+            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={' '.repeat(cols)} onPress={() => void update($, night, v => !v)} />
+          ))}
+        </Box>
+      )
+    }
     const press =
       hit.what === 'pet'
         ? () =>
@@ -332,11 +356,34 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
   const open = openMenu ? hits.find(h => h.what === openMenu) : undefined
   if (open && openMenu) {
     const items = menuFor(openMenu, mine)
-    const others = [...hits.filter(h => h !== open), ...lastAvoid]
-    const at = menuPlace(open, [...items.map(i => i.label), '取消'], others, surface, k, sceneW)
+    const at = menuPlace(open, [...items.map(i => i.label), '取消'], menuOthers(open, hits, lastFixed), surface, k, sceneW)
     const close = () => {
       openMenu = null
       $.ui.invalidate('ui.render')
+    }
+    if (surface === 'desktop') {
+      // 深色不透明底＋金色圓角框＋標題列：一眼看得出是選單、跟場景分開；字自己指定白色，不靠主題（深底上主題的深字會看不見）
+      out.push(
+        <Box key="menu" position="absolute" top={at.top} left={at.left} flexDirection="column" backgroundColor={MENU_BG} borderStyle="round" borderColor={MENU_EDGE} paddingX={1}>
+          <Text key="menu-title" bold color={MENU_EDGE}>{`▾ ${FURNITURE_NAMES[openMenu]}`}</Text>
+          {items.map((it, i) => (
+            <Button
+              key={`menu-${i}`}
+              label={it.label}
+              onPress={() => {
+                close()
+                void runButton($, { label: it.label, prompt: it.prompt })
+              }}
+            >
+              <Text color={MENU_TEXT} bold>{it.label}</Text>
+            </Button>
+          ))}
+          <Button key="menu-cancel" label="取消" onPress={close}>
+            <Text color={MENU_DIM}>取消</Text>
+          </Button>
+        </Box>,
+      )
+      return out
     }
     out.push(
       <Box key="menu" position="absolute" top={at.top} left={at.left} flexDirection="column">
@@ -1546,9 +1593,12 @@ export const register: Register = on => {
         )
       }
       svgOpen = true
+      setSpread(true)
+      // 場景撐滿面板高（jacky 2026-10-27：下面不要留白）：上面只有核准列另外佔高，夜間模式在窗戶上、個人按鈕畫在場景裡
       // 向量版最大情境（112×80、30 人＋貓＋紙飛機＋開會＋排隊）約 6.6 萬字元（2026-10-27 實測，含素材表與走路格 3.1 萬），在 Svg 上限 131072 內；超過就縮小再畫
+      const approvals = approvalRows($, els, now)
       let sw = sceneWidth(e.props.bodyColumns)
-      let sr = Math.min(80, sceneRows(e.props.scroll?.bodyRows))
+      let sr = desktopRows(e.props.scroll?.bodyRows, e.props.bodyColumns / sw, approvals.length)
       let svg = ''
       const t = new Date(await $.clock.now())
       const clock = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` // 牆上時鐘：本機時區
@@ -1561,41 +1611,38 @@ export const register: Register = on => {
         const v = drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock, corgiFed }) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
         svg = vectorSvg(v)
         lastHits = v.hits
-        lastAvoid = v.avoid
+        lastFixed = v.fixed
         if (svg.length <= SVG_MAX) break
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
       }
+      const k = e.props.bodyColumns / width
+      // 舊格式的個人按鈕（沒有 object）：疊在員工區上緣左邊的空地，不另外佔一塊白底
+      const at = cellAt(GEOM.WALL + 1, GEOM.OPEN_Y + 1, 'desktop', k)
       return (
         <Box flexDirection="column">
-          {approvalRows($, els, now)}
+          {approvals}
           <Box key="stage">
             <Svg key="scene" source={svg} alt={`像素辦公室：${shown.length} 人在線`} />
-            {overlay($, els, lastHits, 'desktop', mine, width, e.props.bodyColumns / width)}
-          </Box>
-          {row.length > 0 ? (
-            <Box flexDirection="row">
-              {row.map((b, i) =>
-                b.url ? (
-                  <Link key={`mine-${i}`} href={b.url} label={b.label} />
-                ) : (
-                  <Button key={`mine-${i}`} label={b.label} onPress={() => runButton($, b)} />
-                ),
-              )}
-            </Box>
-          ) : (
-            <Text key="reserved" dimColor>
-              個人按鈕：~/.claude/pixel-office/buttons.json
-            </Text>
-          )}
-          <Box flexDirection="row">
-            <Button key="night" label={nightMode ? '開燈' : '夜間模式'} onPress={toggleNight} />
+            {overlay($, els, lastHits, 'desktop', mine, width, k)}
+            {row.length > 0 ? (
+              <Box key="mine" position="absolute" top={at.top} left={at.left} flexDirection="row">
+                {row.map((b, i) =>
+                  b.url ? (
+                    <Link key={`mine-${i}`} href={b.url} label={b.label} />
+                  ) : (
+                    <Button key={`mine-${i}`} label={b.label} onPress={() => runButton($, b)} />
+                  ),
+                )}
+              </Box>
+            ) : null}
           </Box>
         </Box>
       )
     }
     svgOpen = false
     rasterOpen = true
+    setSpread(false)
 
     const { Box, Raster, Button, Text, Link } = $.ui.resolve(e)
     const mine = await read($, buttons)

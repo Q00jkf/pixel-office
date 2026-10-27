@@ -273,3 +273,14 @@ test('walking: legs alternate every frame, side frames and a flip when going lef
   const seated = people(drawVector([{ ...who, mode: 'typing' }], 1, 80, 50).shapes)[0]
   expect(seated.id).toMatch(/s\d$/) // 坐著打字不用走路格
 })
+
+import { bigCrew } from './scenarios'
+import { setSpread } from './scene'
+
+test('desktop fills tall panes: 30 people at 112 x 200 rows (about a 2300 px tall pane) still fit the Svg limit', () => {
+  setSpread(true)
+  const crew = bigCrew()
+  const s = vectorSvg(drawVector(crew, 0, 112, 200, [], assignSeats(crew, 112, 200), {}))
+  setSpread(false)
+  expect(s.length).toBeLessThanOrEqual(SVG_MAX) // 2026-10-27 實測 112,638 字元
+})
