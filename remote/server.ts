@@ -1,17 +1,19 @@
 // 手機版辦公室（第 3 期）：本機 HTTP 伺服器，讀 ~/.claude/pixel-office/ 共用資料夾，畫跟 Desktop 同一張向量辦公室。
 // 對外靠 Cloudflare Tunnel＋Cloudflare Access（只放行 owner）；只聽 127.0.0.1。
 // 啟動：bun <這個檔>；設定在 ~/.claude/pixel-office/remote.json：{ "port": 8767, "owner": "<Access 登入的 email>" }
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Coworker } from '../types'
-import { MIN_ROWS, assignSeats, setSpread } from '../hooks/scene'
+import { MIN_ROWS, assignSeats, layout, setSpread } from '../hooks/scene'
 import { STALE_MS, parseStatus } from '../hooks/status'
 import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 
 const BASE = join(homedir(), '.claude', 'pixel-office')
 const SESSIONS = join(BASE, 'sessions')
+const COMMANDS = join(BASE, 'commands')
+const COMMAND_TTL_MS = 10 * 60 * 1000 // 跟 hooks/register.tsx 的 COMMAND_TTL_MS 一樣
 
 type Config = { port: number; owner?: string }
 function config(): Config {
@@ -57,11 +59,29 @@ let seats: ReturnType<typeof assignSeats> | undefined
 let seatKey = ''
 let box = { w: 64, h: 128 } // 上一張圖的 viewBox，給點人換算座標
 
-/** 手機直立：寬 w 單位（48～112），高照螢幕比例撐滿 */
+/** 手機要幾排桌：有 peer 在線的主管一隊一排（只有一位主管時照舊有一排），沒 team 的人每 8 個一排、至少一排 */
+export function deskRowsNeeded(people: Coworker[]): number {
+  const bosses = people.filter(c => c.role === 'manager')
+  const ofBoss = (c: Coworker, m: Coworker) => c.team !== undefined && (c.team === m.agent || c.team === m.name)
+  const staff = people.filter(c => c.role !== 'manager')
+  const teams = bosses.length === 1 ? 1 : bosses.filter(m => staff.some(c => ofBoss(c, m))).length
+  const loose = staff.filter(c => !bosses.some(m => ofBoss(c, m))).length
+  return teams + Math.max(1, Math.ceil(loose / 8))
+}
+
+/** 排數：至少撐滿螢幕，桌子排不下就往下長（手機頁可以上下滑） */
+export function phoneRows(width: number, aspect: number, people: Coworker[]): number {
+  let rows = Math.max(MIN_ROWS, Math.round((width * aspect) / 2))
+  const need = deskRowsNeeded(people)
+  while (layout(width, rows).clusters.length / layout(width, rows).cols < need && rows < 400) rows += 1
+  return rows
+}
+
+/** 手機直立：寬 w 單位（48～112），高照螢幕比例撐滿，桌子不夠就加長 */
 export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
   const width = Math.max(48, Math.min(112, Math.round(w)))
-  const rows = Math.max(MIN_ROWS, Math.round((width * aspect) / 2))
   const { people, oneshots } = crew(now)
+  const rows = phoneRows(width, aspect, people)
   const m = meeting(now, people)
   box = { w: width, h: rows * 2 }
   const key = `${width}x${rows}`
@@ -93,6 +113,8 @@ export function roster(now = Date.now()) {
     people: people.map(c => {
       const at = seats?.get(c.id)?.stand
       return {
+        id: c.id,
+        cmd: commandState(c.id, now),
         name: c.name,
         plate: c.name + (no.get(c.id) ?? ''),
         role: c.role,
@@ -112,6 +134,40 @@ export function roster(now = Date.now()) {
   }
 }
 
+function readJson(p: string): any {
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+/** 最近一道命令：送出未收（pending）、已收（delivered）、沒被收就過期（expired） */
+export function commandState(id: string, now = Date.now()): { text: string; at: number; state: 'pending' | 'delivered' | 'expired' } | undefined {
+  const c = readJson(join(COMMANDS, `${id}.json`))
+  if (!c || typeof c.text !== 'string' || typeof c.nonce !== 'string') return undefined
+  const done = readJson(join(COMMANDS, `${id}.done.json`))
+  const state = done?.nonce === c.nonce ? 'delivered' : now - Number(c.at) < COMMAND_TTL_MS ? 'pending' : 'expired'
+  return { text: c.text, at: Number(c.at), state }
+}
+
+/** 手機下命令：寫 commands/<session>.json，那個 session 的外掛每秒來拿（hooks/register.tsx takeCommand） */
+export function sendCommand(id: string, text: string, now = Date.now()): string | undefined {
+  const t = text.trim()
+  if (t === '' || t.length > 4000) return '命令是空的或太長（上限 4000 字）'
+  if (!crew(now).people.some(c => c.id === id)) return '這個 session 已經不在線'
+  mkdirSync(COMMANDS, { recursive: true })
+  writeFileSync(join(COMMANDS, `${id}.json`), JSON.stringify({ nonce: crypto.randomUUID(), text: t, at: now }))
+  return undefined
+}
+
+/** 送命令只收同源的 JSON：跨站表單送不了 application/json，跨站 fetch 會卡在 CORS 預檢 */
+export function sameOrigin(req: Request): boolean {
+  if (!(req.headers.get('content-type') ?? '').startsWith('application/json')) return false
+  const origin = req.headers.get('origin')
+  return !origin || origin === new URL(req.url).origin || origin === `https://${req.headers.get('host')}`
+}
+
 /** 經 Cloudflare 進來的要求必須帶 Access 驗過的 owner email；本機直連（沒有 cf-ray）放行，方便測試 */
 export function allowed(h: Headers, owner: string | undefined): boolean {
   if (!h.get('cf-ray')) return true
@@ -128,7 +184,7 @@ if (import.meta.main) {
   Bun.serve({
     hostname: '127.0.0.1',
     port: cfg.port,
-    fetch(req) {
+    async fetch(req) {
       if (!allowed(req.headers, config().owner)) return new Response('forbidden', { status: 403 })
       const url = new URL(req.url)
       const nocache = { 'cache-control': 'no-store' }
@@ -137,6 +193,12 @@ if (import.meta.main) {
         const w = Number(url.searchParams.get('w')) || 64
         const a = Number(url.searchParams.get('a')) || 1.6
         return new Response(sceneSvg(w, Math.max(0.5, Math.min(3, a))), { headers: { 'content-type': 'image/svg+xml', ...nocache } })
+      }
+      if (url.pathname === '/command' && req.method === 'POST') {
+        if (!sameOrigin(req)) return new Response('forbidden', { status: 403 })
+        const b = await req.json().catch(() => ({}))
+        const err = typeof b.id === 'string' && typeof b.text === 'string' ? sendCommand(b.id, b.text) : '格式不對'
+        return Response.json(err ? { ok: false, error: err } : { ok: true }, { status: err ? 400 : 200, headers: nocache })
       }
       if (url.pathname === '/state.json') {
         return Response.json(roster(), { headers: nocache })

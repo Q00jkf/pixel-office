@@ -788,6 +788,7 @@ async function refresh($: EngineInterface) {
     trackMoves(everyone())
   }
   if (me.office && approveOn) await readApprovals($, d, now)
+  await takeCommand($, d, now)
   await showCrew($)
 }
 
@@ -1015,6 +1016,26 @@ export async function textHash(text: string): Promise<string> {
 const officeRoot = (sessionsDir: string) => sessionsDir.replace(/\/sessions$/, '')
 const approvalFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/approvals/${sid}.json`
 const decisionFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/decisions/${sid}.json`
+
+// 手機下的命令（remote/server.ts 寫 commands/<session>.json）：nonce 跟 <session>.done.json 不同才送，
+// 先寫 done 再送，重載外掛也不會送兩次（MOD 的 $.fs 不能刪檔）。當成使用者自己打的字（jacky 2026-10-27 選），前面加 📱
+const commandFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/commands/${sid}.json`
+export const COMMAND_TTL_MS = 10 * 60 * 1000 // 送出超過 10 分鐘還沒被收的命令作廢（例如對方關了視窗）
+async function takeCommand($: EngineInterface, d: string, now: number) {
+  if (me.id === 'me' || me.oneshot) return
+  const f = commandFile(d, me.id)
+  if (!(await $.fs.exists(f).catch(() => false))) return
+  try {
+    const raw = await $.fs.read(f)
+    const c = JSON.parse(typeof raw === 'string' ? raw : '{}')
+    if (typeof c.nonce !== 'string' || typeof c.text !== 'string' || c.text.trim() === '' || !(now - Number(c.at) < COMMAND_TTL_MS)) return
+    const doneFile = f.replace(/\.json$/, '.done.json')
+    const done = await $.fs.read(doneFile).then(r => JSON.parse(typeof r === 'string' ? r : '{}').nonce).catch(() => undefined)
+    if (done === c.nonce) return
+    await $.fs.write(doneFile, JSON.stringify({ nonce: c.nonce, at: now }))
+    void $.prompt.submit({ text: `📱 ${c.text}`, asUser: true }).catch(() => undefined)
+  } catch {}
+}
 
 /** tool_input → 給人看的全文：Bash／PowerShell 取 command，其他整份 JSON */
 export function approvalText(tool: string, input: unknown): string {

@@ -506,10 +506,12 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     // F1（jacky 2026-10-27 選）：底透明、同一分區的座位群併成一個框；四角 L 形＋細線，名牌深底團隊色字壓在左上
     const ks = units[z].map(i => L.clusters[i])
     if (ks.length === 0) return
-    const x = ks[0].x - 2
-    const top = ks[0].y - 4
-    const rw = CLUSTER_W + 4
-    const bottom = ks[ks.length - 1].y + GEOM.CLUSTER_H + 2
+    const x = Math.min(...ks.map(k => k.x)) - 2
+    const top = Math.min(...ks.map(k => k.y)) - 4
+    const rw = Math.max(...ks.map(k => k.x)) + CLUSTER_W + 2 - x
+    const lowest = Math.max(...ks.map(k => k.y))
+    const below = L.clusters.filter(k => k.y > lowest).map(k => k.y) // 手機一隊一排：下一排的框從 y-4 起，不能疊上去
+    const bottom = Math.min(lowest + GEOM.CLUSTER_H + 2, below.length > 0 ? Math.min(...below) - 5 : Infinity)
     p.rect(x, top, rw, bottom - top, 'none', 0, look.edge, 0.3)
     const arm = 3
     for (const [cx, cy, dx, dy] of [[x, top, 1, 1], [x + rw, top, -1, 1], [x, bottom, 1, -1], [x + rw, bottom, -1, -1]]) p.path(`M${n(cx + dx * arm)} ${n(cy)}H${n(cx)}V${n(cy + dy * arm)}`, undefined, look.edge, 0.7)

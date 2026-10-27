@@ -13,19 +13,28 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: system-ui, "Noto Sans TC", sans-serif; }
   header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: var(--bar); color: #f4f4f4; font-size: 14px; }
   #stale { color: #ffcd75; display: none; }
-  main { height: calc(100% - 37px); display: flex; justify-content: center; align-items: flex-start; }
-  img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+  header { position: sticky; top: 0; z-index: 1; }
+  main { min-height: calc(100% - 37px); }
+  img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
   #card { position: fixed; left: 0; right: 0; bottom: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: #f4f4f4; border-top: 3px solid var(--bar); box-shadow: 0 -4px 16px #0003; font-size: 15px; line-height: 1.6; display: none; }
   #card h2 { margin: 0 0 4px; font-size: 18px; }
   #card .k { color: var(--dim); display: inline-block; min-width: 4.5em; }
   #card .err { color: #b13e53; }
-  #card button { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 22px; color: var(--dim); }
+  #card #close { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 22px; color: var(--dim); }
+  #card { max-height: 70%; overflow-y: auto; }
+  #say { display: flex; gap: 8px; margin-top: 10px; }
+  #say textarea { flex: 1; min-height: 2.6em; max-height: 8em; font: inherit; padding: 6px 8px; border: 1px solid var(--dim); border-radius: 6px; resize: vertical; }
+  #say button { border: 0; border-radius: 6px; padding: 0 16px; background: var(--bar); color: #fff; font: inherit; }
+  #say button:disabled { opacity: .5; }
+  #sent { color: var(--dim); font-size: 13px; margin-top: 4px; }
 </style>
 </head>
 <body>
 <header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span></header>
 <main><img id="scene" alt="像素辦公室"></main>
-<div id="card"><button id="close" aria-label="關閉">×</button><div id="info"></div></div>
+<div id="card"><button id="close" aria-label="關閉">×</button><div id="info"></div>
+  <form id="say"><textarea id="text" placeholder="對他下命令（等於你在他的視窗打字）" enterkeyhint="send"></textarea><button id="send">送出</button></form>
+  <div id="sent"></div></div>
 <script>
   const img = document.getElementById('scene')
   const main = document.querySelector('main')
@@ -33,12 +42,12 @@
   let busy = false
   let lastOk
   let state
-  let picked // 卡片開著的人（名牌），每秒跟著更新
+  let picked // 卡片開著的人（session id），每秒跟著更新
   async function tick() {
     if (busy || document.hidden) return
     busy = true
     try {
-      const a = (main.clientHeight / main.clientWidth).toFixed(2)
+      const a = ((innerHeight - 37) / main.clientWidth).toFixed(2)
       const r = await fetch(`/scene.svg?w=${W}&a=${a}`, { cache: 'no-store' })
       if (!r.ok) throw new Error(r.status)
       const url = URL.createObjectURL(await r.blob())
@@ -46,7 +55,7 @@
       img.onload = () => { if (old.startsWith('blob:')) URL.revokeObjectURL(old) }
       img.src = url
       const s = state = await (await fetch('/state.json', { cache: 'no-store' })).json()
-      if (picked) show(s.people.find(p => p.plate === picked))
+      if (picked) show(s.people.find(p => p.id === picked), true)
       const waiting = s.people.filter(p => p.mode === 'waiting').length
       document.getElementById('count').textContent = `${s.people.length} 人在線` + (waiting ? `・${waiting} 人等你核准` : '')
       document.getElementById('stale').style.display = 'none'
@@ -60,10 +69,13 @@
   }
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : `${Math.round(m / 60)} 小時前` }
-  function show(p) {
+  const CMD = { pending: '已送出，等他收', delivered: '他已收到', expired: '10 分鐘沒被收，作廢了' }
+  function show(p, refresh) {
     const card = document.getElementById('card')
     if (!p) { picked = undefined; card.style.display = 'none'; return }
-    picked = p.plate
+    if (!refresh && picked !== p.id) document.getElementById('text').value = ''
+    picked = p.id
+    document.getElementById('sent').textContent = p.cmd ? `上一道：「${p.cmd.text.slice(0, 40)}」— ${CMD[p.cmd.state]}（${ago(p.cmd.at)}）` : ''
     const row = (k, v) => v ? `<div><span class="k">${k}</span>${v}</div>` : ''
     document.getElementById('info').innerHTML =
       `<h2>${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}</h2>` +
@@ -92,6 +104,23 @@
     show(best)
   })
   document.getElementById('close').addEventListener('click', () => show())
+  document.getElementById('say').addEventListener('submit', async ev => {
+    ev.preventDefault()
+    const box = document.getElementById('text')
+    const btn = document.getElementById('send')
+    if (!picked || !box.value.trim()) return
+    btn.disabled = true
+    try {
+      const r = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: picked, text: box.value }) })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok) box.value = ''
+      document.getElementById('sent').textContent = r.ok ? '已送出，等他收' : `沒送出：${j.error ?? r.status}`
+    } catch {
+      document.getElementById('sent').textContent = '沒送出：連不上電腦'
+    } finally {
+      btn.disabled = false
+    }
+  })
   tick()
   setInterval(tick, 1000)
   document.addEventListener('visibilitychange', tick)

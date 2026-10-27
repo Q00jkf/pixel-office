@@ -166,13 +166,13 @@ export function counterSpot(width: number, rows: number): Seat | undefined {
 
 /**
  * 分區單位（每個單位是幾組桌的編號，依分區順序）：3 欄以上一隊一欄，從最右欄往左；
- * 只有 2 欄又不只一排（手機直立、窄面板）改成一隊一組桌，由上往下、每排從右往左，剩下的給沒 team 的人
- * （jacky 2026-10-27：手機上兩隊只分得出一欄，另一隊被擠進別隊的框）
+ * 只有 2 欄又不只一排（手機直立、窄面板）改成一隊一整排（2 組桌、8 個位子），由上往下，剩下的排給沒 team 的人
+ * （jacky 2026-10-27：手機上兩隊只分得出一欄，另一隊被擠進別隊的框；要一隊一排、頁面往下滑看更多）
  */
 export function zoneUnits(L: { cols: number; clusters: Seat[] }): number[][] {
   if (L.cols < 2) return []
   const ids = L.clusters.map((_, i) => i)
-  if (L.cols === 2 && L.clusters.length > 2) return ids.map(i => Math.floor(i / 2) * 2 + 1 - (i % 2)).map(i => [i])
+  if (L.cols === 2 && L.clusters.length > 2) return Array.from({ length: Math.ceil(ids.length / 2) }, (_, r) => ids.slice(r * 2, r * 2 + 2))
   return Array.from({ length: L.cols }, (_, z) => ids.filter(i => i % L.cols === L.cols - 1 - z))
 }
 

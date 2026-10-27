@@ -2380,23 +2380,21 @@ test('an interactive session started with --name gets it as its plate instead of
 import { zoneUnits } from './scene'
 import { fitLabel, sameNameNumbers, vectorSvg } from './vector'
 
-test('with only 2 columns but several rows (phone portrait) each team gets a desk cluster of its own, so two teams never share a frame', () => {
-  const L = layout(64, 63)
-  expect(L.cols).toBe(2)
-  expect(L.clusters.length).toBe(4)
-  expect(zoneUnits(L)).toEqual([[1], [0], [3], [2]]) // 由上往下、每排從右往左
+test('with only 2 columns but several rows (phone portrait) each team gets a whole row of desks, so two teams never share a frame', () => {
+  expect(zoneUnits(layout(64, 63))).toEqual([[0, 1], [2, 3]]) // 一隊一整排、由上往下
   zoneUnits(layout(112, 60)).forEach((u, z) => expect(u.every(i => i % 3 === 2 - z)).toBe(true)) // 3 欄：照舊一隊一欄、最右先
-  expect(zoneUnits(layout(59, 44))).toEqual(layout(59, 44).clusters.length > 2 ? [[1], [0], [3], [2]].slice(0, layout(59, 44).clusters.length) : [[1], [0]])
-  // jacky 2026-10-27 手機截圖的組合：兩位主管、各自的 peer、四個沒 team 的人
+  // jacky 2026-10-27 手機截圖的組合：兩位主管、各自的 peer、四個沒 team 的人 → 要 3 排（伺服器會把畫面加長）
   const a = boss('a', 'office', 'office-agent')
   const b = boss('b', '6a', 'willy')
   const crew = [a, b, { ...P('of', 'ofimpl'), team: 'office' }, ...['impl', 'r2', 'test'].map(n => ({ ...P(n, n), team: 'willy' })), ...['drill', 'w1', 'w2', 'fin'].map(n => P(n, n))]
-  const seats = assignSeats(crew, 64, 63)
-  const cluster = (id: string) => Math.floor(seats.get(id)!.slot / 4)
-  expect(cluster('of')).toBe(1) // 第一位主管：右上
-  for (const n of ['impl', 'r2', 'test']) expect(cluster(n)).toBe(0) // 第二位主管：左上，三個人都在
-  for (const n of ['drill', 'w1', 'w2', 'fin']) expect([2, 3]).toContain(cluster(n)) // 沒 team 的坐下面
-  const svg = vectorSvg(drawVector(crew, 0, 64, 63, [], seats))
+  let rows = 63
+  while (layout(64, rows).clusters.length < 6) rows += 1
+  const seats = assignSeats(crew, 64, rows)
+  const row = (id: string) => Math.floor(seats.get(id)!.slot / 8)
+  expect(row('of')).toBe(0) // 第一位主管：第一排
+  for (const n of ['impl', 'r2', 'test']) expect(row(n)).toBe(1) // 第二位主管：第二排，三個人都在
+  for (const n of ['drill', 'w1', 'w2', 'fin']) expect(row(n)).toBe(2) // 沒 team 的坐最下面那排
+  const svg = vectorSvg(drawVector(crew, 0, 64, rows, [], seats))
   expect(svg).toContain('TEAM office')
   expect(svg).toContain('TEAM 6a')
 })
@@ -2410,4 +2408,47 @@ test('people with the same name get ① ② on their plate, and truncation keeps
   const t = fitLabel('LLM-Wiki-AEGIVERSE', 8, 1.9, '②').text
   expect(t.endsWith('②')).toBe(true)
   expect(t.startsWith('LLM')).toBe(true)
+})
+
+// ---------- 0.22.0：手機下命令 ----------
+
+test('a command from the phone is submitted once as the user\'s own words with 📱, and never twice after a reload', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = {
+    'commands/aaaa1111.json': JSON.stringify({ nonce: 'n1', text: '整理一下今天的進度', at: NOW - 1000 }),
+    'commands/cccc.json': JSON.stringify({ nonce: 'n9', text: '別人的', at: NOW }),
+  }
+  const submitted: any[] = []
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  const key = (path: string) => path.split(/[\\/]/).slice(-2).join('/')
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[key(e.path)] = e.text
+    return { value: undefined }
+  })
+  on('prompt.submit', (_$, e: any) => {
+    submitted.push(e)
+    return { text: e.text } as any
+  })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'aaaa1111' }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(submitted.map(e => [e.text, e.origin?.asUser ?? e.asUser])).toEqual([['📱 整理一下今天的進度', true]])
+  expect(JSON.parse(files['commands/aaaa1111.done.json']).nonce).toBe('n1')
+  // 重載外掛（模組變數歸零）也靠 done 檔不再送
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(submitted).toHaveLength(1)
+  // 超過 10 分鐘沒被收的命令作廢
+  files['commands/aaaa1111.json'] = JSON.stringify({ nonce: 'n2', text: '太舊了', at: NOW - 11 * 60 * 1000 })
+  await clock.advance(3000)
+  expect(submitted).toHaveLength(1)
 })
