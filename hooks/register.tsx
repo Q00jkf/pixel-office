@@ -1580,9 +1580,17 @@ export const register: Register = on => {
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
-    await $.ui.open({ id: PANE, title: '像素辦公室' })
+    const opened = await $.ui.open({ id: PANE, title: '像素辦公室' })
+    // 手機實測用（jacky 2026-10-27：手機打 /office 說已開啟卻沒畫面）：回報有沒有畫出來、接著哪些畫面，也留一份檔給主管讀
+    const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
+    const where = surfaces.length > 0 ? surfaces.join('、') : '沒有'
+    const at = new Date(await $.clock.now()).toISOString()
+    void sharedDir($)
+      .then(d => $.fs.write(`${d.replace(/\/sessions$/, '')}/debug-open.json`, JSON.stringify({ at, session: me.id, opened, surfaces })))
+      .catch(() => undefined)
+    if (!opened.isPlaced) return { text: `像素辦公室沒有畫出來：${opened.reason}（接著的畫面：${where}）` }
 
-    return { text: `像素辦公室已開啟。你是${ROLE_LABEL[me.role]}，名牌 ${me.name}。` }
+    return { text: `像素辦公室已開啟。你是${ROLE_LABEL[me.role]}，名牌 ${me.name}。（接著的畫面：${where}）` }
   })
 
   // 模型自己設定角色／名牌
