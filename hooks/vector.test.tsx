@@ -290,8 +290,9 @@ test('chairs face their desks: front chairs behind desks and the top meeting row
     const v = drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts)
     const shapes = v.shapes
     const ids = sprites(v).map(s => s.id)
-    expect(ids.filter(id => /^chair(Red|Yellow|Green|Blue|White|Gray)$/.test(id)).every(id => id === 'chairWhite')).toBe(true) // 側面椅只剩主管桌旁的訪客椅
+    expect(ids.filter(id => /^chair(Red|Yellow|Green|Blue|White|Gray)$/.test(id)).every(id => id === 'chairGray')).toBe(true) // 側面椅只剩主管桌旁的訪客椅
     expect(ids.filter(id => id === 'chairFrontGray').length).toBeGreaterThan(0)
+    expect(ids.filter(id => /^chair(Front|Back)/.test(id)).every(id => id.endsWith('Gray'))).toBe(true) // 統一灰色
     const backs = people(shapes).filter(s => s.id.endsWith('k'))
     expect(backs.length).toBeGreaterThan(0)
     for (const b of backs) {

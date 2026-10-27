@@ -184,7 +184,7 @@ FLAG_TW = [
 FLAG_COLORS = {'a': '333c57', 'U': '3b5dc9', 'w': 'f4f4f4', 'd': 'b13e53'}
 
 
-CHAIR_COLORS = ['Red', 'Yellow', 'Green', 'Blue', 'White', 'Gray']
+CHAIR_COLORS = ['Gray']  # 椅子統一灰色（jacky 2026-10-27）
 
 
 def chair_image(rows, src: Image.Image, color: str):

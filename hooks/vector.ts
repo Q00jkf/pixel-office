@@ -197,7 +197,7 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
 
   // 會議室椅子（長桌在 drawVector 裡、上排的人之後才畫）
   // 會議室上排椅子（正面，面向長桌）；下排的背面椅在 drawVector 裡、人之後才畫
-  for (const [i, s] of L.meet.entries()) if (i % 2 === 0) chairFront(p, CHAIRS[i % CHAIRS.length], s.x + 0.5, s.y + 1.5)
+  for (const [i, s] of L.meet.entries()) if (i % 2 === 0) chairFront(p, CHAIR, s.x + 0.5, s.y + 1.5)
 
   if (plantInOffice) plant(p, officeX + 1, WALL + 1)
   plant(p, WALL + 1, h - WALL - 7)
@@ -245,13 +245,13 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   }
 }
 
-const CHAIRS = ['Blue', 'Green', 'Red', 'Yellow', 'White'] as const
-type ChairColor = (typeof CHAIRS)[number] | 'Gray'
+// 椅子統一灰色（jacky 2026-10-27：會議室五顏六色太怪），跟白桌、玻璃地板一致
+const CHAIR = 'Gray'
 
 /** 正背面椅以人頭中心（figure 的 x, y）定位，像素大小跟人物一樣（PX）。正面：畫在人之前，椅背露在肩後 */
-const chairFront = (p: Pen, color: ChairColor, hx: number, hy: number) => p.sprite(`chairFront${color}`, hx - 7.5 * PX, hy - 1.2, 15 * PX, 16 * PX)
+const chairFront = (p: Pen, color: typeof CHAIR, hx: number, hy: number) => p.sprite(`chairFront${color}`, hx - 7.5 * PX, hy - 1.2, 15 * PX, 16 * PX)
 /** 背面：畫在背對畫面的人之後，椅背從後頸蓋到椅腳；底緣在 hy＋4.5（會議室下排＝房間下緣） */
-const chairBack = (p: Pen, color: ChairColor, hx: number, hy: number) => p.sprite(`chairBack${color}`, hx - 7.5 * PX, hy + 0.9, 15 * PX, 12 * PX)
+const chairBack = (p: Pen, color: typeof CHAIR, hx: number, hy: number) => p.sprite(`chairBack${color}`, hx - 7.5 * PX, hy + 0.9, 15 * PX, 12 * PX)
 
 /** 後牆上的窗戶（夜裡窗玻璃換夜空），中間穿插裝飾 */
 function windows(p: Pen, x0: number, x1: number, frame: number, deco: SpriteId[] = ['picBlue']) {
@@ -389,7 +389,7 @@ function carry(p: Pen, at: Step, kind: ErrandKind) {
 
 /** 員工座位：隔板（partitionRow 畫）→ 人 → 桌子擋住下半身，桌上有螢幕、杯子 */
 function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number) {
-  chairFront(p, 'Gray', x + 5.5, y + 2.2)
+  chairFront(p, CHAIR, x + 5.5, y + 2.2)
   if (who) figure(p, x + 5.5, y + 2.2, who, frame)
   p.sprite('table', x + 0.5, y + 5, 10)
   screen(p, x + 3, y + 8.6, 5, who ? who.mode : null, frame)
@@ -400,9 +400,9 @@ function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number)
 }
 
 function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
-  p.sprite('chairWhite', x - 4.2, y + 0.4, 2.6, 5.2, true)
+  p.sprite('chairGray', x - 4.2, y + 0.4, 2.6, 5.2, true)
   if (who) figure(p, x + 7.5, y + 8.6, who, frame, undefined, true, 0, true) // 坐在桌前、背對畫面看螢幕
-  chairBack(p, 'Blue', x + 7.5, y + 8.6)
+  chairBack(p, CHAIR, x + 7.5, y + 8.6)
   p.sprite('tableLong', x, y, 17, 6.8)
   screen(p, x + 4, y + 1.3, 6, who ? who.mode : null, frame)
   p.glowing(() => p.circle(x + 1.5, y + 1.5, 0.6, C.gold))
@@ -416,7 +416,7 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
 
 function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
   if (who) figure(p, x + 4.5, y + 8.6, who, frame, undefined, true, 0, true)
-  chairBack(p, 'Blue', x + 4.5, y + 8.6)
+  chairBack(p, CHAIR, x + 4.5, y + 8.6)
   p.sprite('table', x, y, DESK_W, 6)
   screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
   if (who) {
@@ -535,11 +535,11 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
       if ((pl.slot % 2 === 0) !== top) continue
       const who = byId.get(id)!
       figure(p, pl.seat.x + 0.5, pl.seat.y + 1.5, who, frame, undefined, false, 0, !top)
-      if (!top) chairBack(p, CHAIRS[pl.slot % CHAIRS.length], pl.seat.x + 0.5, pl.seat.y + 1.5)
+      if (!top) chairBack(p, CHAIR, pl.seat.x + 0.5, pl.seat.y + 1.5)
       const above = pl.seat.y - 1.2
       nameTag(p, pl.seat.x + 0.5, top && above - NAME_SIZE >= WALL + 0.3 ? above : pl.seat.y + 6.4, who, 8, 'none') // 上排貼牆放不下就放到人下面
     }
-    if (!top) for (const [i, s] of L.meet.entries()) if (i % 2 && !taken.has(i)) chairBack(p, CHAIRS[i % CHAIRS.length], s.x + 0.5, s.y + 1.5)
+    if (!top) for (const [i, s] of L.meet.entries()) if (i % 2 && !taken.has(i)) chairBack(p, CHAIR, s.x + 0.5, s.y + 1.5)
     if (top) {
       longTable(p, tx - a, ty - 4, 2 * a + 1, 8) // 長桌：素材左右兩端照比例、中段拉長
       p.hits.push({ what: 'meeting', x: tx - a, y: ty - 4, w: 2 * a + 1, h: 8 })
