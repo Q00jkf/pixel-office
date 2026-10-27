@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import type { Coworker } from '../types'
 import { MIN_ROWS, assignSeats, setSpread } from '../hooks/scene'
 import { STALE_MS, parseStatus } from '../hooks/status'
-import { drawVector, vectorSvg } from '../hooks/vector'
+import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 
 const BASE = join(homedir(), '.claude', 'pixel-office')
 const SESSIONS = join(BASE, 'sessions')
@@ -55,6 +55,7 @@ function meeting(now: number, people: Coworker[]): { meeting: boolean; attendees
 
 let seats: ReturnType<typeof assignSeats> | undefined
 let seatKey = ''
+let box = { w: 64, h: 128 } // 上一張圖的 viewBox，給點人換算座標
 
 /** 手機直立：寬 w 單位（48～112），高照螢幕比例撐滿 */
 export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
@@ -62,6 +63,7 @@ export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
   const rows = Math.max(MIN_ROWS, Math.round((width * aspect) / 2))
   const { people, oneshots } = crew(now)
   const m = meeting(now, people)
+  box = { w: width, h: rows * 2 }
   const key = `${width}x${rows}`
   if (key !== seatKey) seats = undefined // 版面變了座位重排
   seatKey = key
@@ -77,6 +79,37 @@ export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
   const queue = people.filter(c => c.mode === 'waiting').sort((a, b) => (a.since ?? 0) - (b.since ?? 0)).map(c => c.id)
   const v = drawVector(people, Math.floor(now / 250), width, rows, [], seats, { ...m, queue, clock, oneshots: [...by].map(([label, n]) => ({ label, n })) })
   return vectorSvg(v)
+}
+
+const MODE_TEXT: Record<string, string> = { idle: '閒著', thinking: '思考中', typing: '打字中', reading: '讀檔中', waiting: '等你核准', done: '剛做完', blocked: '被擋下' }
+
+/** 手機點人用：每個人在上一張圖的位置（viewBox 座標）與詳細資料 */
+export function roster(now = Date.now()) {
+  const { people, oneshots } = crew(now)
+  const no = sameNameNumbers(people)
+  return {
+    box,
+    oneshots: oneshots.length,
+    people: people.map(c => {
+      const at = seats?.get(c.id)?.stand
+      return {
+        name: c.name,
+        plate: c.name + (no.get(c.id) ?? ''),
+        role: c.role,
+        mode: c.mode,
+        modeText: MODE_TEXT[c.mode] ?? c.mode,
+        tool: c.tool || undefined,
+        title: c.title,
+        team: c.team,
+        agent: c.agent,
+        since: c.since,
+        approval: c.approval?.tool,
+        lastError: c.lastError,
+        x: at?.x,
+        y: at?.y,
+      }
+    }),
+  }
 }
 
 /** 經 Cloudflare 進來的要求必須帶 Access 驗過的 owner email；本機直連（沒有 cf-ray）放行，方便測試 */
@@ -106,8 +139,7 @@ if (import.meta.main) {
         return new Response(sceneSvg(w, Math.max(0.5, Math.min(3, a))), { headers: { 'content-type': 'image/svg+xml', ...nocache } })
       }
       if (url.pathname === '/state.json') {
-        const { people, oneshots } = crew()
-        return Response.json({ people: people.map(c => ({ name: c.name, mode: c.mode, tool: c.tool, title: c.title, role: c.role })), oneshots: oneshots.length }, { headers: nocache })
+        return Response.json(roster(), { headers: nocache })
       }
       if (url.pathname === '/manifest.webmanifest') return new Response(MANIFEST, { headers: { 'content-type': 'application/manifest+json' } })
       if (url.pathname === '/icon.svg') return new Response(ICON, { headers: { 'content-type': 'image/svg+xml' } })

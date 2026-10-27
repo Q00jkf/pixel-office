@@ -2374,3 +2374,40 @@ test('an interactive session started with --name gets it as its plate instead of
   expect(mine.name).toBe('drill2')
   expect(mine.oneshot).toBeUndefined()
 })
+
+// ---------- 0.21.0：手機直立（只有 2 欄）一隊一組桌、同名編號 ----------
+
+import { zoneUnits } from './scene'
+import { fitLabel, sameNameNumbers, vectorSvg } from './vector'
+
+test('with only 2 columns but several rows (phone portrait) each team gets a desk cluster of its own, so two teams never share a frame', () => {
+  const L = layout(64, 63)
+  expect(L.cols).toBe(2)
+  expect(L.clusters.length).toBe(4)
+  expect(zoneUnits(L)).toEqual([[1], [0], [3], [2]]) // 由上往下、每排從右往左
+  zoneUnits(layout(112, 60)).forEach((u, z) => expect(u.every(i => i % 3 === 2 - z)).toBe(true)) // 3 欄：照舊一隊一欄、最右先
+  expect(zoneUnits(layout(59, 44))).toEqual(layout(59, 44).clusters.length > 2 ? [[1], [0], [3], [2]].slice(0, layout(59, 44).clusters.length) : [[1], [0]])
+  // jacky 2026-10-27 手機截圖的組合：兩位主管、各自的 peer、四個沒 team 的人
+  const a = boss('a', 'office', 'office-agent')
+  const b = boss('b', '6a', 'willy')
+  const crew = [a, b, { ...P('of', 'ofimpl'), team: 'office' }, ...['impl', 'r2', 'test'].map(n => ({ ...P(n, n), team: 'willy' })), ...['drill', 'w1', 'w2', 'fin'].map(n => P(n, n))]
+  const seats = assignSeats(crew, 64, 63)
+  const cluster = (id: string) => Math.floor(seats.get(id)!.slot / 4)
+  expect(cluster('of')).toBe(1) // 第一位主管：右上
+  for (const n of ['impl', 'r2', 'test']) expect(cluster(n)).toBe(0) // 第二位主管：左上，三個人都在
+  for (const n of ['drill', 'w1', 'w2', 'fin']) expect([2, 3]).toContain(cluster(n)) // 沒 team 的坐下面
+  const svg = vectorSvg(drawVector(crew, 0, 64, 63, [], seats))
+  expect(svg).toContain('TEAM office')
+  expect(svg).toContain('TEAM 6a')
+})
+
+test('people with the same name get ① ② on their plate, and truncation keeps the number', () => {
+  const crew = [P('b', 'LLM-Wiki-AEGIVERSE'), P('a', 'LLM-Wiki-AEGIVERSE'), P('c', 'drill')]
+  const no = sameNameNumbers(crew)
+  expect(no.get('a')).toBe('①')
+  expect(no.get('b')).toBe('②')
+  expect(no.has('c')).toBe(false)
+  const t = fitLabel('LLM-Wiki-AEGIVERSE', 8, 1.9, '②').text
+  expect(t.endsWith('②')).toBe(true)
+  expect(t.startsWith('LLM')).toBe(true)
+})

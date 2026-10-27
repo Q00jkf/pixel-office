@@ -7,7 +7,7 @@ import type { Coworker, ErrandKind, OfficeMode, Pet } from '../types'
 import {
   GEOM, OFFICE_DOOR_W, OFFICE_DOOR_X, PALETTE as C, TEAM_RUGS,
   assignSeats, bossSeating, catMoveFrame, catPose, catRange, counterSpot, counterX, hash, layout, mailboxX, meetTable,
-  pathLength, planePos, queueSpot, raidPath, raidPose, teamZones, walkerPos,
+  pathLength, planePos, queueSpot, raidPath, raidPose, teamZones, walkerPos, zoneUnits,
   type Placement, type SceneOptions, type Seat, type Step, type Walker,
 } from './scene'
 import { CELL, PEOPLE, SHEET_H, SHEET_PNG, SHEET_W, SHIRTS, SPRITES, type SpriteId } from './sheet'
@@ -68,13 +68,23 @@ export function fitText(t: string, maxW: number, size: number): string {
   return out
 }
 
-/** 放進 maxW：先縮字（到 NAME_MIN），再截字 */
-export function fitLabel(t: string, maxW: number, size = NAME_SIZE): { text: string; size: number } {
-  const w = textWidth(t, size)
-  if (w <= maxW) return { text: t, size }
+/** 放進 maxW：先縮字（到 NAME_MIN），再截字；tail（同名編號）不截 */
+export function fitLabel(t: string, maxW: number, size = NAME_SIZE, tail = ''): { text: string; size: number } {
+  const w = textWidth(t + tail, size)
+  if (w <= maxW) return { text: t + tail, size }
   const shrunk = Math.max(NAME_MIN, Math.floor((size * maxW / w) * 20) / 20)
-  return { text: fitText(t, maxW, shrunk), size: shrunk }
+  return { text: fitText(t, maxW - textWidth(tail, shrunk), shrunk) + tail, size: shrunk }
 }
+
+/** 同名的人名牌後面加 ①②（依 id 排），截字也看得出誰是誰（jacky 2026-10-27：手機上兩個 LLM-Wiki- 分不出來） */
+export function sameNameNumbers(crew: Coworker[]): Map<string, string> {
+  const by = new Map<string, Coworker[]>()
+  for (const c of crew) by.set(c.name, [...(by.get(c.name) ?? []), c])
+  const out = new Map<string, string>()
+  for (const g of by.values()) if (g.length > 1) [...g].sort((a, b) => a.id.localeCompare(b.id)).forEach((c, i) => out.set(c.id, '①②③④⑤⑥⑦⑧⑨⑩'[i] ?? String(i + 1)))
+  return out
+}
+let plateNo = new Map<string, string>() // drawVector 每次重算
 
 /** 描邊跟字反差：深字配白邊，淺字（金色主管名牌）配深棕邊 */
 const haloFor = (fill: Paint): Paint => {
@@ -373,7 +383,7 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
 }
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
-  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW)
+  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW, NAME_SIZE, plateNo.get(who.id))
   p.label(x, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
 }
 
@@ -408,7 +418,7 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
   p.glowing(() => p.circle(x + 1.5, y + 1.5, 0.6, C.gold))
   p.spriteAt('paper', x + 14.2, y + 0.6, 0.3)
   if (who) {
-    const t = fitLabel(`★${who.name}`, 13)
+    const t = fitLabel(`★${who.name}`, 13, NAME_SIZE, plateNo.get(who.id))
     p.label(x + 7, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
   if (extra > 0) plusBadge(p, x + 15.5, y + 3.2, extra)
@@ -420,7 +430,7 @@ function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame
   p.sprite('table', x, y, DESK_W, 6)
   screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
   if (who) {
-    const t = fitLabel(`★${who.name}`, DESK_W + 0.6)
+    const t = fitLabel(`★${who.name}`, DESK_W + 0.6, NAME_SIZE, plateNo.get(who.id))
     p.label(x + DESK_W / 2, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
   }
   if (extra > 0) plusBadge(p, x + DESK_W - 1, y + 0.2, extra)
@@ -483,17 +493,18 @@ function hearts(p: Pen, x: number, y: number) {
 /** opts.clock：牆上時鐘顯示的字（例如現在時間 "14:05"）；沒給就照素材原圖 12:00。opts.corgiFed：餵柯基的那一格 */
 export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string; corgiFed?: number; oneshots?: { label: string; n: number }[] } = {}): VectorScene {
   crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
+  plateNo = sameNameNumbers(crew)
   const L = layout(width, rows)
   const p = new Pen(opts.night === true)
   const bosses = bossSeating(crew, width, rows, seating)
   const seatedCount = bosses.order.filter(b => b !== undefined).length
   building(p, L, width, frame, seatedCount < 2 || L.bossDesks[seatedCount - 1].x >= L.officeX + 6, opts.clock ?? '12:00')
 
-  teamZones(bosses.leads, crew, L.cols).forEach((lead, z) => {
-    const col = L.cols - 1 - z
+  const units = zoneUnits(L)
+  teamZones(bosses.leads, crew, units.length).forEach((lead, z) => {
     const look = TEAM_RUGS[z % TEAM_RUGS.length]
-    // F1（jacky 2026-10-27 選）：底透明、同一欄的座位群併成一個框；四角 L 形＋細線，名牌深底團隊色字壓在左上
-    const ks = L.clusters.filter((_, i) => i % L.cols === col)
+    // F1（jacky 2026-10-27 選）：底透明、同一分區的座位群併成一個框；四角 L 形＋細線，名牌深底團隊色字壓在左上
+    const ks = units[z].map(i => L.clusters[i])
     if (ks.length === 0) return
     const x = ks[0].x - 2
     const top = ks[0].y - 4

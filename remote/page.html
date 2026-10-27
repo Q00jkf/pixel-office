@@ -15,17 +15,25 @@
   #stale { color: #ffcd75; display: none; }
   main { height: calc(100% - 37px); display: flex; justify-content: center; align-items: flex-start; }
   img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+  #card { position: fixed; left: 0; right: 0; bottom: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: #f4f4f4; border-top: 3px solid var(--bar); box-shadow: 0 -4px 16px #0003; font-size: 15px; line-height: 1.6; display: none; }
+  #card h2 { margin: 0 0 4px; font-size: 18px; }
+  #card .k { color: var(--dim); display: inline-block; min-width: 4.5em; }
+  #card .err { color: #b13e53; }
+  #card button { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 22px; color: var(--dim); }
 </style>
 </head>
 <body>
 <header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span></header>
 <main><img id="scene" alt="像素辦公室"></main>
+<div id="card"><button id="close" aria-label="關閉">×</button><div id="info"></div></div>
 <script>
   const img = document.getElementById('scene')
   const main = document.querySelector('main')
   const W = 64 // 手機直立用 64 單位寬：比 Desktop 窄，名牌才不會小到看不清
   let busy = false
   let lastOk
+  let state
+  let picked // 卡片開著的人（名牌），每秒跟著更新
   async function tick() {
     if (busy || document.hidden) return
     busy = true
@@ -37,7 +45,8 @@
       const old = img.src
       img.onload = () => { if (old.startsWith('blob:')) URL.revokeObjectURL(old) }
       img.src = url
-      const s = await (await fetch('/state.json', { cache: 'no-store' })).json()
+      const s = state = await (await fetch('/state.json', { cache: 'no-store' })).json()
+      if (picked) show(s.people.find(p => p.plate === picked))
       const waiting = s.people.filter(p => p.mode === 'waiting').length
       document.getElementById('count').textContent = `${s.people.length} 人在線` + (waiting ? `・${waiting} 人等你核准` : '')
       document.getElementById('stale').style.display = 'none'
@@ -49,6 +58,40 @@
       busy = false
     }
   }
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : `${Math.round(m / 60)} 小時前` }
+  function show(p) {
+    const card = document.getElementById('card')
+    if (!p) { picked = undefined; card.style.display = 'none'; return }
+    picked = p.plate
+    const row = (k, v) => v ? `<div><span class="k">${k}</span>${v}</div>` : ''
+    document.getElementById('info').innerHTML =
+      `<h2>${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}</h2>` +
+      row('職稱', p.title && esc(p.title)) +
+      row('狀態', esc(p.modeText) + (p.since ? `（${ago(p.since)}起）` : '')) +
+      row('工具', p.tool && esc(p.tool)) +
+      row('等核准', p.approval && esc(p.approval)) +
+      row('隊伍', p.team && esc(p.team)) +
+      row('名稱', p.agent && esc(p.agent)) +
+      (p.lastError ? `<div class="err"><span class="k">錯誤</span>${esc(p.lastError.text)}（${ago(p.lastError.at)}）</div>` : '')
+    card.style.display = 'block'
+  }
+  // 點圖：把點的位置換回圖上的座標，找最近的人
+  img.addEventListener('click', ev => {
+    if (!state) return
+    const r = img.getBoundingClientRect()
+    const k = Math.min(r.width / state.box.w, r.height / state.box.h)
+    const x = (ev.clientX - r.left - (r.width - state.box.w * k) / 2) / k
+    const y = (ev.clientY - r.top - (r.height - state.box.h * k) / 2) / k
+    let best, d = 8
+    for (const p of state.people) {
+      if (p.x === undefined) continue
+      const e = Math.hypot(p.x - x, p.y + 1.5 - y)
+      if (e < d) { d = e; best = p }
+    }
+    show(best)
+  })
+  document.getElementById('close').addEventListener('click', () => show())
   tick()
   setInterval(tick, 1000)
   document.addEventListener('visibilitychange', tick)

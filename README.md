@@ -129,6 +129,8 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 設定 `~/.claude/pixel-office/remote.json`（不進 repo）：`{ "port": 8767, "owner": "<Cloudflare Access 登入的 email>" }`
 - 啟動：`bun <plugin>/remote/server.ts`，只聽 `127.0.0.1`
 - 對外：Cloudflare Tunnel 加一個 public hostname 指到 `http://localhost:8767`，前面掛 Cloudflare Access（只允許 owner）。經 Cloudflare 進來的要求沒有 Access 驗過的 owner email 一律 403；本機直連放行
+- 點人（0.21.0）：點圖上的人跳出卡片，看職稱、狀態、工具、隊伍、最近錯誤；還不能核准
+- 團隊分區：手機只有 2 欄，一隊佔一組桌（4 個位子）、由上往下排，沒 team 的人坐下面
 - 測試：`bun test plugins/pixel-office/remote`（檔名 `.spec.ts`：`claude plugin test` 會載入所有 `.test.ts`）
 
 ### 圖素：2dPig Pixel Office（CC0）
