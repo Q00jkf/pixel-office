@@ -13,6 +13,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 const BASE = join(homedir(), '.claude', 'pixel-office')
 const SESSIONS = join(BASE, 'sessions')
 const COMMANDS = join(BASE, 'commands')
+const REPLIES = join(BASE, 'replies')
 const COMMAND_TTL_MS = 10 * 60 * 1000 // 跟 hooks/register.tsx 的 COMMAND_TTL_MS 一樣
 
 type Config = { port: number; owner?: string }
@@ -115,6 +116,7 @@ export function roster(now = Date.now()) {
       return {
         id: c.id,
         cmd: commandState(c.id, now),
+        reply: lastReply(c.id),
         name: c.name,
         plate: c.name + (no.get(c.id) ?? ''),
         role: c.role,
@@ -149,6 +151,13 @@ export function commandState(id: string, now = Date.now()): { text: string; at: 
   const done = readJson(join(COMMANDS, `${id}.done.json`))
   const state = done?.nonce === c.nonce ? 'delivered' : now - Number(c.at) < COMMAND_TTL_MS ? 'pending' : 'expired'
   return { text: c.text, at: Number(c.at), state }
+}
+
+/** 那個 session 最後一輪的回覆（hooks/register.tsx saveReply 寫的） */
+export function lastReply(id: string): { text: string; at: number; ask?: string } | undefined {
+  const r = readJson(join(REPLIES, `${id}.json`))
+  if (!r || typeof r.text !== 'string' || typeof r.at !== 'number') return undefined
+  return { text: r.text, at: r.at, ask: typeof r.ask === 'string' ? r.ask : undefined }
 }
 
 /** 手機下命令：寫 commands/<session>.json，那個 session 的外掛每秒來拿（hooks/register.tsx takeCommand） */

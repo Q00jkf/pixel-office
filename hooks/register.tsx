@@ -1033,8 +1033,22 @@ async function takeCommand($: EngineInterface, d: string, now: number) {
     const done = await $.fs.read(doneFile).then(r => JSON.parse(typeof r === 'string' ? r : '{}').nonce).catch(() => undefined)
     if (done === c.nonce) return
     await $.fs.write(doneFile, JSON.stringify({ nonce: c.nonce, at: now }))
+    phoneAsk = c.text
     void $.prompt.submit({ text: `📱 ${c.text}`, asUser: true }).catch(() => undefined)
   } catch {}
+}
+
+// 每輪結束把最後的回覆寫到 replies/<session>.json，手機卡片顯示（jacky 2026-10-27：看不到回應就不知道要跟他說什麼）
+// 只存主對話；那一輪若是手機命令觸發的，帶上那道命令
+export const REPLY_MAX = 8000
+let phoneAsk: string | undefined
+async function saveReply($: EngineInterface, answer: string) {
+  if (me.id === 'me' || me.oneshot) return
+  const ask = phoneAsk
+  phoneAsk = undefined
+  const d = await sharedDir($)
+  const text = answer.length > REPLY_MAX ? `${answer.slice(0, REPLY_MAX)}\n…（後面截掉）` : answer
+  await $.fs.write(`${officeRoot(d)}/replies/${me.id}.json`, JSON.stringify({ text, at: await $.clock.now(), ask }))
 }
 
 /** tool_input → 給人看的全文：Bash／PowerShell 取 command，其他整份 JSON */
@@ -1651,6 +1665,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (!e.agentId && e.answer) void saveReply($, e.answer).catch(() => undefined)
     try {
       await setMode($, 'done')
       revertLater($, 5000, 'idle')

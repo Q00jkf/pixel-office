@@ -27,12 +27,16 @@
   #say button { border: 0; border-radius: 6px; padding: 0 16px; background: var(--bar); color: #fff; font: inherit; }
   #say button:disabled { opacity: .5; }
   #sent { color: var(--dim); font-size: 13px; margin-top: 4px; }
+  #reply { margin-top: 10px; border-top: 1px solid #ccd; padding-top: 8px; }
+  #reply .head { color: var(--dim); font-size: 13px; }
+  #reply pre { margin: 4px 0 0; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif; background: #fff; border-radius: 6px; padding: 8px; }
 </style>
 </head>
 <body>
 <header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span></header>
 <main><img id="scene" alt="像素辦公室"></main>
 <div id="card"><button id="close" aria-label="關閉">×</button><div id="info"></div>
+  <div id="reply"></div>
   <form id="say"><textarea id="text" placeholder="對他下命令（等於你在他的視窗打字）" enterkeyhint="send"></textarea><button id="send">送出</button></form>
   <div id="sent"></div></div>
 <script>
@@ -75,6 +79,13 @@
     if (!p) { picked = undefined; card.style.display = 'none'; return }
     if (!refresh && picked !== p.id) document.getElementById('text').value = ''
     picked = p.id
+    const rep = document.getElementById('reply')
+    const pre = rep.querySelector('pre')
+    const keep = pre && pre.dataset.at === String(p.reply?.at) // 同一則回覆：不重畫，捲到哪就停在哪
+    if (!keep) rep.innerHTML = p.reply
+      ? `<div class="head">最新回覆（${ago(p.reply.at)}）${p.reply.ask ? `・回你：📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><pre data-at="${p.reply.at}">${esc(p.reply.text)}</pre>`
+      : '<div class="head">還沒有回覆紀錄（對方要裝 0.23.0 以上，講完一輪才會有）</div>'
+    else rep.querySelector('.head').textContent = `最新回覆（${ago(p.reply.at)}）` + (p.reply.ask ? `・回你：📱 ${p.reply.ask.slice(0, 40)}` : '')
     document.getElementById('sent').textContent = p.cmd ? `上一道：「${p.cmd.text.slice(0, 40)}」— ${CMD[p.cmd.state]}（${ago(p.cmd.at)}）` : ''
     const row = (k, v) => v ? `<div><span class="k">${k}</span>${v}</div>` : ''
     document.getElementById('info').innerHTML =

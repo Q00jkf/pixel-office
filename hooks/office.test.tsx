@@ -2433,6 +2433,7 @@ test('a command from the phone is submitted once as the user\'s own words with �
     submitted.push(e)
     return { text: e.text } as any
   })
+  on('turn.complete', () => ({ text: '' }) as any)
   on('command.register', () => ({ value: undefined }) as any)
   on('tool.register', () => ({ value: undefined }) as any)
   on('session.start', (_$: any, e: any) => e)
@@ -2443,6 +2444,18 @@ test('a command from the phone is submitted once as the user\'s own words with �
   await clock.advance(3000)
   expect(submitted.map(e => [e.text, e.origin?.asUser ?? e.asUser])).toEqual([['📱 整理一下今天的進度', true]])
   expect(JSON.parse(files['commands/aaaa1111.done.json']).nonce).toBe('n1')
+  // 那一輪講完：回覆寫到 replies/，帶上手機那道命令；子代理的不寫、下一輪不再帶命令
+  await ($ as any).turn.complete({ answer: '進度：A 完成、B 進行中', durationMs: 5, isAborted: false, turnId: 't1' })
+  await clock.advance(1)
+  expect(JSON.parse(files['replies/aaaa1111.json'])).toMatchObject({ text: '進度：A 完成、B 進行中', ask: '整理一下今天的進度' })
+  await ($ as any).turn.complete({ answer: '子代理的報告', durationMs: 5, isAborted: false, turnId: 't2', agentId: 'ag1' })
+  await clock.advance(1)
+  expect(JSON.parse(files['replies/aaaa1111.json']).text).toBe('進度：A 完成、B 進行中')
+  await ($ as any).turn.complete({ answer: 'x'.repeat(9000), durationMs: 5, isAborted: false, turnId: 't3' })
+  await clock.advance(1)
+  const long = JSON.parse(files['replies/aaaa1111.json'])
+  expect(long.ask).toBeUndefined()
+  expect(long.text.endsWith('（後面截掉）')).toBe(true)
   // 重載外掛（模組變數歸零）也靠 done 檔不再送
   await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
   await clock.advance(3000)
