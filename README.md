@@ -133,6 +133,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 下命令（0.22.0）：卡片下方輸入框送出 → 伺服器寫 `commands/<session>.json` → 那個 session 的外掛每秒來拿，當成使用者打的字送進對話（前面 📱）。對方要裝 0.22.0 以上；10 分鐘沒被收就作廢；回覆不傳回手機
 - 最新回覆（0.23.0）：每個 session 每輪結束把最後的回覆寫到 `replies/<session>.json`（上限 8000 字），卡片顯示；回手機命令的那輪會標「回你：📱 …」。Markdown 照原文顯示
 - 團隊分區：手機只有 2 欄，一隊佔一整排（8 個位子）、由上往下，沒 team 的人坐下面；排不下就把畫面加長，頁面上下滑
+- 主畫面圖示：`remote/build_icon.py` 從素材表拼出 `icon-192.png`／`icon-512.png`／`icon-maskable.png`（Android 不吃 SVG 圖示），改圖就重跑
 - 測試：`bun test plugins/pixel-office/remote`（檔名 `.spec.ts`：`claude plugin test` 會載入所有 `.test.ts`）
 
 ### 圖素：2dPig Pixel Office（CC0）
