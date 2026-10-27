@@ -26,6 +26,7 @@ let dir = ''
 let lastCrew = ''
 let me: Coworker = { id: 'me', name: 'me', mode: 'idle', tool: '', isMe: true, role: 'staff' }
 let others: Coworker[] = []
+let oneshots: Coworker[] = [] // 別的 session 裡的一次性對話（claude -p）：不進 others，不畫成員工
 let walkers: Walker[] = []
 let nightMode = false
 let pet: Pet = 'cat'
@@ -130,7 +131,7 @@ function liveWalkers(): Walker[] {
   return walkers
 }
 
-const everyone = (): Coworker[] => [me, ...others].sort((a, b) => a.id.localeCompare(b.id))
+const everyone = (): Coworker[] => [me, ...others].filter(c => !c.oneshot).sort((a, b) => a.id.localeCompare(b.id))
 
 async function sharedDir($: EngineInterface): Promise<string> {
   if (dir === '') {
@@ -491,8 +492,8 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
-  defaultName = plateName(await $.session.cwd(), id)
-  me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff' }
+  defaultName = launchPlate(launchName) ?? plateName(await $.session.cwd(), id)
+  me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff', ...(oneshotRun ? { oneshot: true, label: launchName } : {}) }
   // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
   const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
   const ownRaw = await readOwnStatus($, id)
@@ -555,7 +556,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, label: me.label, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -639,8 +640,9 @@ function doingText(c: Coworker, now: number): string {
 }
 
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
-export function roster(list: Coworker[], now: number): string {
-  if (list.length === 0) return '辦公室目前沒有人。'
+export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = []): string {
+  const extra = oneshot.length > 0 ? `\n一次性對話（claude -p，不列入名單）：${oneshotText(oneshot)}` : ''
+  if (list.length === 0) return `辦公室目前沒有人。${extra}`
   const sorted = [...list].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
   const rows = sorted.map(c => {
     const stale = titleStale(c)
@@ -660,7 +662,7 @@ export function roster(list: Coworker[], now: number): string {
     '| 名牌 | 職稱 | 角色 | ListAgents 名稱（SendMessage 用） | ref | 目前 |',
     '|---|---|---|---|---|---|',
   ]
-  return [...head, ...rows].join('\n')
+  return [...head, ...rows].join('\n') + extra
 }
 
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
@@ -784,11 +786,14 @@ async function refresh($: EngineInterface) {
           sentTo: typeof s.sentTo === 'string' ? s.sentTo : undefined,
           sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
           gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
+          oneshot: s.oneshot === true ? true : undefined,
+          label: typeof s.label === 'string' && s.label.length > 0 ? s.label : undefined,
         })
       }
     } catch {}
   }
-  others = found
+  others = found.filter(c => !c.oneshot)
+  oneshots = found.filter(c => c.oneshot)
   // 進入／離開開會：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
   // 臨時會議：~/.claude/pixel-office/meeting.json 的 {"until": <ms>} 在期限前算開會（主管寫檔，各視窗都看得到）
   let until = 0
@@ -938,6 +943,38 @@ async function saveProfile($: EngineInterface) {
 }
 
 let sessionTitle: string | undefined // classic SessionStart／UserPromptSubmit 帶的 session_title（--name 或自動標題）
+let launchName: string | undefined // 啟動時的 --name（classic SessionStart、source＝startup 的 session_title）
+let oneshotRun = false // session.start 的 isInteractive＝false：claude -p 或 SDK
+
+/** --name → 預設名牌：去掉非 ASCII、截到 12 字，至少 2 字才用（名牌只能 ASCII，Raster 畫不出中文） */
+export function launchPlate(name: string | undefined): string | undefined {
+  const ascii = (name ?? '').replace(/[^\x21-\x7e]/g, '').slice(0, 12)
+  return ascii.length >= 2 ? ascii : undefined
+}
+
+/** 記下 --name：一次性對話拿它分組；互動 session 名牌還是預設的（沒手動設過）就換成它 */
+async function noteLaunchName($: EngineInterface, t: string) {
+  launchName = t
+  if (me.id === 'me') return // adopt 會套用
+  const plate = launchPlate(t)
+  if (me.oneshot) me = { ...me, label: t }
+  if (plate && me.name === defaultName) {
+    defaultName = plate
+    me = { ...me, name: plate }
+  }
+  await publish($, false)
+}
+
+/** 一次性對話依 --name 前綴分組（第一個 - 之前；沒帶 --name 的歸「一次性」），人數多的在前 */
+export function oneshotGroups(list: Coworker[]): { label: string; n: number }[] {
+  const by = new Map<string, number>()
+  for (const c of list) {
+    const k = c.label ? c.label.split('-')[0] || c.label : '一次性'
+    by.set(k, (by.get(k) ?? 0) + 1)
+  }
+  return [...by].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n || Number(a.label === '一次性') - Number(b.label === '一次性') || a.label.localeCompare(b.label))
+}
+export const oneshotText = (g: { label: string; n: number }[]) => g.map(x => `⚙ ${x.label} ×${x.n}`).join('　')
 
 /** 自動帶 title：有 session_title 就用，沒有用指令前 16 字；手動設過的不動 */
 async function autoTitle($: EngineInterface, head: string | undefined, now: number) {
@@ -952,6 +989,7 @@ async function noteSessionTitle($: EngineInterface, e: unknown) {
   const t = (e as { session_title?: unknown }).session_title
   if (typeof t !== 'string' || t.trim().length === 0 || t === sessionTitle) return
   sessionTitle = t
+  if (me.id === 'me') return // 還沒拿到編號：先記著，adopt 之後由 session.start 套用
   if (!me.title || me.titleAuto) {
     me = { ...me, title: undefined }
     await autoTitle($, undefined, await $.clock.now())
@@ -1295,7 +1333,9 @@ export const register: Register = on => {
       instance = crypto.randomUUID()
       await update($, instanceRef, () => instance)
     }
+    oneshotRun = e.isInteractive === false
     await adopt($, await $.session.id())
+    if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
     const savedPet = await $.store.get('pet').catch(() => undefined)
     if (isPet(savedPet)) {
@@ -1367,7 +1407,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: ROSTER }, async $ => {
     await refresh($).catch(() => undefined)
-    return { result: roster(everyone(), await $.clock.now()) }
+    return { result: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots)) }
   })
 
   on('tool.describe', { tool: TOOL }, async ($, e, next) => {
@@ -1510,7 +1550,7 @@ export const register: Register = on => {
     }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
-      return { text: roster(everyone(), await $.clock.now()) }
+      return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots)) }
     }
     if (sub !== '' && sub !== undefined) return { text: '用法：/office｜/office who｜/office role 主管|員工｜/office title <職稱>｜/office name <英數字>｜/office agent <ListAgents 名稱>｜/office team <主管>|off｜/office auto on|off｜/office approve on|off（替別人按核准，預設關）｜/office buttons（重讀個人按鈕）｜/office bite [名牌]（放貓咬人／放寶寶抱大腿）｜/office pet [cat|baby|bird]（貓、小寶寶、山雀切換）｜/office meeting [off]（會議狀態／散會）｜/office hits（Desktop 點擊範圍校準顯示）' }
 
@@ -1532,6 +1572,9 @@ export const register: Register = on => {
   })
 
   on('classic.SessionStart', async ($, e, next) => {
+    // startup 時的 session_title 就是 --name（實測 claude -p --name API-probe-01-1）；resume 帶的可能是自動標題，不當 --name
+    const t = (e as { session_title?: unknown; source?: unknown }).session_title
+    if ((e as { source?: unknown }).source === 'startup' && typeof t === 'string' && t.trim().length > 0) await noteLaunchName($, t.trim()).catch(() => undefined)
     await noteSessionTitle($, e).catch(() => undefined)
     return next(e)
   })
@@ -1636,7 +1679,7 @@ export const register: Register = on => {
           rows = sr
         }
         lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees)
-        const v = drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock, corgiFed }) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
+        const v = drawVector(shown, frame, width, rows, liveWalkers(), lastPlaced, { ...sceneOpts(), clock, corgiFed, oneshots: oneshotGroups(oneshots) }) // Desktop 畫 2dPig 素材＋向量名牌；終端機照舊點陣
         svg = vectorSvg(v)
         lastHits = v.hits
         lastFixed = v.fixed
@@ -1710,6 +1753,7 @@ export const register: Register = on => {
         <Box flexDirection="row">
           <Button key="night" label={nightMode ? '開燈' : '夜間模式'} hotkey="n" onPress={toggleNight} />
           {petNote && frame < petNote.until ? <Text dimColor>{`  ${petNote.text}`}</Text> : null}
+          {oneshots.length > 0 ? <Text key="oneshot" dimColor>{`  ${oneshotText(oneshotGroups(oneshots))}`}</Text> : null}
         </Box>
       </Box>
     )

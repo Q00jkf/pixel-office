@@ -2225,3 +2225,111 @@ test('desktop hit areas reach further out but never into a neighbour’s own are
     }
   }
 })
+
+// ---------- 0.19.0（G4）：claude -p 一次性對話不畫成員工、--name 當名牌、me.json 垃圾檔 ----------
+
+import { launchPlate, oneshotGroups, oneshotText } from './register'
+
+test('one-shot groups: --name prefix before the first dash, no --name is 一次性, biggest first', () => {
+  const o = (id: string, label?: string) => ({ ...P(id, id), oneshot: true, label })
+  const g = oneshotGroups([o('a', 'API-標籤正本-02-3'), o('b', 'API-標籤正本-02-4'), o('c'), o('d', 'nightly')])
+  expect(g).toEqual([{ label: 'API', n: 2 }, { label: 'nightly', n: 1 }, { label: '一次性', n: 1 }])
+  expect(oneshotText(g)).toBe('⚙ API ×2　⚙ nightly ×1　⚙ 一次性 ×1')
+})
+
+test('--name as the default plate: ASCII only, cut to 12, at least 2 characters', () => {
+  expect(launchPlate('API-probe-01-1')).toBe('API-probe-01')
+  expect(launchPlate('ofimpl')).toBe('ofimpl')
+  expect(launchPlate('辦公室實作')).toBeUndefined()
+  expect(launchPlate('6a主管')).toBe('6a')
+  expect(launchPlate(undefined)).toBeUndefined()
+})
+
+test('the roster leaves one-shot runs out and counts them on one line', () => {
+  const out = roster([P('a', 'alpha')], 1_000_000, [{ label: 'API', n: 3 }])
+  expect(out).toContain('alpha')
+  expect(out).toContain('一次性對話（claude -p，不列入名單）：⚙ API ×3')
+  expect(roster([], 1_000_000, [{ label: 'API', n: 1 }])).toContain('⚙ API ×1')
+})
+
+const G4_FILES = (NOW: number): Record<string, string> => ({
+  'sessions/g4b.json': JSON.stringify({ id: 'g4b', name: 'hub', role: 'staff', mode: 'typing', tool: 'Bash', updatedAt: NOW - 1000, left: false }),
+  'sessions/g4k1.json': JSON.stringify({ id: 'g4k1', name: 'kb', role: 'staff', mode: 'typing', tool: 'Bash', oneshot: true, label: 'API-標籤正本-02-3', updatedAt: NOW - 1000, left: false }),
+  'sessions/g4k2.json': JSON.stringify({ id: 'g4k2', name: 'kb', role: 'staff', mode: 'thinking', tool: '', oneshot: true, label: 'API-標籤正本-02-4', updatedAt: NOW - 1000, left: false }),
+  'sessions/g4k3.json': JSON.stringify({ id: 'g4k3', name: 'kb', role: 'staff', mode: 'idle', tool: '', oneshot: true, updatedAt: NOW - 1000, left: false }),
+})
+const G4_MOCKS = (on: any, files: Record<string, string>, NOW: number) => {
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('clock.now', () => ({ value: NOW }))
+  on('fs.list', () => ({ value: Object.keys(files).filter(k => k.startsWith('sessions/')).map(k => ({ name: k.slice(9), kind: 'file', size: 1, mtimeMs: NOW, isLink: false })) }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).slice(-2).join('/')] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.split(/[\\/]/).slice(-2).join('/')] = e.text
+    return { value: undefined }
+  })
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('classic.SessionStart', () => ({}) as any)
+}
+
+test('one-shot runs never sit at a desk: the terminal shows a badge line, the desktop a badge, the roster a count', async ($, on) => {
+  const NOW = 1_000_000
+  const files = G4_FILES(NOW)
+  G4_MOCKS(on, files, NOW)
+  await $.command.run({ command: 'office', args: '' } as any)
+  const ui = await $.ui.mount({ ...PANE_PROPS, viewport: { columns: 140, rows: 46 } })
+  const raster = await ui.find({ type: 'Raster', key: 'scene' })
+  const p = raster!.props as { cells: string; columns: number; rows: number }
+  const text = cellText(p.cells, p.columns, p.rows).join('\n')
+  expect(text).toContain('hub')
+  expect(text).not.toContain('kb')
+  expect((await ui.find({ type: 'Text', text: /⚙/ }))?.text).toContain('⚙ API ×2　⚙ 一次性 ×1')
+  await ui.unmount()
+
+  const desk = await $.ui.mount({ ...PANE_PROPS, surface: 'desktop', props: { ...PANE_PROPS.props, bodyColumns: 112, scroll: { offset: 0, bodyRows: 64 } } } as any)
+  const svg = String((await desk.find({ type: 'Svg' }))!.props.source)
+  expect(svg).toContain('⚙ API ×2')
+  expect(svg).toContain('⚙ 一次性 ×1')
+  expect(svg).not.toContain('>kb<')
+  await desk.unmount()
+
+  const who = (await $.command.run({ command: 'office', args: 'who' } as any)).text as string
+  expect(who).toContain('hub')
+  expect(who).not.toMatch(/\| kb \|/)
+  expect(who).toContain('⚙ API ×2')
+})
+
+const G4_START = (on: any, files: Record<string, string>, sid: string) => {
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: sid }) as any)
+  on('session.cwd', () => ({ value: 'C:/work/kb' }) as any)
+  mock.store(on)
+}
+
+test('claude -p with --name: classic SessionStart first leaves no me.json, then the run publishes oneshot + label under its own id', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW)
+  G4_START(on, files, 'p1')
+  await ($ as any).classic.SessionStart({ hook_event_name: 'SessionStart', source: 'startup', session_id: 'p1', transcript_path: '', cwd: 'C:/work/kb', session_title: 'API-標籤正本-02-3' })
+  expect(files['sessions/me.json']).toBeUndefined()
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
+  const mine = JSON.parse(files['sessions/p1.json'])
+  expect(mine.oneshot).toBe(true)
+  expect(mine.label).toBe('API-標籤正本-02-3')
+  expect(files['sessions/me.json']).toBeUndefined()
+})
+
+test('an interactive session started with --name gets it as its plate instead of the folder name; not marked one-shot', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW)
+  G4_START(on, files, 'i1')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['sessions/i1.json']).name).toBe('kb')
+  await ($ as any).classic.SessionStart({ hook_event_name: 'SessionStart', source: 'startup', session_id: 'i1', transcript_path: '', cwd: 'C:/work/kb', session_title: 'drill2' })
+  const mine = JSON.parse(files['sessions/i1.json'])
+  expect(mine.name).toBe('drill2')
+  expect(mine.oneshot).toBeUndefined()
+})

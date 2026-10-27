@@ -53,6 +53,10 @@ export type Coworker = {
   sentAt?: number
   /** 最近一次收到別的 session 的訊息（ms） */
   gotAt?: number
+  /** 非互動的一次性對話（claude -p、SDK）：不畫成員工，在走廊收成一個「⚙ <前綴> ×N」徽章 */
+  oneshot?: boolean
+  /** 啟動時的 --name（classic SessionStart 的 session_title）：一次性對話靠它的前綴分組 */
+  label?: string
 }
 
 /** 個人按鈕（~/.claude/pixel-office/buttons.json）：prompt 送給這個視窗，url 用瀏覽器開 */

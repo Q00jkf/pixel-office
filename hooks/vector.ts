@@ -426,6 +426,23 @@ function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame
   if (extra > 0) plusBadge(p, x + DESK_W - 1, y + 0.2, extra)
 }
 
+/**
+ * 一次性對話（claude -p）的徽章：櫃台右邊由下往上疊，一組一顆「⚙ <前綴> ×N」；
+ * 窄到沒畫櫃台時（櫃台右邊就是影印桌）改放檔案櫃右上、家具那排上方。畫在名牌那層（最上層），走過的人蓋不到
+ */
+function oneshotBadges(p: Pen, w: number, h: number, groups: { label: string; n: number }[]) {
+  const counter = counterSpot(w, h / 2) !== undefined
+  const x = counter ? counterX(w) + COUNTER_W + 1 : CABINET_X + 7
+  const y0 = counter ? h - WALL - 3 : h - WALL - 9
+  groups.forEach((g, i) => {
+    const t = fitText(`⚙ ${g.label} ×${g.n}`, 18, 1.6)
+    const bw = textWidth(t, 1.6) + 1.2
+    const y = y0 - i * 2.6
+    p.labelRect(x, y - 1.6, bw, 2.2, SW.ink, 1)
+    p.labels.push({ k: 'text', x: x + 0.6, y, text: t, size: 1.6, fill: SW.cyan, bold: true })
+  })
+}
+
 /** 坐不下的主管數：桌角一顆小徽章，不擠進名牌 */
 function plusBadge(p: Pen, cx: number, cy: number, extra: number) {
   const t = `+${extra}`
@@ -464,7 +481,7 @@ function hearts(p: Pen, x: number, y: number) {
 // ---------- 組合（跟 drawScene 同一套判斷） ----------
 
 /** opts.clock：牆上時鐘顯示的字（例如現在時間 "14:05"）；沒給就照素材原圖 12:00。opts.corgiFed：餵柯基的那一格 */
-export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string; corgiFed?: number } = {}): VectorScene {
+export function drawVector(crew: Coworker[], frame: number, width: number, rows: number, walkers: Walker[] = [], seating?: Map<string, Placement>, opts: SceneOptions & { clock?: string; corgiFed?: number; oneshots?: { label: string; n: number }[] } = {}): VectorScene {
   crew = crew.map(c => (c.blocked ? { ...c, mode: 'blocked' as const } : c))
   const L = layout(width, rows)
   const p = new Pen(opts.night === true)
@@ -608,6 +625,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     if (a) p.path(`M${a.x + 0.5} ${a.y + 0.5}l${-a.dx * 2.6} -1.3 ${a.dx * 0.6} 1.3 ${-a.dx * 0.6} 1.3Z`, C.plane, C.planeFold, 0.2)
   }
 
+  oneshotBadges(p, width, L.h, opts.oneshots ?? [])
   const extra = crew.length - placed.size - bosses.extra
   if (extra > 0) p.text(WALL + 0.5, 1.6, `+${extra}`, 1.8, C.white, { bold: true })
   // 每件東西所在的房間：上排會議室／主管室，其餘是員工區＋走廊
