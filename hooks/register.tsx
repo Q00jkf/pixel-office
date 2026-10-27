@@ -1304,6 +1304,27 @@ function approvalRows($: EngineInterface, els: Record<string, any>, now: number)
 }
 
 // 暫時狀態：ms 後若沒被別的狀態蓋掉，就切回 to
+/**
+ * 自己跑一次 ListAgents，從「This session is X [ref]」登記 ListAgents 名稱：外掛直接叫工具、不經模型，不花 tokens。
+ * 會跳權限詢問（tool.check 不是 allow）就不跑。沒名字的 session，ListAgents 不印自己那行 → 'unnamed'
+ * （jacky 2026-10-27：finance 沒登記，別的 session 傳訊息找不到它）
+ */
+async function selfRegister($: EngineInterface): Promise<'ok' | 'unnamed' | 'skipped'> {
+  if (me.oneshot) return 'skipped'
+  try {
+    const verdict = await $.tool.check({ tool: 'ListAgents', input: {} })
+    if (verdict.decision !== 'allow') return 'skipped'
+    const ran: any = await $.tool.call({ tool: 'ListAgents' } as any)
+    const out = ran?.text ?? (typeof ran?.result === 'string' ? ran.result : '') // core 給 text；別的外掛自己回答時只有 result
+    const self = ran?.deny === undefined ? selfFromListAgents(out) : undefined
+    if (!self) return 'unnamed'
+    if (self.name !== me.agent || self.ref !== me.ref) await applyProfile($, { agent: self.name, ref: self.ref })
+    return 'ok'
+  } catch {
+    return 'skipped'
+  }
+}
+
 function revertLater($: EngineInterface, ms: number, to: OfficeMode) {
   const mine = seq
   $.clock.after(ms, () => {
@@ -1391,6 +1412,7 @@ export const register: Register = on => {
     $.clock.every(5000, () => void followSession($).then(() => publish($, false)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
+    $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
 
     return next(e)
   })
@@ -1594,8 +1616,12 @@ export const register: Register = on => {
       .then(d => $.fs.write(`${d.replace(/\/sessions$/, '')}/debug-open.json`, JSON.stringify({ at, session: me.id, opened, surfaces })))
       .catch(() => undefined)
     if (!opened.isPlaced) return { text: `像素辦公室沒有畫出來：${opened.reason}（接著的畫面：${where}）` }
-
-    return { text: `像素辦公室已開啟。你是${ROLE_LABEL[me.role]}，名牌 ${me.name}。（接著的畫面：${where}）` }
+    const reg = await selfRegister($)
+    const tag =
+      reg === 'ok' ? `ListAgents 名稱 ${me.agent}${me.ref ? ` [${me.ref}]` : ''}，別人傳得到你。`
+      : reg === 'unnamed' ? '這個 session 沒有名字，別人用 SendMessage 找不到你：用 /rename <名字> 取個名字，再打一次 /office。'
+      : '沒能自動登記 ListAgents 名稱（要權限）：跑一次 ListAgents 或 /office agent <名稱>。'
+    return { text: `像素辦公室已開啟。你是${ROLE_LABEL[me.role]}，名牌 ${me.name}。${tag}（接著的畫面：${where}）` }
   })
 
   // 模型自己設定角色／名牌

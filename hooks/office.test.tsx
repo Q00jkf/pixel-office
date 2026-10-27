@@ -2465,3 +2465,33 @@ test('a command from the phone is submitted once as the user\'s own words with �
   await clock.advance(3000)
   expect(submitted).toHaveLength(1)
 })
+
+// ---------- 0.24.0：/office 自己跑 ListAgents 登記 ----------
+
+test('/office runs ListAgents itself (no model) to register the ListAgents name; unnamed sessions and permission prompts are reported', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const files: Record<string, string> = {}
+  const key = (path: string) => path.split(/[\/]/).slice(-2).join('/')
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[key(e.path)] = e.text
+    return { value: undefined }
+  })
+  on('session.id', () => ({ value: 'ffff0001' }) as any)
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('session.surfaces', () => ({ value: ['desktop'] }) as any)
+  let decision = 'allow'
+  let listing = 'Peer sessions (1):\n  x [111111]\n\nThis session is Daily check [2b3c4d]'
+  on('tool.check', () => ({ decision }) as any)
+  on('tool.call', { tool: 'ListAgents' }, () => ({ result: listing }) as any)
+  const out = await $.command.run({ command: 'office', args: '' } as any)
+  expect(out.text).toContain('ListAgents 名稱 Daily check [2b3c4d]')
+  expect((await $.command.run({ command: 'office', args: 'who' } as any)).text).toContain('Daily check') // 名單上有了
+  listing = 'Peer sessions (1):\n  x [111111]'
+  expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('/rename')
+  decision = 'ask'
+  expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('沒能自動登記')
+})
