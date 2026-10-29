@@ -1,5 +1,12 @@
 # pixel-office（像素辦公室）
 
+> **English** — A Claude Code plugin that turns every running Claude Code session into a pixel-art coworker in a shared office: see who is typing, thinking, stuck, or waiting for your approval at a glance.
+> - **Claude × Google Antigravity in one office** — Antigravity CLI conversations join the same office (blue-violet **G** badge) and exchange messages with Claude sessions; agy waits for the reply and continues on its own.
+> - **Multi-session teamwork** — one skill (`team`): managers, two-layer org (department leads with their own squads), role cards, meetings.
+> - **Remote from your phone** — a local server + Cloudflare Tunnel/Access lets you watch the office and send a command to any session.
+>
+> Install: `/plugin marketplace add Q00jkf/pixel-office` → `/plugin install pixel-office@pixel-office` → restart → `/office`. Docs below are in Traditional Chinese.
+
 把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事，加上多 session 協作的做法。
 **Claude 和 Google Antigravity 也能坐進同一間辦公室、互相寄信分工。**
 
