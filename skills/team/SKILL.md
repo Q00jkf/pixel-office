@@ -1,6 +1,6 @@
 ---
 name: team
-description: "Multi-session collaboration: layers (solo / manager / department leads), stepping up or down as manager, role cards generated from a rule set the user names (AIMM, gstack, a project flow), takeover, checkpoints, dispatch, reports, meetings. Also for peer reports, 📋 meeting notices, 請裁示, demotion reminders. Triggers: 當主管, 升層, 降層, 設角色, 角色卡, 接手, 派工, 誰在動, 開會, 請裁示, 存檢查點, collab.md."
+description: "Multi-session collaboration: layers (solo / manager / department leads), stepping up or down as manager, role cards generated from a rule set the user names (AIMM, gstack, a project flow), squads (machine-wide reusable layer-2 crews: 研發+測試, PM+採購…), takeover, checkpoints, dispatch, reports, meetings. Also for peer reports, 📋 meeting notices, 請裁示, demotion reminders. Triggers: 當主管, 升層, 降層, 部門主管, 小隊, 設角色, 角色卡, 接手, 派工, 誰在動, 開會, 請裁示, 存檢查點, collab.md."
 ---
 
 # team：一人多 session 協作
@@ -10,8 +10,8 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 
 | 你現在的情境 | 讀 |
 |---|---|
-| 「照 <規則> 設角色」、建角色卡、「你是 <角色>，接手」、存檢查點 | `roles.md` |
-| 要不要多開人（升層）、當主管、收到 peer 回報／佔用申請／BLOCKED、派工、降層提醒、「大家在幹嘛」 | `lead.md` |
+| 「照 <規則> 設角色」、建角色卡、建小隊、「你是 <角色>，接手」、存檢查點 | `roles.md` |
+| 要不要多開人（升層）、當主管或部門主管、開小隊、收到 peer 回報／佔用申請／BLOCKED、派工、降層提醒、「大家在幹嘛」 | `lead.md` |
 | 開會、收到 `📋 開會`、主持人送來「請裁示：」 | `meet.md` |
 
 ## 分層（外掛只管骨架，各層內容由規則產生）
@@ -20,10 +20,10 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 |---|---|---|
 | 0 | 一個 session 自己做完 | 員工 |
 | 1 | 主管開 session，一件事一條線（審查、測試另開） | 主管＋peer 掛 `team=<主管>` |
-| 2 | 專案主管底下分部門，部門用到才開 | 專案主管；部門主管＝`role=主管`＋`team=<專案主管>` |
+| 2 | 第 1 層的員工升成**部門主管**：自己跟使用者商討，從一個**小隊**挑人（研發、測試…）用到才開 | 部門主管＝`role=主管`＋`team=<上層主管>`；小隊成員掛 `team=<部門主管>` |
 
 - **升層**：session 判斷要多開人時**提議**，使用者說好才登記成主管（`lead.md` §1）。
-- **降層**：主管底下沒有在線的人滿 20 分鐘，外掛會在下一則指令附提醒；**問使用者**，只是暫時關視窗就照舊。外掛不自動改。
+- **降層**：主管（含部門主管）底下沒有在線的人滿 20 分鐘，外掛會在下一則指令附提醒；**問使用者**，只是暫時關視窗就照舊。外掛不自動改。
 
 ## 專案資料夾 `<主 repo>/.claude/office/`
 
@@ -38,6 +38,18 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 ```
 
 🔴 **一個檔只有一個寫的人**：多 session 改同一檔沒有鎖，後存檔無聲覆蓋先存檔。`collab.md` 只有主管寫（多位主管各寫自己那列）；別人用 `SendMessage` 回報，由主管登記。
+
+## 小隊 `~/.claude/office/squads/`（整台電腦共用）
+
+第 2 層的編制不屬於某個專案：一個小隊＝一組可重用的角色卡，任何專案的部門主管都能挑來用；要搬到別台就複製資料夾。外掛**不內建**小隊，由使用者指定規則產生（`roles.md` §5）。
+
+```
+~/.claude/office/squads/<小隊>/
+├─ squad.md          ← 什麼時候用、有哪些角色、source
+└─ roles/<角色>.md    ← 格式同專案卡，layer: 2
+```
+
+找卡的順序：**專案 `roles/` 先，小隊後**——專案要特別的測試就在專案放一張同名卡蓋過去，小隊那份不動。檢查點、`collab.md` 照樣寫在專案裡。
 
 ## 在知識庫（llm-wiki vault）裡
 
