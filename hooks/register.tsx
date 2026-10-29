@@ -666,7 +666,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const stale = titleStale(c)
     const doing = doingText(c, now) + (stale ? `・最新指令「${c.prompt!.text}」` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (自動)` : stale ? `${c.title}（${Math.round((now - c.titleAt!) / 60000)} 分前設）` : c.title
-    const agent = c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
+    const agent = c.kind === 'agy' ? 'Antigravity（不能傳訊）' : c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? '員工' : isDeptLead(c, list) ? '部門主管' : '主管'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)

@@ -1,6 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 
 import type { Coworker } from '../types'
+import { parseStatus } from './status'
 import { catPose, catRange, catWalkRows, drawScene, encode, layout, plateName, sceneRows, sceneWidth } from './scene'
 
 const P = (id: string, name: string, mode: Coworker['mode'] = 'idle', isMe = false, role: Coworker['role'] = 'staff'): Coworker => ({
@@ -2546,4 +2547,14 @@ test('demotion reminder: only a manager, only after 20 minutes with nobody under
   expect(shouldRemindDemote('manager', 0, DEMOTE_MS, true)).toBe(false)
   expect(shouldRemindDemote('staff', 0, DEMOTE_MS, false)).toBe(false)
   expect(shouldRemindDemote('manager', undefined, DEMOTE_MS, false)).toBe(false)
+})
+
+test('an Antigravity (agy) status file shows up as a coworker that cannot be messaged', () => {
+  const now = 50_000
+  const s = { id: 'agy-c1', kind: 'agy', name: 'wtoffice', mode: 'typing', tool: 'run_command', updatedAt: now - 1000, left: false, addr: 'x' }
+  const c = parseStatus(s, now)!
+  expect(c.kind).toBe('agy')
+  expect(roster([c], now)).toContain('| wtoffice | — | 員工 | Antigravity（不能傳訊） |')
+  expect(parseStatus({ ...s, left: true }, now)).toBeUndefined()
+  expect(parseStatus({ ...s, kind: 'other' }, now)!.kind).toBeUndefined()
 })

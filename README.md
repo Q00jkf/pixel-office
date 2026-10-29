@@ -155,6 +155,16 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office」](https://2dpig.itch.io/pixel-office)（CC0，原檔與授權在 `assets/2dpig/`）。
 `assets/build_sheet.py` 從原素材表去掉天空、加上換色人物，產生 `assets/office-sheet.png` 與 `hooks/sheet.ts`（base64＋裁切框）；改素材或換色就重跑，兩個產物都進 repo。SVG 裡素材表只嵌一次，每個圖素是巢狀 `<svg viewBox>` 以 `<use>` 裁切引用。
 
+## Antigravity CLI（agy，0.27.0 起：只顯示）
+
+`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事：名牌＝工作資料夾名、名單標「Antigravity（不能傳訊）」。
+
+- 安裝：`python <plugin>/agy/agy_office.py install` —— 複製到 `~/.claude/pixel-office/agy/`，在 `~/.gemini/config/hooks.json` 加「pixel-office」一組 hook（別的設定不動）；**新開的 agy 視窗**才生效。移除：`… uninstall`
+- hook 只接 `SessionStart`／`PreInvocation`／`PostInvocation`／`PostToolUse`／`Stop`，不接 `PreToolUse`（不碰 agy 的權限判斷）；任何錯都吞掉、exit 0，壞了也不會卡住 agy
+- 心跳：agy 閒著時沒有事件，由背景看守每 5 秒檢查 `~/.gemini/antigravity-cli/presence/<對話>.lock` 是否還被鎖（2026-10-29 實測：開著鎖、關掉放）；沒有 agy 在線 60 秒看守自己結束
+- 不存使用者打的字（hook 收到的 `lastUserInput` 直接丟掉）
+- 還不能傳訊：agy 沒有 SendMessage。官方文件說 `PreInvocation` 可回 `injectSteps` 塞訊息進對話，未實測
+
 ## 運作方式
 
 每個 session 每 5 秒把自己的狀態寫到 `~/.claude/pixel-office/sessions/<session-id>.json`（一個 session 一個檔，不互相覆蓋），每秒讀一次所有人的。超過 20 秒沒心跳或標記離開的不畫。只讀寫 `~/.claude/pixel-office/` 底下（sessions、approvals、decisions、commands、replies、meeting.json、buttons.json），不碰其他檔案、不連網。
