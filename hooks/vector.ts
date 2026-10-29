@@ -42,6 +42,7 @@ const SW = {
   navy: 0x29366f, blue: 0x3b5dc9, sky: 0x41a6f6, cyan: 0x73eff7, white: 0xf4f4f4, silver: 0x94b0c2, slate: 0x566c86, dark: 0x333c57,
 }
 const TEAM_TAG_BG = 0x0d1320
+const AGY = 0x7b61ff // agy 的藍紫：上衣邊（build_sheet.py）、G 徽章
 const FLOOR_BASE = 0xe4eef6 // 大廳玻璃磚底色：門洞、大門用同色
 const GLASS_EDGE = 0x3fc6e0
 const GOLD_SOFT = 0xe2cd85 // 主管室內圈金邊（金色淡一階）
@@ -324,10 +325,10 @@ function screen(p: Pen, x: number, y: number, w: number, mode: OfficeMode | null
   })
 }
 
-/** 造型：名字雜湊決定 5 個人物之一，再決定上衣顏色（主管一律深藍西裝） */
-export function lookOf(who: Pick<Coworker, 'name' | 'role'>): { person: number; shirt: number } {
+/** 造型：名字雜湊決定 5 個人物之一，再決定上衣顏色（主管一律深藍西裝、agy 一律白衣藍紫邊） */
+export function lookOf(who: Pick<Coworker, 'name' | 'role' | 'kind'>): { person: number; shirt: number } {
   const hh = hash(who.name)
-  return { person: hh % PEOPLE, shirt: who.role === 'manager' ? SHIRTS - 1 : Math.floor(hh / PEOPLE) % (SHIRTS - 1) }
+  return { person: hh % PEOPLE, shirt: who.role === 'manager' ? SHIRTS - 1 : who.kind === 'agy' ? SHIRTS - 2 : Math.floor(hh / PEOPLE) % (SHIRTS - 2) }
 }
 
 /**
@@ -382,9 +383,18 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
   }
 }
 
+/** agy 名牌右邊的藍紫 G 徽章（jacky 2026-10-29：衣服之外再加一眼可辨的記號） */
+const AGY_BADGE = 1.7
+
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
-  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW, NAME_SIZE, plateNo.get(who.id))
-  p.label(x, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
+  const badge = who.kind === 'agy' ? AGY_BADGE + 0.3 : 0
+  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
+  const tx = align === 'middle' ? x - badge / 2 : x
+  p.label(tx, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
+  if (!badge) return
+  const bx = tx + (align === 'middle' ? textWidth(t.text, t.size) / 2 : textWidth(t.text, t.size)) + 0.3
+  p.labelRect(bx, y - t.size * 0.85, AGY_BADGE, t.size * 1.05, AGY, 0.4)
+  p.label(bx + AGY_BADGE / 2, y - 0.2, 'G', t.size * 0.8, SW.white, { anchor: 'middle', bold: true, bg: AGY })
 }
 
 function carry(p: Pen, at: Step, kind: ErrandKind) {

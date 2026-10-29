@@ -40,7 +40,7 @@ PEOPLE = [
     ((3, 132, 17, 23), 9, (12, 17), {'41a6f6': 'base', '3b5dc9': 'dark'}, 20),
     ((22, 132, 17, 23), 9, (12, 17), {'b13e53': 'base', '5d275d': 'dark'}, 20),
 ]
-# 第 0 種＝原色；不用橘、黃（會跟膚色糊在一起）；最後一種是主管的深藍西裝（vector.ts 的 SUIT）
+# 第 0 種＝原色；不用橘、黃（會跟膚色糊在一起）；倒數第二種是 agy 的白衣藍紫邊（jacky 2026-10-29 選），最後一種是主管的深藍西裝（vector.ts 的 SUIT）
 SHIRTS = [
     None,
     {'base': 'b13e53', 'dark': '5d275d', 'light': 'ef7d57'},
@@ -49,6 +49,7 @@ SHIRTS = [
     {'base': '41a6f6', 'dark': '3b5dc9', 'light': '73eff7'},
     {'base': '257179', 'dark': '29366f', 'light': '73eff7'},
     {'base': '566c86', 'dark': '333c57', 'light': '94b0c2'},
+    {'base': 'f4f4f4', 'dark': '7b61ff', 'light': 'ffffff'},
     {'base': '29366f', 'dark': '1a1c2c', 'light': '3b5dc9'},
 ]
 
@@ -336,7 +337,7 @@ def main():
     ts = (
         '// 由 assets/build_sheet.py 產生，不要手改。素材：2dPig「Pixel Office」（CC0）https://2dpig.itch.io/pixel-office\n'
         f'export const SHEET_W = {sheet.width}\nexport const SHEET_H = {sheet.height}\n'
-        f'export const PEOPLE = {len(PEOPLE)}\nexport const SHIRTS = {len(SHIRTS)} // 第 0 種原色，最後一種主管西裝\n'
+        f'export const PEOPLE = {len(PEOPLE)}\nexport const SHIRTS = {len(SHIRTS)} // 第 0 種原色，倒數第二種 agy，最後一種主管西裝\n'
         f'export const CELL = {{ w: {CELL_W}, h: {CELL_H}, headX: 10, headY: 8.5 }}\n'
         f'export const SPRITES = {{\n{entries},\n}} as const\n'
         'export type SpriteId = keyof typeof SPRITES\n'

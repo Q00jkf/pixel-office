@@ -42,7 +42,7 @@ const C = {
   mon: 0x263238, off: 0x37474f, screen: 0x1e88e5, screenDim: 0x1565c0, code: 0x69f0ae, codeDim: 0x2e7d32,
   err: 0xe53935, errDark: 0xb71c1c, ok: 0x43a047, white: 0xffffff, ink: 0x90a4ae,
   key: 0xbdbdbd, keyDark: 0x9e9e9e, paper: 0xf5f5f5, mug: 0xfafafa, coffee: 0x6d4c41,
-  skin: 0xf0c8a0, suit: 0x1a237e, spark: 0xffeb3b, shoe: 0x212121,
+  skin: 0xf0c8a0, suit: 0x1a237e, agy: 0x7b61ff, spark: 0xffeb3b, shoe: 0x212121,
   potRim: 0xa1887f, soil: 0x5d4037, leaf: 0x66bb6a, leafMid: 0x4caf50, leafDark: 0x33691e, // 不可與螢幕／完成的綠撞色碼，否則夜裡會被當成發光
   copier: 0xbdbdbd, copierTop: 0x757575, led: 0x76ff03,
   text: 0x263238, me: 0x0d47a1, gold: 0xffd54f, goldDark: 0x8d6e00,
@@ -671,7 +671,7 @@ function unit(p: Px, x: number, y: number, who: Coworker | null, frame: number) 
 
   if (who) {
     person(p, x + 5, y + 1, who, frame, 1)
-    const tag = `${who.isMe ? '>' : ''}${who.role === 'manager' ? '*' : ''}${who.name}`
+    const tag = `${who.isMe ? '>' : ''}${who.role === 'manager' ? '*' : ''}${who.kind === 'agy' ? `${who.name.slice(0, 7)} G` : who.name}`
     const fg = who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text
     p.labels.push({ row: (y + 6) / 2, col: x + 1, text: tag.slice(0, 9), fg, bg: C.desk })
   }
@@ -684,7 +684,7 @@ function unit(p: Px, x: number, y: number, who: Coworker | null, frame: number) 
 function person(p: Px, cx: number, cy: number, who: Coworker, frame: number, dir: 1 | -1) {
   const mode = who.mode
   const hh = hash(who.id)
-  const shirt = who.role === 'manager' ? C.suit : SHIRTS[hh % SHIRTS.length]
+  const shirt = who.role === 'manager' ? C.suit : who.kind === 'agy' ? C.agy : SHIRTS[hh % SHIRTS.length]
   const hair = HAIR[(hh >> 4) % HAIR.length]
   const shake = mode === 'error' ? (frame % 2 ? 1 : -1) : 0
   const sy = dir === 1 ? cy + 1 : cy
@@ -755,7 +755,7 @@ function carry(p: Px, at: Step, kind: ErrandKind) {
 
 function walking(p: Px, at: Step, who: Coworker, frame: number) {
   const hh = hash(who.id)
-  const shirt = who.role === 'manager' ? C.suit : SHIRTS[hh % SHIRTS.length]
+  const shirt = who.role === 'manager' ? C.suit : who.kind === 'agy' ? C.agy : SHIRTS[hh % SHIRTS.length]
   const hair = HAIR[(hh >> 4) % HAIR.length]
   const cx = at.x
   const cy = at.y + 1

@@ -141,7 +141,7 @@ test('meeting-room nameplates stay inside the room, below the wall', () => {
 })
 
 // ---- 0.15.0：2dPig 素材 ----
-import { SHEET_PNG, SPRITES } from './sheet'
+import { SHEET_PNG, SHIRTS, SPRITES } from './sheet'
 import { lookOf } from './vector'
 
 const sprites = (v: ReturnType<typeof drawVector>) => v.shapes.concat(v.glow).filter((s): s is Sprite => s.k === 'sprite')
@@ -173,7 +173,8 @@ test('looks: one of 5 people by name hash, shirt colour varies beyond 5, manager
   expect(new Set(looks.map(l => l.person)).size).toBe(5)
   expect(new Set(looks.map(l => `${l.person}/${l.shirt}`)).size).toBeGreaterThan(10)
   expect(looks.every(l => l.shirt < 7)).toBe(true)
-  expect(lookOf({ name: 'office', role: 'manager' }).shirt).toBe(7)
+  expect(lookOf({ name: 'office', role: 'manager' }).shirt).toBe(8)
+  expect(lookOf({ name: 'research', role: 'staff', kind: 'agy' }).shirt).toBe(7)
   expect(lookOf({ name: '實作4', role: 'staff' })).toEqual(lookOf({ name: '實作4', role: 'staff' }))
   const who: Coworker = { id: 'a', name: 'peer-3', mode: 'idle', tool: '', isMe: false, role: 'staff' }
   const id = (f: number) => people(drawVector([who], f, 60, 44).shapes)[0].id
@@ -220,7 +221,7 @@ test('B2: cups on the desks stay clear of the nameplates', () => {
 
 test('B3: managers wear the suit but each has a different face', () => {
   for (const c of cases().filter(c => c.name.startsWith('max') || c.name.startsWith('night'))) {
-    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id.replace(/(l?[ab]|k)$/, '')).filter(id => id.endsWith('s7'))
+    const ids = people(drawVector(c.crew, c.frame, c.width, c.rows, c.walkers, c.seating, c.opts).shapes).map(s => s.id.replace(/(l?[ab]|k)$/, '')).filter(id => id.endsWith(`s${SHIRTS - 1}`))
     expect(ids.length).toBeGreaterThan(0)
     expect(new Set(ids).size).toBe(ids.length)
   }
@@ -322,4 +323,15 @@ test('the flying bird flaps between two frames with an SMIL animation, and still
   expect(f).toBeDefined()
   expect(svgAt(f)).toContain('values="1;0"')
   expect(svgAt(f)).toContain('values="0;1"')
+})
+
+test('agy: G badge after the nameplate (not part of the name), Claude sessions have none', () => {
+  const crew: Coworker[] = [
+    { id: 'a', name: 'research', mode: 'idle', tool: '', isMe: false, role: 'staff', kind: 'agy' },
+    { id: 'c', name: 'office', mode: 'idle', tool: '', isMe: false, role: 'staff' },
+  ]
+  const texts = drawVector(crew, 0, 60, 44).labels.flatMap(l => (l.k === 'text' ? [l.text] : []))
+  expect(texts.filter(t => t === 'G')).toHaveLength(1)
+  expect(texts.some(t => t.startsWith('resear') && !t.includes('G'))).toBe(true)
+  expect(texts).toContain('office')
 })
