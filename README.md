@@ -96,6 +96,10 @@ Claude（主管）◀── 回信：整理好的規格表 ───────
 
 說「開會」，讓幾個 session 討論出一個方案；被點名的人會走進會議室坐下，散會再走回座位。
 
+<img src="docs/meeting.png" alt="開會：dev、impl、test、pm 與 agy 的 research 坐進會議室，TEAM dev 的座位空出來" width="720">
+
+<sub>被點名的 5 位（含部門主管 ★dev 和 Antigravity 的 research）坐進會議室，TEAM dev 的座位空著；沒被點名的照常在座位上工作。</sub>
+
 ## 更多
 
 - 全部指令、個人按鈕、點人核准、手機版、畫面細節：[docs/使用說明.md](docs/使用說明.md)
