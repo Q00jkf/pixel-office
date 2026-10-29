@@ -94,7 +94,7 @@ export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
   seats = assignSeats(people, width, rows, seats, m.meeting, m.attendees)
   const by = new Map<string, number>()
   for (const c of oneshots) {
-    const k = c.label ? c.label.split('-')[0] || c.label : '一次性'
+    const k = c.label ? c.label.split('-')[0] || c.label : 'one-shot'
     by.set(k, (by.get(k) ?? 0) + 1)
   }
   const t = new Date(now)
@@ -104,7 +104,7 @@ export function sceneSvg(w: number, aspect: number, now = Date.now()): string {
   return vectorSvg(v)
 }
 
-const MODE_TEXT: Record<string, string> = { idle: '閒著', thinking: '思考中', typing: '打字中', reading: '讀檔中', waiting: '等你核准', done: '剛做完', blocked: '被擋下' }
+const MODE_TEXT: Record<string, string> = { idle: 'idle', thinking: 'thinking', typing: 'typing', reading: 'reading', waiting: 'waiting for you', done: 'just finished', blocked: 'blocked' }
 
 /** 手機點人用：每個人在上一張圖的位置（viewBox 座標）與詳細資料 */
 export function roster(now = Date.now()) {
@@ -165,8 +165,8 @@ export function lastReply(id: string): { text: string; at: number; ask?: string 
 /** 手機下命令：寫 commands/<session>.json，那個 session 的外掛每秒來拿（hooks/register.tsx takeCommand） */
 export function sendCommand(id: string, text: string, now = Date.now()): string | undefined {
   const t = text.trim()
-  if (t === '' || t.length > 4000) return '命令是空的或太長（上限 4000 字）'
-  if (!crew(now).people.some(c => c.id === id)) return '這個 session 已經不在線'
+  if (t === '' || t.length > 4000) return 'Command is empty or too long (max 4000 characters)'
+  if (!crew(now).people.some(c => c.id === id)) return 'This session is no longer online'
   mkdirSync(COMMANDS, { recursive: true })
   writeFileSync(join(COMMANDS, `${id}.json`), JSON.stringify({ nonce: crypto.randomUUID(), text: t, at: now }))
   return undefined
@@ -187,7 +187,7 @@ export function allowed(h: Headers, owner: string | undefined): boolean {
 }
 
 const PAGE = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
-const MANIFEST = JSON.stringify({ name: '像素辦公室', short_name: '辦公室', start_url: '/', display: 'standalone', background_color: '#e4eef6', theme_color: '#29366f', icons: [
+const MANIFEST = JSON.stringify({ name: 'Pixel Office', short_name: 'Office', start_url: '/', display: 'standalone', background_color: '#e4eef6', theme_color: '#29366f', icons: [
   { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
   { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
   { src: '/icon-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
@@ -214,7 +214,7 @@ if (import.meta.main) {
       if (url.pathname === '/command' && req.method === 'POST') {
         if (!sameOrigin(req)) return new Response('forbidden', { status: 403 })
         const b = await req.json().catch(() => ({}))
-        const err = typeof b.id === 'string' && typeof b.text === 'string' ? sendCommand(b.id, b.text) : '格式不對'
+        const err = typeof b.id === 'string' && typeof b.text === 'string' ? sendCommand(b.id, b.text) : 'Bad request'
         return Response.json(err ? { ok: false, error: err } : { ok: true }, { status: err ? 400 : 200, headers: nocache })
       }
       if (url.pathname === '/state.json') {
@@ -227,5 +227,5 @@ if (import.meta.main) {
       return new Response('not found', { status: 404 })
     },
   })
-  console.log(`pixel-office remote: http://127.0.0.1:${cfg.port}  owner=${cfg.owner ?? '（未設定：經 Cloudflare 的要求一律 403）'}`)
+  console.log(`pixel-office remote: http://127.0.0.1:${cfg.port}  owner=${cfg.owner ?? '(not set: requests via Cloudflare all get 403)'}`)
 }

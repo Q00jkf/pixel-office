@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,7 +7,7 @@
 <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
-<title>像素辦公室</title>
+<title>Pixel Office</title>
 <style>
   :root { --bg: #e4eef6; --ink: #1a1c2c; --dim: #566c86; --bar: #29366f; }
   * { box-sizing: border-box; }
@@ -34,11 +34,11 @@
 </style>
 </head>
 <body>
-<header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span></header>
-<main><img id="scene" alt="像素辦公室"></main>
-<div id="card"><button id="close" aria-label="關閉">×</button><div id="info"></div>
+<header><span id="count">Pixel Office</span><span id="stale">Disconnected, frozen at <b id="at"></b></span></header>
+<main><img id="scene" alt="Pixel Office"></main>
+<div id="card"><button id="close" aria-label="Close">×</button><div id="info"></div>
   <div id="reply"></div>
-  <form id="say"><textarea id="text" placeholder="對他下命令（等於你在他的視窗打字）" enterkeyhint="send"></textarea><button id="send">送出</button></form>
+  <form id="say"><textarea id="text" placeholder="Send a command (same as typing in its window)" enterkeyhint="send"></textarea><button id="send">Send</button></form>
   <div id="sent"></div></div>
 <script>
   const img = document.getElementById('scene')
@@ -62,19 +62,19 @@
       const s = state = await (await fetch('/state.json', { cache: 'no-store' })).json()
       if (picked) show(s.people.find(p => p.id === picked), true)
       const waiting = s.people.filter(p => p.mode === 'waiting').length
-      document.getElementById('count').textContent = `${s.people.length} 人在線` + (waiting ? `・${waiting} 人等你核准` : '')
+      document.getElementById('count').textContent = `${s.people.length} online` + (waiting ? ` · ${waiting} waiting for you` : '')
       document.getElementById('stale').style.display = 'none'
       lastOk = new Date()
     } catch {
-      document.getElementById('at').textContent = lastOk ? lastOk.toLocaleTimeString() : '（還沒連上過）'
+      document.getElementById('at').textContent = lastOk ? lastOk.toLocaleTimeString() : '(never connected)'
       document.getElementById('stale').style.display = 'inline'
     } finally {
       busy = false
     }
   }
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
-  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : `${Math.round(m / 60)} 小時前` }
-  const CMD = { pending: '已送出，等他收', delivered: '他已收到', expired: '10 分鐘沒被收，作廢了' }
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago` }
+  const CMD = { pending: 'sent, waiting for pickup', delivered: 'delivered', expired: 'not picked up in 10 min, discarded' }
   function show(p, refresh) {
     const card = document.getElementById('card')
     if (!p) { picked = undefined; card.style.display = 'none'; return }
@@ -84,20 +84,20 @@
     const pre = rep.querySelector('pre')
     const keep = pre && pre.dataset.at === String(p.reply?.at) // 同一則回覆：不重畫，捲到哪就停在哪
     if (!keep) rep.innerHTML = p.reply
-      ? `<div class="head">最新回覆（${ago(p.reply.at)}）${p.reply.ask ? `・回你：📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><pre data-at="${p.reply.at}">${esc(p.reply.text)}</pre>`
-      : '<div class="head">還沒有回覆紀錄（對方要裝 0.23.0 以上，講完一輪才會有）</div>'
-    else rep.querySelector('.head').textContent = `最新回覆（${ago(p.reply.at)}）` + (p.reply.ask ? `・回你：📱 ${p.reply.ask.slice(0, 40)}` : '')
-    document.getElementById('sent').textContent = p.cmd ? `上一道：「${p.cmd.text.slice(0, 40)}」— ${CMD[p.cmd.state]}（${ago(p.cmd.at)}）` : ''
+      ? `<div class="head">Latest reply (${ago(p.reply.at)})${p.reply.ask ? ` · to you: 📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><pre data-at="${p.reply.at}">${esc(p.reply.text)}</pre>`
+      : '<div class="head">No reply yet (needs 0.23.0+ and one finished turn)</div>'
+    else rep.querySelector('.head').textContent = `Latest reply (${ago(p.reply.at)})` + (p.reply.ask ? ` · to you: 📱 ${p.reply.ask.slice(0, 40)}` : '')
+    document.getElementById('sent').textContent = p.cmd ? `Last command: "${p.cmd.text.slice(0, 40)}" — ${CMD[p.cmd.state]} (${ago(p.cmd.at)})` : ''
     const row = (k, v) => v ? `<div><span class="k">${k}</span>${v}</div>` : ''
     document.getElementById('info').innerHTML =
       `<h2>${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}</h2>` +
-      row('職稱', p.title && esc(p.title)) +
-      row('狀態', esc(p.modeText) + (p.since ? `（${ago(p.since)}起）` : '')) +
-      row('工具', p.tool && esc(p.tool)) +
-      row('等核准', p.approval && esc(p.approval)) +
-      row('隊伍', p.team && esc(p.team)) +
-      row('名稱', p.agent && esc(p.agent)) +
-      (p.lastError ? `<div class="err"><span class="k">錯誤</span>${esc(p.lastError.text)}（${ago(p.lastError.at)}）</div>` : '')
+      row('Title', p.title && esc(p.title)) +
+      row('Status', esc(p.modeText) + (p.since ? ` (since ${ago(p.since)})` : '')) +
+      row('Tool', p.tool && esc(p.tool)) +
+      row('Approval', p.approval && esc(p.approval)) +
+      row('Team', p.team && esc(p.team)) +
+      row('Name', p.agent && esc(p.agent)) +
+      (p.lastError ? `<div class="err"><span class="k">Error</span>${esc(p.lastError.text)} (${ago(p.lastError.at)})</div>` : '')
     card.style.display = 'block'
   }
   // 點圖：把點的位置換回圖上的座標，找最近的人
@@ -126,9 +126,9 @@
       const r = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: picked, text: box.value }) })
       const j = await r.json().catch(() => ({}))
       if (r.ok) box.value = ''
-      document.getElementById('sent').textContent = r.ok ? '已送出，等他收' : `沒送出：${j.error ?? r.status}`
+      document.getElementById('sent').textContent = r.ok ? 'Sent, waiting for pickup' : `Not sent: ${j.error ?? r.status}`
     } catch {
-      document.getElementById('sent').textContent = '沒送出：連不上電腦'
+      document.getElementById('sent').textContent = 'Not sent: cannot reach the computer'
     } finally {
       btn.disabled = false
     }

@@ -201,10 +201,10 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   }
   p.rect(Math.floor(w / 2) - 3, h - WALL, 6, WALL, FLOOR_BASE)
 
-  // 門牌（向量版可以寫中文）
+  // 門牌
   const signY = WALL + TOP_H + 1.5
-  p.text(officeX + OFFICE_DOOR_X + OFFICE_DOOR_W + 1, signY, '主管室', 1.7, C.gold, { bold: true })
-  if (L.meetDoor - WALL - 1 >= 7) p.text(WALL + 1, signY, '會議室', 1.7, SW.cyan, { bold: true })
+  p.text(officeX + OFFICE_DOOR_X + OFFICE_DOOR_W + 1, signY, 'MANAGERS', 1.7, C.gold, { bold: true })
+  if (L.meetDoor - WALL - 1 >= textWidth('MEETING', 1.7) + 1) p.text(WALL + 1, signY, 'MEETING', 1.7, SW.cyan, { bold: true })
 
   // 會議室椅子（長桌在 drawVector 裡、上排的人之後才畫）
   // 會議室上排椅子（正面，面向長桌）；下排的背面椅在 drawVector 裡、人之後才畫

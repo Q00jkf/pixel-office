@@ -159,7 +159,7 @@ test('desktop draws the office as an SVG under the size limit, with all buttons'
   expect(src).toContain('<path')
   expect(src.length).toBeLessThanOrEqual(131072)
   expect(src).toContain('Microsoft JhengHei') // 0.14.0 起 Desktop 畫向量（vector.ts），不是點陣
-  expect(String(svg!.props.alt)).toContain('人在線')
+  expect(String(svg!.props.alt)).toContain('online')
   for (const key of ['night', 'hit-pet', 'hit-printer', 'hit-corgi']) expect(await ui.find({ key })).toBeDefined()
   expect(await ui.find({ key: 'role' })).toBeUndefined() // 0.16.0 拿掉升為主管按鈕
   await ui.unmount()
@@ -174,7 +174,7 @@ test('desktop keeps a text line for the head count (old behaviour)', async ($, o
     requestId: 'pixel-office',
     props: { title: '像素辦公室', isFocused: false, bodyColumns: 48, placement: 'dock', scroll: undefined, view: undefined },
   } as any)
-  expect((await ui.find({ type: 'Svg' }))?.props.alt).toContain('人在線')
+  expect((await ui.find({ type: 'Svg' }))?.props.alt).toContain('online')
   await ui.unmount()
 })
 
@@ -192,9 +192,9 @@ const MOCKS = (on: any, writes: string[]) => {
 test('/office role 主管 and /office name set the profile and publish it', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
-  expect((await $.command.run({ command: 'office', args: 'role 主管' } as any)).text).toContain('角色＝主管')
-  expect((await $.command.run({ command: 'office', args: 'name 58' } as any)).text).toContain('名牌＝58')
-  expect((await $.command.run({ command: 'office', args: 'name 主管室' } as any)).text).toContain('不行')
+  expect((await $.command.run({ command: 'office', args: 'role 主管' } as any)).text).toContain('role=manager')
+  expect((await $.command.run({ command: 'office', args: 'name 58' } as any)).text).toContain('name=58')
+  expect((await $.command.run({ command: 'office', args: 'name 主管室' } as any)).text).toContain('invalid')
   const last = JSON.parse(writes[writes.length - 1])
   expect(last.role).toBe('manager')
   expect(last.name).toBe('58')
@@ -205,7 +205,7 @@ test('the model can set its own role through the office_profile tool', async ($,
   MOCKS(on, writes)
   const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', role: '主管', name: 'e2' } as any)
   expect(typeof out.result).toBe('string')
-  expect(out.result).toContain('主管')
+  expect(out.result).toContain('manager')
   expect(JSON.parse(writes[writes.length - 1]).role).toBe('manager')
 })
 
@@ -321,9 +321,9 @@ test('buttons: no promote or pet buttons below (role is /office role, pets are c
   const ui = await $.ui.mount(PANE_PROPS)
   for (const key of ['role', 'cat', 'bite', 'pet']) expect(await ui.find({ key })).toBeUndefined()
 
-  expect((await ui.find({ key: 'night' }))?.text).toBe('夜間模式')
+  expect((await ui.find({ key: 'night' }))?.text).toBe('Night mode')
   await ui.press({ key: 'night' })
-  expect((await ui.find({ key: 'night' }))?.text).toBe('開燈')
+  expect((await ui.find({ key: 'night' }))?.text).toBe('Lights on')
 
   await ui.press({ key: 'hit-pet' })
   await ui.unmount()
@@ -400,7 +400,7 @@ test('office_profile registers the ListAgents name (agent)', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
   const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'user-30 [b11cf3]' } as any)
-  expect(out.result).toContain('agent＝user-30')
+  expect(out.result).toContain('agent=user-30')
   expect(JSON.parse(writes[writes.length - 1]).agent).toBe('user-30')
 })
 
@@ -435,7 +435,7 @@ test('another session starting to wait pops a toast here', async ($, on) => {
   await $.command.run({ command: 'office', args: '' } as any) // 第一次看到 b：只記錄
   mode = 'waiting'
   await $.command.run({ command: 'office', args: '' } as any) // b 進入等待 → toast
-  expect(toasts.some(t => t.includes('u30') && t.includes('核准'))).toBe(true)
+  expect(toasts.some(t => t.includes('u30') && t.includes('approval'))).toBe(true)
 })
 
 // ---------- 0.3.0：職稱與名單 ----------
@@ -450,13 +450,13 @@ test('the roster lists manager first, with title, role, ListAgents name and what
   ]
   const text = roster(crew, 0)
   const lines = text.split('\n')
-  expect(lines[0]).toContain('3 人在線')
+  expect(lines[0]).toContain('3 online')
   expect(lines[3]).toContain('30') // 主管排第一列
   expect(lines[3]).toContain('協作主管')
   expect(lines[3]).toContain('user-30')
   expect(text).toContain('▶ IT')
-  expect(text).toContain('🟡 等核准（Bash）') // 0.11.0：等核准與等輸入分開；沒有 since 就不報秒數
-  expect(text).toContain('未登記')
+  expect(text).toContain('🟡 awaiting approval (Bash)') // 0.11.0：等核准與等輸入分開；沒有 since 就不報秒數
+  expect(text).toContain('not registered')
 })
 
 test('the roster carries each ref, so two sessions sharing a ListAgents name can still be addressed', () => {
@@ -470,7 +470,7 @@ test('the roster carries each ref, so two sessions sharing a ListAgents name can
   expect(text).toContain('180a9b')
   expect(text).toContain('aa11bb')
   // 撞名：直接給可貼的定址字串，不用再跑一次 ListAgents
-  expect(text).toContain('🔴 撞名')
+  expect(text).toContain('🔴 Name clash')
   expect(text).toContain('wiki-e4 [180a9b]')
   expect(text).toContain('wiki-e4 [019e4b]')
   expect(text).not.toContain('solo [aa11bb]') // 沒撞名的不唱名
@@ -479,11 +479,11 @@ test('the roster carries each ref, so two sessions sharing a ListAgents name can
 test('/office title sets a free-text title (Chinese ok) and /office who prints the roster', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
-  expect((await $.command.run({ command: 'office', args: 'title 系統管理' } as any)).text).toContain('職稱＝系統管理')
+  expect((await $.command.run({ command: 'office', args: 'title 系統管理' } as any)).text).toContain('title=系統管理')
   expect(JSON.parse(writes[writes.length - 1]).title).toBe('系統管理')
-  expect((await $.command.run({ command: 'office', args: 'title 這個職稱真的非常非常非常非常非常長喔' } as any)).text).toContain('太長')
+  expect((await $.command.run({ command: 'office', args: 'title 這個職稱真的非常非常非常非常非常長喔' } as any)).text).toContain('too long')
   const who = (await $.command.run({ command: 'office', args: 'who' } as any)).text!
-  expect(who).toContain('像素辦公室名單')
+  expect(who).toContain('Pixel office roster')
   expect(who).toContain('系統管理')
 })
 
@@ -507,7 +507,7 @@ test('the scene fills the pane height and leaves one reserved row above the butt
   // Text 不保留 key，改看元素類型：辦公室 → 預留空白列 → 按鈕列
   expect(tree.children.map((c: any) => c.type)).toEqual(['Box', 'Text', 'Box']) // 辦公室（Raster＋疊上去的按鈕）→ 沒有個人按鈕：顯示提示 → 按鈕列
   expect(tree.children[0].children[0].type).toBe('Raster')
-  expect((await ui.find({ type: 'Text', text: /buttons\.json/ }))?.text).toContain('個人按鈕')
+  expect((await ui.find({ type: 'Text', text: /buttons\.json/ }))?.text).toContain('Personal buttons')
   await ui.unmount()
 })
 
@@ -530,10 +530,10 @@ test('/office auto on stops the raised hand; the roster marks auto sessions', as
   MOCKS(on, writes)
   expect((await $.command.run({ command: 'office', args: 'auto on' } as any)).text).toContain('auto')
   expect(JSON.parse(writes[writes.length - 1]).auto).toBe(true)
-  expect((await $.command.run({ command: 'office', args: 'auto maybe' } as any)).text).toContain('用法')
+  expect((await $.command.run({ command: 'office', args: 'auto maybe' } as any)).text).toContain('Usage')
   const who = (await $.command.run({ command: 'office', args: 'who' } as any)).text!
-  expect(who).toContain('（auto）')
-  expect((await $.command.run({ command: 'office', args: 'auto off' } as any)).text).toContain('會等人核准')
+  expect(who).toContain(' (auto)')
+  expect((await $.command.run({ command: 'office', args: 'auto off' } as any)).text).toContain('waits for approval')
   expect(JSON.parse(writes[writes.length - 1]).auto).toBeUndefined()
 })
 
@@ -541,7 +541,7 @@ test('the model can declare auto mode through office_profile', async ($, on) => 
   const writes: string[] = []
   MOCKS(on, writes)
   const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', auto: true } as any)
-  expect(out.result).toContain('模式＝auto')
+  expect(out.result).toContain('mode=auto')
   expect(JSON.parse(writes[writes.length - 1]).auto).toBe(true)
 })
 
@@ -567,7 +567,7 @@ test('registering an agent also sets a short plate when the plate is still the d
   const writes: string[] = []
   MOCKS(on, writes)
   const out: any = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: 'llm-wiki-aegiverse-55' } as any)
-  expect(out.result).toContain('名牌自動設為 55')
+  expect(out.result).toContain('nameplate set automatically to 55')
   expect(JSON.parse(writes[writes.length - 1]).name).toBe('55')
   // 自己設過名牌之後，再登記 agent 不會蓋掉
   await $.tool.call({ tool: 'mcp__pixel-office__office_profile', name: 'mine' } as any)
@@ -615,8 +615,8 @@ test('a blocked coworker raises a red card that stays while they keep working', 
 test('the roster flags who needs a release and for how long', () => {
   const crew = [{ ...P('a', 'ff'), blocked: { tool: 'Write', at: 0 } }, P('b', '55')]
   const text = roster(crew, 5 * 60000)
-  expect(text).toContain('🔴 待放行：ff')
-  expect(text).toContain('被擋（Write），已等 5 分')
+  expect(text).toContain('🔴 Blocked: ff')
+  expect(text).toContain('blocked (Write) for 5 min')
 })
 
 test('a classifier denial marks me blocked in the status file', async ($, on) => {
@@ -671,7 +671,7 @@ test('the reserved row shows personal buttons; a slash prompt runs as a command,
     submitted.push(e)
     return { text: e.text } as any // prompt.submit 的回傳是 { text }
   })
-  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('3 顆')
+  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('Loaded 3 personal buttons')
   const ui = await $.ui.mount({ ...PANE_PROPS, props: { ...PANE_PROPS.props, scroll: { offset: 0, bodyRows: 50 } } })
   const tree: any = await ui.drawn()
   expect(tree.children.map((c: any) => c.type)).toEqual(['Box', 'Box', 'Box'])
@@ -726,10 +726,10 @@ test('becoming a peer moves you to the peer area (and keeps your seat after that
 test('/office team sets and clears the team; the roster shows it', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
-  expect((await $.command.run({ command: 'office', args: 'team user-30 [b0fe80]' } as any)).text).toContain('歸屬＝user-30')
+  expect((await $.command.run({ command: 'office', args: 'team user-30 [b0fe80]' } as any)).text).toContain('team=user-30')
   expect(JSON.parse(writes[writes.length - 1]).team).toBe('user-30')
-  expect((await $.command.run({ command: 'office', args: 'who' } as any)).text).toContain('屬 user-30')
-  expect((await $.command.run({ command: 'office', args: 'team off' } as any)).text).toContain('歸屬已清除')
+  expect((await $.command.run({ command: 'office', args: 'who' } as any)).text).toContain('under user-30')
+  expect((await $.command.run({ command: 'office', args: 'team off' } as any)).text).toContain('team cleared')
   expect(JSON.parse(writes[writes.length - 1]).team).toBeUndefined()
 })
 
@@ -1063,11 +1063,11 @@ test('while biting, the prey shakes with a red mark and the boss cannot be the p
 test('/office bite needs the pane first, then sends the cat; a second one says it is still out', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
-  expect(String(((await $.command.run({ command: 'office', args: 'bite' } as any)) as any).text)).toContain('先輸入 /office')
+  expect(String(((await $.command.run({ command: 'office', args: 'bite' } as any)) as any).text)).toContain('Open the office panel with /office first')
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: 'bite' } as any) // 只有自己（員工）：咬自己
   const again = await $.command.run({ command: 'office', args: 'bite' } as any)
-  expect(String((again as any).text)).toContain('貓還在外面')
+  expect(String((again as any).text)).toContain('The cat is still out')
   await ui.unmount()
 })
 
@@ -1121,17 +1121,17 @@ test('/office pet switches cat, baby and bird in order and remembers the choice'
   })
   const ui = await $.ui.mount(PANE_PROPS)
   const r1 = await $.command.run({ command: 'office', args: 'pet' } as any)
-  expect(String((r1 as any).text)).toContain('小寶寶')
+  expect(String((r1 as any).text)).toContain('baby')
   expect(kept.pet).toBe('baby')
   const r2 = await $.command.run({ command: 'office', args: 'pet' } as any)
-  expect(String((r2 as any).text)).toContain('山雀') // 依序：貓 → 寶寶 → 山雀 → 貓
+  expect(String((r2 as any).text)).toContain('tit') // 依序：貓 → 寶寶 → 山雀 → 貓
   expect(kept.pet).toBe('bird')
   await $.command.run({ command: 'office', args: 'pet 銀喉長尾山雀' } as any)
   expect(kept.pet).toBe('bird')
   await $.command.run({ command: 'office', args: 'pet cat' } as any)
   expect(kept.pet).toBe('cat')
   const bad = await $.command.run({ command: 'office', args: 'pet dog' } as any)
-  expect(String((bad as any).text)).toContain('用法')
+  expect(String((bad as any).text)).toContain('Usage')
   await ui.unmount()
 })
 
@@ -1184,7 +1184,7 @@ test('office_meeting writes meeting.json with topic and participants, and end cl
   expect(m.participants).toEqual(['llm-a', 'finance-c'])
   expect(m.topic).toBe('請購流程')
   expect(m.until).toBe(1_000_000 + 30 * 60000)
-  expect(JSON.stringify(started)).toContain('走進會議室')
+  expect(JSON.stringify(started)).toContain('walk into the meeting room')
   const none: any = await $.tool.call({ tool: 'mcp__pixel-office__office_meeting', action: 'start', participants: [] } as any)
   expect(JSON.stringify(none)).toContain('participants')
   // 不帶 minutes：不設期限
@@ -1204,12 +1204,12 @@ test('an open-ended meeting ends by itself when none of the participants is onli
   on('ui.open', () => ({ value: { isPlaced: true } }) as any)
   await $.command.run({ command: 'office', args: '' } as any) // 開面板時會 refresh 一次，讀到 meeting.json
   const r: any = await $.command.run({ command: 'office', args: 'meeting' } as any)
-  expect(String(r.text)).toContain('目前沒有開會')
+  expect(String(r.text)).toContain('No meeting right now')
   // 對照：參與者有人在線（自己，名牌預設 me）→ 開會中
   files['meeting.json'] = JSON.stringify({ until: Number.MAX_SAFE_INTEGER, topic: 't', participants: ['ghost', 'me'] })
   await $.command.run({ command: 'office', args: '' } as any)
   const on2: any = await $.command.run({ command: 'office', args: 'meeting' } as any)
-  expect(String(on2.text)).toContain('開會中')
+  expect(String(on2.text)).toContain('In a meeting')
 })
 
 test('the silver-throated bushtit: its own colours, hops on the ground, flies straight to the person and sings with notes', () => {
@@ -1271,10 +1271,10 @@ test('the roster tells waiting-for-approval (with seconds) from waiting-for-inpu
     { ...P('e', 'fresh', 'idle'), since: NOW - 5000 },
   ]
   const text = roster(crew, NOW)
-  expect(text).toContain('🟡 等核准 42 秒（Bash）')
-  expect(text).toContain('| 等輸入（5 分） |')
-  expect(text).toContain('剛完成，等輸入')
-  expect(text).toContain('| 等輸入 |') // 不到 1 分鐘不報分鐘數
+  expect(text).toContain('🟡 awaiting approval 42s (Bash)')
+  expect(text).toContain('| waiting for input (5 min) |')
+  expect(text).toContain('just finished, waiting for input')
+  expect(text).toContain('| waiting for input |') // 不到 1 分鐘不報分鐘數
 })
 
 test('an error keeps a one-line summary of at most 80 characters, shown in the roster for 10 minutes', () => {
@@ -1283,9 +1283,9 @@ test('an error keeps a one-line summary of at most 80 characters, shown in the r
   expect([...summarizeError('錯'.repeat(100))]).toHaveLength(80)
   const NOW = 20 * MIN
   const err = { text: 'Exit code 1', at: NOW - 2 * MIN }
-  expect(roster([{ ...P('a', 'x', 'error'), tool: 'Bash', lastError: err }], NOW)).toContain('出錯（Bash）：Exit code 1')
-  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: err }], NOW)).toContain('思考中・上次出錯 2 分前：Exit code 1')
-  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: { ...err, at: 0 } }], NOW)).not.toContain('上次出錯')
+  expect(roster([{ ...P('a', 'x', 'error'), tool: 'Bash', lastError: err }], NOW)).toContain('error (Bash): Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: err }], NOW)).toContain('thinking · last error 2 min ago: Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'thinking'), lastError: { ...err, at: 0 } }], NOW)).not.toContain('last error')
 })
 
 test('a failing tool writes its error summary and the mode start time to the status file', async ($, on) => {
@@ -1325,10 +1325,10 @@ test('the roster marks automatic titles, and flags a stale manual title with the
   expect(titleStale(fresh)).toBe(false)
   expect(titleStale(stale)).toBe(true)
   const text = roster([auto, fresh, stale], NOW)
-  expect(text).toContain('| 幫我把請購單 (自動) |')
+  expect(text).toContain('| 幫我把請購單 (auto) |')
   expect(text).toContain('| FOG 論文 |')
-  expect(text).toContain('| 請購單（40 分前設） |')
-  expect(text).toContain('・最新指令「改辦公室的貓」')
+  expect(text).toContain('| 請購單 (set 40 min ago) |')
+  expect(text).toContain(' · latest prompt "改辦公室的貓"')
 })
 
 test('/office title is manual: it records when it was set and is not marked automatic', async ($, on) => {
@@ -1354,9 +1354,9 @@ test('each session publishes its own reply address; the roster offers it when th
 
   const crew: Coworker[] = [{ ...P('a', 'nameless'), addr: 'uds:/tmp/cc-msg-abc' }, { ...P('b', 'named'), agent: 'user-30', addr: 'uds:x' }, P('c', 'old')]
   const text = roster(crew, 0)
-  expect(text).toContain('（沒有名稱）SendMessage 用 `to=uds:/tmp/cc-msg-abc`') // code 格式：模型照抄才不會吃掉反斜線
+  expect(text).toContain('(no name) SendMessage with `to=uds:/tmp/cc-msg-abc`') // code 格式：模型照抄才不會吃掉反斜線
   expect(text).toContain('| user-30 |') // 有名稱就照舊顯示名稱
-  expect(text).toContain('（未登記，傳訊息找不到）') // 舊版沒有位址
+  expect(text).toContain('(not registered, messages cannot reach it)') // 舊版沒有位址
   expect(findRecipient(crew, 'uds:/tmp/cc-msg-abc')?.id).toBe('a') // 寄到位址也畫得出紙飛機
 })
 
@@ -1365,9 +1365,9 @@ test('an error stays visible in the roster after the turn ends (error → done �
   const lastError = { text: 'Exit code 1', at: NOW - 3 * MIN }
   const done = roster([{ ...P('a', 'x', 'done'), lastError }], NOW)
   const idle = roster([{ ...P('a', 'x', 'idle'), since: NOW - 2 * MIN, lastError }], NOW)
-  expect(done).toContain('剛完成，等輸入・上次出錯 3 分前：Exit code 1')
-  expect(idle).toContain('等輸入（2 分）・上次出錯 3 分前：Exit code 1')
-  expect(roster([{ ...P('a', 'x', 'idle'), lastError: { ...lastError, at: 0 } }], NOW)).not.toContain('上次出錯') // 10 分鐘後收掉
+  expect(done).toContain('just finished, waiting for input · last error 3 min ago: Exit code 1')
+  expect(idle).toContain('waiting for input (2 min) · last error 3 min ago: Exit code 1')
+  expect(roster([{ ...P('a', 'x', 'idle'), lastError: { ...lastError, at: 0 } }], NOW)).not.toContain('last error') // 10 分鐘後收掉
 })
 
 // ---------- 0.12.0：多主管、各主管 peer 區、櫃台 ----------
@@ -1626,7 +1626,7 @@ test('waiting: the deadline, a broken file or the terminal answering first all g
   expect(slow.elapsed()).toBe(8500) // 剛好停在 deadline，不多睡一輪
   const broken = fakeIO([undefined, '{not json'])
   expect(await waitForDecision(broken.io, WANT, 8500)).toBeUndefined()
-  expect(broken.logs[0]).toContain('壞掉')
+  expect(broken.logs[0]).toContain('corrupt')
   const terminal = fakeIO([undefined, undefined, decided()], { settledAt: 300 }) // 終端機先按了：之後才到的決定也不採用
   expect(await waitForDecision(terminal.io, WANT, 8500)).toBeUndefined()
 })
@@ -1812,10 +1812,10 @@ test('waiting for the office: people queue at the counter (front door when narro
 
 test('the roster says the office pane can answer a waiting session', () => {
   const c = { ...P('w', 'w', 'waiting'), tool: 'Bash', since: 1000, approval: { tool: 'Bash', at: 1000, deadline: 9500 } }
-  expect(roster([c], 5000)).toContain('辦公室面板可審')
-  expect(roster([P('a', 'a'), c], 5000).split('\n')[0]).toBe('🟡🟡 等你核准（開辦公室面板按「審 <名牌>」）：w（Bash，剩 5 秒）') // 第一行最醒目
-  expect(roster([c], 9500)).not.toContain('等你核准')
-  expect(roster([{ ...c, approval: undefined }], 5000)).not.toContain('辦公室面板可審')
+  expect(roster([c], 5000)).toContain('reviewable in office panel')
+  expect(roster([P('a', 'a'), c], 5000).split('\n')[0]).toBe('🟡🟡 Waiting for your approval (open the office panel, press "Review <name>"): w (Bash, 5s left)') // 第一行最醒目
+  expect(roster([c], 9500)).not.toContain('Waiting for your approval')
+  expect(roster([{ ...c, approval: undefined }], 5000)).not.toContain('reviewable in office panel')
 })
 
 test('a decision for swapped command text is not taken: same toolUseId and nonce, but the hash is of what the viewer saw', async () => {
@@ -1900,7 +1900,7 @@ test('office pane: past the deadline the slip folds away and nothing can be pres
   const ui = await $.ui.mount(PANE_PROPS)
   await $.command.run({ command: 'office', args: '' } as any)
   await ui.press({ key: 'review-bbbb' })
-  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).toContain('剩 3 秒')
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).toContain('3s left')
   await clock.advance(1500) // 冷卻過了、還沒到 deadline
   await clock.advance(1600) // 過了 deadline（這段時間 refresh 還沒跑也一樣）
   expect(await ui.find({ key: 'approval-allow' })).toBeUndefined()
@@ -1927,14 +1927,14 @@ test('approval is off by default: an open pane alone publishes no approve flag a
   expect(mine.office).toBe(true)
   expect(mine.approve).toBeUndefined() // 請求端看到這個就不送單
   expect(await ui.find({ key: 'review-bbbb' })).toBeUndefined()
-  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).not.toContain('核准已開啟')
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text).join(' ')).not.toContain('Approvals on')
   // 打開：狀態檔帶 approve、面板頂端常駐提示、看得到單
   const text: any = await $.command.run({ command: 'office', args: 'approve on' } as any)
-  expect(String(text?.text ?? text)).toContain('已開啟')
+  expect(String(text?.text ?? text)).toContain('approvals on')
   await $.command.run({ command: 'office', args: '' } as any)
   const after = JSON.parse(files[Object.keys(files).find(k => k.startsWith('sessions/') && k !== 'sessions/bbbb.json')!])
   expect(after.approve).toBe(true)
-  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text)).toContain('核准已開啟（/office approve off 關閉）')
+  expect((await ui.findAll({ type: 'Text' } as any)).map((t: any) => t.text)).toContain('Approvals on (/office approve off to turn off)')
   expect(await ui.find({ key: 'review-bbbb' })).toBeDefined()
   await $.command.run({ command: 'office', args: 'approve off' } as any)
   await $.command.run({ command: 'office', args: '' } as any)
@@ -1968,13 +1968,13 @@ const DESKTOP = (bodyColumns = 112, bodyRows = 80) =>
   }) as any
 
 test('furniture menus: every object has its default menu; buttons.json with the same object replaces it; old entries stay in the row', () => {
-  expect(MENUS.printer.map(i => i.label)).toEqual(['查最近信件', '寫信', '看草稿'])
-  expect(MENUS.cabinet.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-repo list', '/llm-wiki:wiki-query', '在 Google Drive 搜尋檔案：先問我關鍵字'])
-  expect(MENUS.mailbox.map(i => i.label)).toEqual(['狀態', 'pull', 'push', '最近 commit'])
+  expect(MENUS.printer.map(i => i.label)).toEqual(['Recent mail', 'Write mail', 'Drafts'])
+  expect(MENUS.cabinet.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-repo list', '/llm-wiki:wiki-query', 'Search Google Drive for files: ask me for keywords first'])
+  expect(MENUS.mailbox.map(i => i.label)).toEqual(['Status', 'pull', 'push', 'Recent commits'])
   expect(MENUS.calendar.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-agenda', '/llm-wiki:wiki-agenda add'])
   expect(MENUS.vending.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-doctor', '/llm-wiki:wiki'])
   expect(MENUS.clock.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-day 開工', '/llm-wiki:wiki-day 收工'])
-  expect(MENUS.meeting).toEqual([{ label: '開會', prompt: '/pixel-office:team 開會' }])
+  expect(MENUS.meeting).toEqual([{ label: 'Meeting', prompt: '/pixel-office:team start a meeting' }])
   for (const f of FURNITURE) expect(MENUS[f].length).toBeGreaterThan(0)
 
   const mine = parseButtons([
@@ -2017,13 +2017,13 @@ test('desktop: clicking furniture opens its menu beside it, one at a time; choos
   for (const f of ['printer', 'cabinet', 'mailbox', 'calendar', 'clock', 'meeting']) expect(await ui.find({ key: `hit-${f}` })).toBeDefined()
   expect(await ui.find({ key: 'menu' })).toBeUndefined()
   await ui.press({ key: 'hit-printer' })
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('查最近信件')
-  expect((await ui.find({ key: 'menu-cancel' }))?.text).toBe('取消')
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('Recent mail')
+  expect((await ui.find({ key: 'menu-cancel' }))?.text).toBe('Cancel')
   await ui.press({ key: 'hit-mailbox' }) // 換一件：同時只開一個
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('狀態')
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('Status')
   expect(await ui.find({ key: 'menu-4' })).toBeUndefined()
   await ui.press({ key: 'menu-0' })
-  expect(submitted.some(e => e.text === 'git status 並用一兩句摘要')).toBe(true)
+  expect(submitted.some(e => e.text === 'git status, and summarize it in a sentence or two')).toBe(true)
   expect(await ui.find({ key: 'menu' })).toBeUndefined()
   await ui.press({ key: 'hit-calendar' })
   await ui.press({ key: 'menu-0' }) // 斜線開頭：當指令跑
@@ -2046,7 +2046,7 @@ test('desktop: a user menu from buttons.json replaces the default; old-format en
     submitted.push(e)
     return { text: e.text } as any
   })
-  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('自訂家具選單：printer')
+  expect((await $.command.run({ command: 'office', args: 'buttons' } as any)).text).toContain('Custom furniture menus: printer')
   const ui = await $.ui.mount(DESKTOP())
   expect((await ui.find({ key: 'mine-0' }))?.text).toBe('說嗨')
   expect(await ui.find({ key: 'mine-1' })).toBeUndefined() // 家具項目不在底下那排
@@ -2081,7 +2081,7 @@ test('terminal: the pet, printer, cabinet, mailbox and meeting table get a one-c
   for (const k of ['hit-pet', 'hit-printer', 'hit-cabinet', 'hit-mailbox']) expect(await ui.find({ key: k })).toBeDefined()
   for (const k of ['hit-corgi', 'hit-vending', 'hit-clock', 'hit-calendar']) expect(await ui.find({ key: k })).toBeUndefined()
   await ui.press({ key: 'hit-mailbox' })
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('狀態')
+  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('Status')
   await ui.unmount()
 })
 
@@ -2090,7 +2090,7 @@ test('terminal: the pet, printer, cabinet, mailbox and meeting table get a one-c
 import { cases } from './scenarios'
 import { cellWidth, drawVector, menuSize, type Rect } from './vector'
 
-const MENU_LABELS = (f: keyof typeof MENUS) => [...MENUS[f].map(i => i.label), '取消']
+const MENU_LABELS = (f: keyof typeof MENUS) => [...MENUS[f].map(i => i.label), 'Cancel']
 const cellBox = (r: Rect, row: number) => ({ t: Math.floor(r.y / row), l: Math.floor(r.x), b: Math.ceil((r.y + r.h) / row), r: Math.ceil(r.x + r.w) })
 
 const isFurniture = (h: { what: string }): h is { what: keyof typeof MENUS } & Rect => h.what in MENUS
@@ -2160,7 +2160,7 @@ test('terminal: clicking the pet leaves a line in the button row for about 5 s (
   const ui = await $.ui.mount(PANE_PROPS)
   await ui.press({ key: 'hit-pet' })
   await new Promise(r => setTimeout(r, 20))
-  const note = await ui.find({ type: 'Text', text: /餵|換|小寶寶|山雀|貓/ })
+  const note = await ui.find({ type: 'Text', text: /feed|cat|baby|tit/i })
   expect(note).toBeDefined()
   await ui.unmount()
 })
@@ -2192,7 +2192,7 @@ test('desktop: the picture fills the pane height, no hint line, no night button 
   expect(tree.children.map((c: any) => c.type)).toEqual(['Box']) // 只剩場景（Svg＋疊上去的按鈕）
   expect(viewH(String((await ui.find({ type: 'Svg' }))!.props.source))).toBe(250) // 100 列 × 2.5 單位
   expect(await ui.find({ type: 'Text', text: /buttons\.json/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Button', text: /夜間模式|開燈/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /Night mode|Lights on/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -2232,7 +2232,7 @@ test('desktop: the furniture menu is an opaque framed box with a title and dark 
   const menu: any = await ui.find({ key: 'menu' })
   expect(menu.props.backgroundColor).toBe('#f4f4f4')
   expect(menu.props.borderStyle).toBe('round')
-  expect((await ui.find({ type: 'Text', text: /販賣機/ }))).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /Vending/ }))).toBeDefined()
   expect((await ui.find({ key: 'menu-0' }))).toBeDefined()
   await ui.unmount()
 })
@@ -2261,8 +2261,8 @@ import { launchPlate, oneshotGroups, oneshotText } from './register'
 test('one-shot groups: --name prefix before the first dash, no --name is 一次性, biggest first', () => {
   const o = (id: string, label?: string) => ({ ...P(id, id), oneshot: true, label })
   const g = oneshotGroups([o('a', 'API-標籤正本-02-3'), o('b', 'API-標籤正本-02-4'), o('c'), o('d', 'nightly')])
-  expect(g).toEqual([{ label: 'API', n: 2 }, { label: 'nightly', n: 1 }, { label: '一次性', n: 1 }])
-  expect(oneshotText(g)).toBe('⚙ API ×2　⚙ nightly ×1　⚙ 一次性 ×1')
+  expect(g).toEqual([{ label: 'API', n: 2 }, { label: 'nightly', n: 1 }, { label: 'one-shot', n: 1 }])
+  expect(oneshotText(g)).toBe('⚙ API ×2　⚙ nightly ×1　⚙ one-shot ×1')
 })
 
 test('--name as the default plate: ASCII only, cut to 12, at least 2 characters', () => {
@@ -2276,7 +2276,7 @@ test('--name as the default plate: ASCII only, cut to 12, at least 2 characters'
 test('the roster leaves one-shot runs out and counts them on one line', () => {
   const out = roster([P('a', 'alpha')], 1_000_000, [{ label: 'API', n: 3 }])
   expect(out).toContain('alpha')
-  expect(out).toContain('一次性對話（claude -p，不列入名單）：⚙ API ×3')
+  expect(out).toContain('One-shot conversations (claude -p, not listed): ⚙ API ×3')
   expect(roster([], 1_000_000, [{ label: 'API', n: 1 }])).toContain('⚙ API ×1')
 })
 
@@ -2310,13 +2310,13 @@ test('one-shot runs never sit at a desk: the terminal shows a badge line, the de
   const text = cellText(p.cells, p.columns, p.rows).join('\n')
   expect(text).toContain('hub')
   expect(text).not.toContain('kb')
-  expect((await ui.find({ type: 'Text', text: /⚙/ }))?.text).toContain('⚙ API ×2　⚙ 一次性 ×1')
+  expect((await ui.find({ type: 'Text', text: /⚙/ }))?.text).toContain('⚙ API ×2　⚙ one-shot ×1')
   await ui.unmount()
 
   const desk = await $.ui.mount({ ...PANE_PROPS, surface: 'desktop', props: { ...PANE_PROPS.props, bodyColumns: 112, scroll: { offset: 0, bodyRows: 64 } } } as any)
   const svg = String((await desk.find({ type: 'Svg' }))!.props.source)
   expect(svg).toContain('⚙ API ×2')
-  expect(svg).toContain('⚙ 一次性 ×1')
+  expect(svg).toContain('⚙ one-shot ×1')
   expect(svg).not.toContain('>kb<')
   await desk.unmount()
 
@@ -2456,7 +2456,7 @@ test('a command from the phone is submitted once as the user\'s own words with �
   await clock.advance(1)
   const long = JSON.parse(files['replies/aaaa1111.json'])
   expect(long.ask).toBeUndefined()
-  expect(long.text.endsWith('（後面截掉）')).toBe(true)
+  expect(long.text.endsWith('(truncated)')).toBe(true)
   // 重載外掛（模組變數歸零）也靠 done 檔不再送
   await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
   await clock.advance(3000)
@@ -2489,12 +2489,12 @@ test('/office runs ListAgents itself (no model) to register the ListAgents name;
   on('tool.check', () => ({ decision }) as any)
   on('tool.call', { tool: 'ListAgents' }, () => ({ result: listing }) as any)
   const out = await $.command.run({ command: 'office', args: '' } as any)
-  expect(out.text).toContain('ListAgents 名稱 Daily check [2b3c4d]')
+  expect(out.text).toContain('ListAgents name Daily check [2b3c4d]')
   expect((await $.command.run({ command: 'office', args: 'who' } as any)).text).toContain('Daily check') // 名單上有了
   listing = 'Peer sessions (1):\n  x [111111]'
   expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('/rename')
   decision = 'ask'
-  expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('沒能自動登記')
+  expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('Could not register')
 })
 
 // ---------- 0.25.0：部門主管（第 2 層）、降層提醒（jacky 2026-10-29） ----------
@@ -2524,7 +2524,7 @@ test('a manager with team on another online manager is a department lead: sits f
   expect(bossSeating(crew, 112, 60).order.filter(Boolean).map(b => b!.id)).toEqual(['t'])
   const text = cellText(encode(drawScene(crew, 0, 112, 60)), 112, 60).join('\n')
   expect(text).toContain('TEAM dd')
-  expect(roster(crew, 0)).toContain('部門主管')
+  expect(roster(crew, 0)).toContain('dept lead')
 })
 
 test('a department lead with nobody under them sits in their manager zone like a peer', () => {
@@ -2554,13 +2554,13 @@ test('an Antigravity (agy) status file shows up as a coworker that cannot be mes
   const s = { id: 'agy-c1', kind: 'agy', name: 'wtoffice', mode: 'typing', tool: 'run_command', updatedAt: now - 1000, left: false, addr: 'x' }
   const c = parseStatus(s, now)!
   expect(c.kind).toBe('agy')
-  expect(roster([c], now)).toContain('| wtoffice | — | 員工 | Antigravity：`python ~/.claude/pixel-office/agy/agy_office.py send wtoffice "…" --from <你的名稱>`（它下次動作才收到） |')
+  expect(roster([c], now)).toContain('| wtoffice | — | staff | Antigravity: `python ~/.claude/pixel-office/agy/agy_office.py send wtoffice "…" --from <your name>` (delivered on its next action) |')
   expect(parseStatus({ ...s, left: true }, now)).toBeUndefined()
   expect(parseStatus({ ...s, kind: 'other' }, now)!.kind).toBeUndefined()
 })
 
 test('a command written by another AI is labeled with its sender, never as the user', () => {
   expect(commandText({ text: 'hi' })).toBe('📱 hi')
-  expect(commandText({ text: 'hi', from: 'wtoffice（Antigravity，不是使用者本人）' })).toBe('📨 wtoffice（Antigravity，不是使用者本人）：hi')
+  expect(commandText({ text: 'hi', from: 'wtoffice (Antigravity, not the user)' })).toBe('📨 wtoffice (Antigravity, not the user): hi')
   expect(commandText({ text: 'hi', from: 3 })).toBe('📱 hi')
 })

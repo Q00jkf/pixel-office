@@ -41,7 +41,7 @@ test('nameplates can be Chinese and are cut by width, not by character count', (
   const s = svgOf(big)
   expect(s).toContain('實作4')
   expect(s).toContain('主管乙')
-  expect(s).toContain('主管室')
+  expect(s).toContain('MANAGERS')
   expect(textWidth('實作', 2)).toBe(4)
   expect(Math.round(textWidth('ab', 2) * 10)).toBe(24)
   expect(fitText('非常長的中文名牌名稱', 8, 2)).toBe('非常長的')

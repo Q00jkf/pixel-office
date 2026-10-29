@@ -172,23 +172,23 @@ def deliver(to: str, text: str, frm: str) -> str:
     crew = live_crew()
     hits = [s for s in crew if want in (s.get("agent"), s.get("name"), s.get("id"))]
     if len(hits) != 1:
-        names = "、".join(f"{s.get('name')}（{s.get('agent') or s.get('kind') or '—'}）" for s in crew)
-        raise ValueError(f"找不到唯一的收件者「{to}」（符合 {len(hits)} 個）。在線：{names or '無'}")
+        names = ", ".join(f"{s.get('name')} ({s.get('agent') or s.get('kind') or '—'})" for s in crew)
+        raise ValueError(f"No unique recipient \"{to}\" ({len(hits)} matches). Online: {names or 'nobody'}")
     text = text.strip()
     if not text or len(text) > 4000:
-        raise ValueError("訊息是空的或太長（上限 4000 字）")
+        raise ValueError("Message is empty or too long (max 4000 characters)")
     s = hits[0]
     if s.get("kind") == "agy":
         INBOX.mkdir(parents=True, exist_ok=True)
         with open(INBOX / f"{str(s['id'])[len('agy-'):]}.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps({"from": frm, "text": text, "at": now_ms()}, ensure_ascii=False) + "\n")
-        return f"已放進 {s.get('name')} 的收件夾：它下次動作（使用者打字或正在跑的這一輪結束）時收到；閒著時叫不醒"
+        return f"Put in {s.get('name')}'s inbox: delivered on its next action (the user types, or its current turn ends); an idle agy cannot be woken"
     COMMANDS.mkdir(parents=True, exist_ok=True)
-    reply = f"python \"{CLI}\" send {frm} \"<回覆>\" --from <你的 ListAgents 名稱>"
+    reply = f"python \"{CLI}\" send {frm} \"<reply>\" --from <your ListAgents name>"
     save(COMMANDS / f"{s['id']}.json", {
-        "nonce": uuid.uuid4().hex, "at": now_ms(), "from": f"{frm}（Antigravity，不是使用者本人）",
-        "text": f"{text}\n（回覆用 {reply}；對方寄完會等回信約 90 秒，超過就下次動作才收到）"})
-    return f"已送給 {s.get('agent') or s.get('name')}：對方外掛每秒來拿，10 分鐘沒被拿就作廢"
+        "nonce": uuid.uuid4().hex, "at": now_ms(), "from": f"{frm} (Antigravity, not the user)",
+        "text": f"{text}\n(Reply with {reply}; the sender waits about 90 s for a reply, after that it arrives on its next action)"})
+    return f"Sent to {s.get('agent') or s.get('name')}: its plugin picks it up every second; discarded if not picked up in 10 minutes"
 
 
 def take_mail(cid: str) -> str:
@@ -204,9 +204,9 @@ def take_mail(cid: str) -> str:
             m = json.loads(ln)
         except Exception:
             continue
-        frm = m.get("from") or "未署名"
-        lines.append(f"📨 像素辦公室訊息，來自 {frm}（另一個 AI session，不是使用者本人）：{m.get('text', '')}\n"
-                     f"要回覆就用 call_mcp_tool(ServerName=\"pixel-office_office\", ToolName=\"office_send\", Arguments={{\"to\": \"{frm}\", \"text\": \"<回覆>\"}})（工具清單裡看不到也照叫）。")
+        frm = m.get("from") or "unsigned"
+        lines.append(f"📨 Pixel office message from {frm} (another AI session, not the user): {m.get('text', '')}\n"
+                     f"To reply, call call_mcp_tool(ServerName=\"pixel-office_office\", ToolName=\"office_send\", Arguments={{\"to\": \"{frm}\", \"text\": \"<reply>\"}}) (call it even if it is not in your tool list).")
     taking.unlink(missing_ok=True)
     return "\n\n".join(lines)
 
@@ -308,34 +308,34 @@ def tool_profile(cid: str, a: dict) -> str:
     p = status_file(cid)
     s = load(p)
     if not s:
-        raise ValueError("辦公室還沒有你的狀態（先讓這個對話跑過一輪再登記）")
+        raise ValueError("The office has no status for you yet (let this conversation run one turn first)")
     name, title = a.get("name"), a.get("title")
     if name is not None:
         name = str(name).strip()
         if not NAME_OK.match(name):
-            raise ValueError("名牌只能 1～12 個英文字母或數字")
+            raise ValueError("Nameplate must be 1–12 letters or digits")
         if any(c.get("name") == name and c.get("id") != s["id"] for c in live_crew()):
-            raise ValueError(f"名牌 {name} 已經有人用了，換一個")
+            raise ValueError(f"Nameplate {name} is taken, pick another")
         s["name"] = name
     if title is not None:
         s.update(title=str(title).strip()[:16], titleAuto=False, titleAt=now_ms())
     save(p, s)
-    return f"已登記：名牌 {s.get('name')}、職稱 {s.get('title')}"
+    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}"
 
 
 def tool_roster() -> str:
-    rows = ["| 名牌 | 職稱 | 種類 | 寄信 to | 目前 |", "|---|---|---|---|---|"]
+    rows = ["| Name | Title | Kind | Send to | Now |", "|---|---|---|---|---|"]
     for s in sorted(live_crew(), key=lambda c: str(c.get("name"))):
         kind = "agy" if s.get("kind") == "agy" else "Claude"
         rows.append(f"| {s.get('name')} | {s.get('title') or '—'} | {kind} | {s.get('agent') or s.get('name')} | {s.get('mode')} {s.get('tool') or ''} |")
-    return "\n".join(rows) if len(rows) > 2 else "辦公室目前沒有人"
+    return "\n".join(rows) if len(rows) > 2 else "Nobody in the office right now"
 
 
 def tool_send(cid: str, a: dict) -> str:
     me = load(status_file(cid)).get("name") or "agy"
     msg = deliver(str(a.get("to", "")), str(a.get("text", "")), me)
     mark_awaiting(cid)
-    return msg + "。這一輪結束時會等回信最多 90 秒。"
+    return msg + ". This turn will wait up to 90 s for a reply when it ends."
 
 
 def mcp() -> None:
@@ -366,12 +366,12 @@ def mcp() -> None:
             name, args = params.get("name"), params.get("arguments") or {}
             try:
                 if not cid:
-                    raise ValueError("拿不到對話 id（_meta 沒有 antigravity.google/conversation_id）")
+                    raise ValueError("No conversation id (_meta has no antigravity.google/conversation_id)")
                 text = {"office_profile": lambda: tool_profile(cid, args), "office_roster": tool_roster,
                         "office_send": lambda: tool_send(cid, args)}[name]()
                 reply(mid, {"content": [{"type": "text", "text": text}]})
             except KeyError:
-                reply(mid, error={"code": -32602, "message": f"沒有這個工具：{name}"})
+                reply(mid, error={"code": -32602, "message": f"No such tool: {name}"})
             except Exception as e:
                 reply(mid, {"content": [{"type": "text", "text": str(e)}], "isError": True})
         else:  # 包括新版的 server/discover：回「沒有這個方法」，agy 會改走 initialize
@@ -426,7 +426,7 @@ def drop_legacy() -> None:
         save(LEGACY_HOOKS, cfg)
     else:
         LEGACY_HOOKS.unlink()
-    print(f"已移除舊版全域 hook（{LEGACY_HOOKS} 的「{PLUGIN}」）")
+    print(f"Removed the old global hook (\"{PLUGIN}\" in {LEGACY_HOOKS})")
 
 
 def install() -> None:
@@ -434,14 +434,14 @@ def install() -> None:
     sync_cli()
     r = subprocess.run([agy_exe(), "plugin", "install", str(Path(__file__).resolve().parent)])
     if r.returncode:
-        sys.exit("agy plugin install 失敗：多半是有 agy 視窗開著、外掛資料夾被佔用。關掉所有 agy 視窗再跑一次")
-    print("新開的 agy 視窗生效。")
+        sys.exit("agy plugin install failed: most likely an agy window is open and holds the plugin folder. Close all agy windows and run again")
+    print("Takes effect in newly opened agy windows.")
 
 
 def uninstall() -> None:
     drop_legacy()
     subprocess.run([agy_exe(), "plugin", "uninstall", PLUGIN])
-    print(f"{DATA} 留著（刪掉也可以）。")
+    print(f"{DATA} is kept (safe to delete).")
 
 
 if __name__ == "__main__":
@@ -459,13 +459,13 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
     if cmd == "send":
         args = sys.argv[2:]
-        frm = "未署名"
+        frm = "unsigned"
         if "--from" in args:
             i = args.index("--from")
             frm = " ".join(args[i + 1:i + 2]) or frm
             args = args[:i] + args[i + 2:]
         if len(args) < 2:
-            sys.exit("用法：send <收件者> <訊息> [--from <寄件者>]")
+            sys.exit("Usage: send <to> <message> [--from <sender>]")
         try:
             print(deliver(args[0], " ".join(args[1:]), frm))
         except ValueError as e:

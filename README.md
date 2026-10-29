@@ -104,7 +104,7 @@ Say "let's have a meeting" to have several sessions work out a plan together; in
 
 ## More
 
-The in-app text and the detailed docs are in Traditional Chinese.
+The in-app text is English; the detailed docs are in Traditional Chinese.
 
 - All commands, personal buttons, click-to-approve, mobile, rendering details: [docs/使用說明.md](docs/使用說明.md)
 - Antigravity CLI: [docs/agy-寄件協作.md](docs/agy-寄件協作.md)

@@ -7,6 +7,20 @@
 
 ---
 
+## 0.32.0 — 2026-10-29
+
+- **改了什麼**：看得到的介面全改英文
+  - 面板、按鈕（Night mode／Lights on、Review <名牌>、Allow (in 1s)／Allow (ready)、Cancel）、家具名與選單（Recent mail、Add event…）、狀態字、toast、`/office` 的回覆與用法、`office_profile` 回覆、名單表頭（Name／Title／Role／Now）與角色（manager／staff／dept lead）
+  - 門牌：主管室→`MANAGERS`、會議室→`MEETING`（`vector.ts`；112、60 欄實測放得下）
+  - 手機面板 `remote/page.html`、`remote/server.ts` 的狀態字與錯誤、manifest 名稱
+  - agy：`agy_office.py` 的訊息、寄信抬頭改 `📨 Pixel office message from …`、名單表頭；`agy/skills/office/SKILL.md` 跟著改
+  - 英文比中文寬，兩處重調：Allow 冷卻中的字改 `Allow (in 1s)`，跟 `Allow (ready)` 同寬（Deny 不跳位）；月曆選單 `Add event`（48 欄才放得進房間）
+  - **沒改**：skill `team` 內容（llm-wiki 相容：collab.md 的「主管／在線」標題）；中文參數照收（`/office role 主管`、`/office pet 貓`…）；選單裡 `/llm-wiki:wiki-day 開工／收工` 的參數
+  - README／使用說明的畫面字樣、`docs/office.png`、`meeting.png`、`social-preview.png` 重拍（門牌英文）
+- **為什麼**：jacky 2026-10-29「辦公室內部的也改成英文好了 盡量不要讓我們的介面有中文」，範圍選「只改看得到的介面」
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.31.0 — 2026-10-29
 
 - **改了什麼**：搬到獨立 repo `Q00jkf/pixel-office`（`git subtree split` 帶 105 筆歷史），自帶 marketplace `pixel-office`；README／agy 指南的安裝指令、cache 路徑、`plugin.json` 的 repository、各檔裡的 `plugins/pixel-office/` 路徑改成新 repo；補 `LICENSE`、`CHANGELOG.md`、`CLAUDE.md`。行為不變
