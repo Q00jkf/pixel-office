@@ -36,6 +36,7 @@ PLUGIN = "pixel-office"
 STALE_MS = 20000  # 同 hooks/status.ts
 BEAT = 5          # 看守多久續一次心跳（秒）；辦公室 20 秒沒心跳就當離開
 IDLE_EXIT = 60    # 沒有 agy 在線這麼久，看守自己結束
+DONE_MS = 5000    # 「完成」顯示多久後改回閒置（同 hooks/register.tsx revertLater 5000）
 WAIT_S = 90       # 寄過信的那一輪，Stop 最多等回信幾秒（等待中 agy 轉圈、不能打字，Esc 可中斷）；hooks.json 的 Stop timeout 要比它長
 MAX_CHAIN = 5     # 沒有使用者介入時，最多自動續跑幾輪（防兩個 AI 無限互回）
 READ_TOOLS = re.compile(r"view|read|list|grep|search|find|glob|fetch|browser_get", re.I)
@@ -393,6 +394,8 @@ def watch() -> None:
             if locked(p.stem[len("agy-"):]):
                 live += 1
                 s["updatedAt"] = now_ms()
+                if s.get("mode") == "done" and now_ms() - s.get("since", 0) > DONE_MS:
+                    s.update(mode="idle", modeWas="idle", since=now_ms())
             else:
                 s["left"] = True
             try:
