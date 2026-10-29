@@ -41,7 +41,7 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 
 ## 在知識庫（llm-wiki vault）裡
 
-照常用本 skill；vault 才有的規則（受控紀錄的禁止事項、`_README.md` 歸屬、`hot.md`／`log.md`）在 llm-wiki 的 `wiki-collabteam`，**那份是補充，不取代這份**。
+照常用本 skill；vault 才有的規則（受控紀錄的禁止事項、`_README.md` 歸屬、`hot.md`／`log.md`）在 llm-wiki 的 `wiki-collabteam`，**那份是補充，不取代這份**。vault 的卡多「用到才查」「守門腳本」兩段，`collab.md` 多幾段擴充；舊 vault 的 `wiki/meta/coordination.md`、`wiki/meta/roles/` 用 `role_cards.py migrate` 搬過來。
 
 ## 共通前提
 
