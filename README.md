@@ -157,7 +157,7 @@ Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office�
 
 ## Antigravity CLI（agy，0.27.0 起顯示、0.28.0 起互傳訊息）
 
-`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事（名牌＝工作資料夾名），並跟 Claude session 互傳訊息。設計與實測紀錄：`docs/designs/agy.md`。
+`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事（名牌＝工作資料夾名），並跟 Claude session 互傳訊息。給使用者的安裝與用法：`docs/agy-寄件協作.md`；設計與實測紀錄：`docs/designs/agy.md`。
 
 - 安裝：`python <plugin>/agy/agy_office.py install` —— 複製到 `~/.claude/pixel-office/agy/`，在 `~/.gemini/config/hooks.json` 加「pixel-office」一組 hook（別的設定不動）；**新開的 agy 視窗**才生效。移除：`… uninstall`。外掛升版後重跑一次 install 才會換新腳本
 - hook 只接 `SessionStart`／`PreInvocation`／`PostInvocation`／`PostToolUse`／`Stop`，不接 `PreToolUse`（不碰 agy 的權限判斷）；任何錯都吞掉、exit 0，壞了也不會卡住 agy
