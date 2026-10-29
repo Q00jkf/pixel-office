@@ -16,6 +16,8 @@ call_mcp_tool(ServerName="pixel-office_office", ToolName="office_roster", Argume
 call_mcp_tool(ServerName="pixel-office_office", ToolName="office_send", Arguments={"to": "ofdesign", "text": "..."})
 ```
 
+If the call fails with `unknown tool: "call_mcp_tool"`: plugin MCP servers are still loading (they start after login, a few seconds after the window opens). Wait ~10 s (`run_command` with `Start-Sleep 10` / `sleep 10`) and retry once. Do **not** start `agy_office.py mcp` yourself through the shell.
+
 | ToolName | Use |
 |---|---|
 | `office_profile` | Set your nameplate (`name`: 1–12 ASCII letters/digits, unique) and/or `title` (≤16 chars, what you are doing). Do it when the user names you or your task changes. |

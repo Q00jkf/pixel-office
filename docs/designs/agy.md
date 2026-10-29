@@ -69,4 +69,6 @@ agy ──python agy_office.py send <Claude 名稱> "…"──▶ commands/<ses
 - MCP：agy 先送 `server/discover`（回 -32601 後改走 `initialize`）→ `tools/list`。外掛的工具被列為 **Lazy**，不是原生工具，agy 透過 `call_mcp_tool(ServerName="<外掛>_<server>", ToolName, Arguments)` 呼叫。agy 第一輪自稱「MCP 工具 0 個」是它只數了原生工具（它事後更正）。
 - `tools/call` 的 `params._meta` 帶 `antigravity.google/conversation_id`：MCP 工具知道是哪個對話叫的，不用靠 hook 對應。
 - log 的「Not reloading plugin MCP servers: not logged into Antigravity」是啟動時序，隨後 keyring 登入成功，不影響（agy 查證，轉述）。
+- 視窗剛開就叫工具時，`call_mcp_tool` 可能回 unknown tool（推測外掛 MCP 在登入後才載入）；skill 要求等 10 秒重試。agy 若自己用 shell 啟動 MCP server 繞過，PowerShell 管線會把中文寫成「???」（2026-10-29 實測）。
+- 端到端驗證（2026-10-29，agy 用 Claude Opus 4.6）：`office_profile`、`office_roster`、`office_send`＋寄完等回信都通過。
 - agy 內建的 `send_message` 只能送給同一對話樹的 subagent，不能跨 session（agy 查證，轉述）。
