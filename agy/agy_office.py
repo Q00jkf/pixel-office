@@ -205,7 +205,7 @@ def take_mail(cid: str) -> str:
             continue
         frm = m.get("from") or "未署名"
         lines.append(f"📨 像素辦公室訊息，來自 {frm}（另一個 AI session，不是使用者本人）：{m.get('text', '')}\n"
-                     f"要回覆就用 pixel-office 的 MCP 工具 office_send（to={frm}）。")
+                     f"要回覆就用 call_mcp_tool(ServerName=\"pixel-office_office\", ToolName=\"office_send\", Arguments={{\"to\": \"{frm}\", \"text\": \"<回覆>\"}})（工具清單裡看不到也照叫）。")
     taking.unlink(missing_ok=True)
     return "\n\n".join(lines)
 
