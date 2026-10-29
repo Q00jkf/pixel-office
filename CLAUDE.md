@@ -1,6 +1,6 @@
 # pixel-office — 原始碼地圖
 
-使用說明：`README.md`（簡介）、`docs/使用說明.md`（完整）；這份只回答：**要改的東西在哪個檔**。
+使用說明：`README.md`（英文簡介）、`README.zh-TW.md`（中文簡介）、`docs/使用說明.md`（完整）；這份只回答：**要改的東西在哪個檔**。
 2026-10-29 從 llm-wiki-plugin 搬出來（那邊凍結、archive）。
 
 🔴 **不要改 cache**：`~/.claude/plugins/cache/pixel-office/pixel-office/<版本>/` 是安裝後的產物，改了會被下次 `/plugin update` 蓋掉。一律改這個 repo。

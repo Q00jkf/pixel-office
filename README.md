@@ -1,114 +1,111 @@
-# pixel-office（像素辦公室）
+# pixel-office
 
-> **English** — A Claude Code plugin that turns every running Claude Code session into a pixel-art coworker in a shared office: see who is typing, thinking, stuck, or waiting for your approval at a glance.
-> - **Claude × Google Antigravity in one office** — Antigravity CLI conversations join the same office (blue-violet **G** badge) and exchange messages with Claude sessions; agy waits for the reply and continues on its own.
-> - **Multi-session teamwork** — one skill (`team`): managers, two-layer org (department leads with their own squads), role cards, meetings.
-> - **Remote from your phone** — a local server + Cloudflare Tunnel/Access lets you watch the office and send a command to any session.
->
-> Install: `/plugin marketplace add Q00jkf/pixel-office` → `/plugin install pixel-office@pixel-office` → restart → `/office`. Docs below are in Traditional Chinese.
+**English** | **[繁體中文](README.zh-TW.md)**
 
-把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事，加上多 session 協作的做法。
-**Claude 和 Google Antigravity 也能坐進同一間辦公室、互相寄信分工。**
+A Claude Code plugin that turns every running Claude Code session into a pixel-art coworker in a shared office, plus a way to run many sessions as a team.
+**Claude and Google Antigravity can sit in the same office and hand work to each other.**
 
-<img src="docs/office.png" alt="像素辦公室（Desktop）：主管室兩位主管、三個團隊區、部門主管 dev 帶自己的小隊、agy 名牌帶 G 徽章" width="720">
+<img src="docs/office.png" alt="pixel-office in Claude Desktop: two managers in the manager's room, three team areas, department lead dev with its own squad, Antigravity coworkers with a G badge" width="720">
 
-<sub>Claude Desktop 畫面。★ 是主管：★willy、★jacky 是頂層主管，坐主管室；★dev 是**第 2 層的部門主管**，不進主管室，坐在自己的「TEAM dev」區第一個位子帶小隊。research、wengpun 是 Antigravity（G）。</sub>
+<sub>Claude Desktop view. ★ marks a manager: ★willy and ★jacky are top-level managers in the manager's room; ★dev is a **layer-2 department lead**, so it sits at the first desk of its own "TEAM dev" area with its squad. research and wengpun are Antigravity (G).</sub>
 
-- **看得到大家在做什麼**：打字、讀檔、思考、出錯、等你核准，一眼看出
-- **多 session 協作**：一個 skill `team`，負責分主管和員工、派工、開會
-- **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信
-- **人在外面也能管**：接上 Cloudflare，手機隨時看辦公室、對任一個 session 下指令
+- **See what everyone is doing**: typing, reading, thinking, erroring, waiting for your approval — at a glance
+- **Multi-session teamwork**: one skill, `team` — managers and staff, task hand-off, meetings
+- **Cross-vendor AI teamwork**: Antigravity CLI (agy) conversations join the office with a blue-violet **G** badge and message Claude sessions
+- **Manage it from anywhere**: with Cloudflare, watch the office and send a command to any session from your phone
 
-## ✨ Claude × Antigravity 一起工作
+## ✨ Claude × Antigravity, working together
 
-兩家的 AI 各開在自己的視窗，在同一間辦公室裡互相交辦：
+Each AI runs in its own window, and they assign work to each other in the same office:
 
 ```
-Claude（主管）── 寄信：「查一下這三顆料的規格」──▶ agy（research）
-Claude（主管）◀── 回信：整理好的規格表 ─────────── agy
+Claude (manager) ── mail: "look up specs for these three parts" ──▶ agy (research)
+Claude (manager) ◀── reply: a tidy spec table ───────────────────── agy
 ```
 
-- **各用所長、額度分開算**：Claude 的額度快用完時，查資料、整理之類的雜事交給 agy 的 Gemini
-- **agy 寄完信會自己等回信**（最多 90 秒），收到就接著做，不用你在兩個視窗之間轉貼
-- **agy 有自己的辦公室工具**：取名牌、看誰在線、寄信，跟 Claude 用的是同一套
-- **兩邊都用一般互動視窗**，不用 `-p`，你隨時看得到、插得進話
-- 防呆：信上標明「來自另一個 AI，不是使用者本人」；兩個 AI 自動來回最多 5 輪就停
+- **Play to each side's strengths, separate quotas**: when Claude's quota runs low, hand lookups and tidy-up work to agy's Gemini
+- **agy waits for the reply on its own** (up to 90 s) and continues when it arrives — no copy-pasting between windows
+- **agy has its own office tools**: set a nameplate, see who's online, send mail — the same set Claude uses
+- **Both sides use normal interactive windows**, not `-p`, so you can always watch and step in
+- Safeguards: mail is labeled "from another AI, not the user"; AI-to-AI auto replies stop after 5 rounds
 
-設定一次就好：[docs/agy-寄件協作.md](docs/agy-寄件協作.md)
+One-time setup: [docs/agy-寄件協作.md](docs/agy-寄件協作.md) (Chinese)
 
-> 2026-10-29 起從 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 搬出來獨立（歷史一起帶過來）。
-> ⚠️ 用的是 Claude Code 的 function hooks（early access，版本間可能變動）。
+> Moved out of [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) on 2026-10-29, with full history.
+> ⚠️ Built on Claude Code function hooks (early access; may change between versions).
 
-## 📱 人在外面也能管（Cloudflare 遠端）
+## 📱 Manage it from anywhere (Cloudflare remote)
 
-本機跑一個小伺服器畫同一間辦公室，用 Cloudflare Tunnel 接到外面，手機瀏覽器打開（可以加到主畫面）：
+A small local server draws the same office; connect it through Cloudflare Tunnel and open it in your phone's browser (add it to your home screen):
 
-- **看**：誰在做什麼、誰卡住、誰在等你
-- **點人**：看職稱、狀態、最近的錯誤，還有它最後回了什麼
-- **下指令**：在卡片打字送出，那個 session 會當成你打的字照做（前面標 📱）
-- **只有你進得來**：前面掛 Cloudflare Access，只放行你登入的帳號；伺服器本身只聽本機
-- 不用開著任何 session 的面板，電腦開著就好。權限核准還是要回電腦按
+- **Watch**: who is doing what, who is stuck, who is waiting for you
+- **Tap a coworker**: title, status, latest error, and its last reply
+- **Send a command**: type on the card and that session runs it as if you typed it (marked 📱)
+- **Only you get in**: Cloudflare Access in front lets only your login through; the server itself listens on localhost only
+- No session needs its panel open — just keep the computer on. Permission approvals still happen on the computer
 
-設定方式：[docs/使用說明.md](docs/使用說明.md) 的「手機版」
+Setup: the "手機版" (mobile) section of [docs/使用說明.md](docs/使用說明.md)
 
-## 安裝
+## Install
 
 ```
 /plugin marketplace add Q00jkf/pixel-office
 /plugin install pixel-office@pixel-office
 ```
 
-重開 Claude Code，輸入 `/office`。
+Restart Claude Code and type `/office`.
 
-原本裝的是 `pixel-office@llm-wiki`：先 `/plugin uninstall pixel-office@llm-wiki` 再照上面裝。名牌、按鈕設定都保留。
+Previously installed `pixel-office@llm-wiki`? Run `/plugin uninstall pixel-office@llm-wiki` first, then install as above. Nameplates and buttons are kept.
 
-## 常用
+## Everyday commands
 
-| 指令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/office` | 開辦公室面板 |
-| `/office who` | 誰在線、在做什麼 |
-| `/office name <英數字>` | 改桌上名牌 |
-| `/office title <職稱>` | 改職稱 |
-| `/office role 主管`／`員工` | 換角色（主管坐主管室） |
+| `/office` | Open the office panel |
+| `/office who` | Who's online and what they're doing |
+| `/office name <letters/digits>` | Set your desk nameplate |
+| `/office title <title>` | Set your job title |
+| `/office role manager` / `staff` | Switch role (managers sit in the manager's room) |
 
-點家具會跳出選單（查信、git、開工收工…），點寵物可以餵牠。
+Click furniture for a menu (mail, git, start/end of day…); click the pet to feed it.
 
-## 協作（skill `team`）
+## Teamwork (skill `team`)
 
-一個人開很多 session 時怎麼分工。只有一個 skill，不用記指令，直接跟 Claude 說就好。
+How one person splits work across many sessions. It is a single skill — no commands to learn, just tell Claude.
 
-### 兩層架構
+### Two layers
 
-| 層 | 什麼時候用 | 辦公室裡 |
+| Layer | When | In the office |
 |---|---|---|
-| 0 | 一個 session 自己做完 | 員工座位 |
-| 1 | 一位主管帶幾個員工 | 主管坐主管室，員工坐「TEAM <主管>」區 |
-| 2 | 專案大到要分部門 | **部門主管**（上圖的 ★dev）坐自己部門那一區的第一個位子，帶自己的小隊；上一層主管照常坐主管室 |
+| 0 | One session does it all | A staff desk |
+| 1 | One manager leads a few staff | Manager in the manager's room, staff in the "TEAM <manager>" area |
+| 2 | The project needs departments | A **department lead** (★dev above) takes the first desk of its own area and leads its own squad; the top manager stays in the manager's room |
 
-- 升層：說「你來當主管」，或員工自己提議，**你說好才升**
-- 降層：主管底下沒人在線滿 20 分鐘會提醒，問你要不要降，不會自動降
+- Step up: say "you're the manager", or a session proposes it — **it only happens when you agree**
+- Step down: after 20 minutes with nobody online under a manager, it reminds you and asks; it never steps down by itself
 
-### 多位主管
+### Multiple managers
 
-同時跑好幾個專案，每個專案各有一位主管：主管室最多擺 3 張桌，每位主管的員工各坐一區、地毯顏色不同，一眼分得出誰是哪一隊。
+Run several projects at once, each with its own manager: the manager's room holds up to 3 desks, and each manager's staff sit in their own area with a different carpet colour, so you can tell the teams apart instantly.
 
-### 角色設計
+### Role design
 
-- **不內建任何方法**：說「照 <規則> 設角色」（AIMM、gstack、你自己的流程），它列出角色和邊界，你核可才建
-- **角色卡**放在專案的 `.claude/office/roles/`（進 git）：寫職責、邊界、交付；做到哪記在檢查點，換一個 session 也接得上
-- **小隊**：常用的一組角色（例如「研發＋測試」、「PM＋採購」）存在 `~/.claude/office/squads/`，整台電腦共用；開第二層時直接挑一組
+- **No built-in methodology**: say "set up roles following <rules>" (AIMM, gstack, your own process); it lists roles and boundaries, and creates them only after you approve
+- **Role cards** live in the project's `.claude/office/roles/` (committed to git): responsibilities, boundaries, deliverables; progress goes into checkpoints, so a new session can pick up where the last one left off
+- **Squads**: save a set of roles you use often (e.g. "dev + test", "PM + purchasing") in `~/.claude/office/squads/`, shared across the machine; pick one when opening layer 2
 
-### 開會
+### Meetings
 
-說「開會」，讓幾個 session 討論出一個方案；被點名的人會走進會議室坐下，散會再走回座位。
+Say "let's have a meeting" to have several sessions work out a plan together; invited coworkers walk into the meeting room and return to their desks when it ends.
 
-<img src="docs/meeting.png" alt="開會：dev、impl、test、pm 與 agy 的 research 坐進會議室，TEAM dev 的座位空出來" width="720">
+<img src="docs/meeting.png" alt="Meeting: dev, impl, test, pm and Antigravity's research sit in the meeting room; the TEAM dev desks are empty" width="720">
 
-<sub>被點名的 5 位（含部門主管 ★dev 和 Antigravity 的 research）坐進會議室，TEAM dev 的座位空著；沒被點名的照常在座位上工作。</sub>
+<sub>The 5 invitees (including department lead ★dev and Antigravity's research) sit in the meeting room and the TEAM dev desks are empty; everyone else keeps working at their desk.</sub>
 
-## 更多
+## More
 
-- 全部指令、個人按鈕、點人核准、手機版、畫面細節：[docs/使用說明.md](docs/使用說明.md)
-- Antigravity CLI：[docs/agy-寄件協作.md](docs/agy-寄件協作.md)
-- 改程式：[CLAUDE.md](CLAUDE.md)
+The in-app text and the detailed docs are in Traditional Chinese.
+
+- All commands, personal buttons, click-to-approve, mobile, rendering details: [docs/使用說明.md](docs/使用說明.md)
+- Antigravity CLI: [docs/agy-寄件協作.md](docs/agy-寄件協作.md)
+- Hacking on it: [CLAUDE.md](CLAUDE.md)
