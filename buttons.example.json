@@ -4,5 +4,5 @@
   { "object": "mailbox", "label": "狀態", "prompt": "git status 並用一兩句摘要" },
   { "label": "開工", "prompt": "/llm-wiki:wiki-day 開工" },
   { "label": "收工", "prompt": "/llm-wiki:wiki-day 收工" },
-  { "label": "說明", "url": "https://github.com/Q00jkf/llm-wiki-plugin" }
+  { "label": "說明", "url": "https://github.com/Q00jkf/pixel-office" }
 ]

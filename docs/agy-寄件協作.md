@@ -23,8 +23,8 @@
 **1. Claude Code 裝外掛**（在 Claude Code 裡打）：
 
 ```
-/plugin marketplace add Q00jkf/llm-wiki-plugin
-/plugin install pixel-office@llm-wiki
+/plugin marketplace add Q00jkf/pixel-office
+/plugin install pixel-office@pixel-office
 ```
 
 重開 Claude Code，打 `/office` 看得到辦公室就成功。
@@ -32,7 +32,7 @@
 **2. 給 agy 裝它那一半**（先**關掉所有 agy 視窗**，再在 PowerShell 跑；`<版本>` 換成你裝的版本，例如 `0.30.0`）：
 
 ```powershell
-python "$HOME\.claude\plugins\cache\llm-wiki\pixel-office\<版本>\agy\agy_office.py" install
+python "$HOME\.claude\plugins\cache\pixel-office\pixel-office\<版本>\agy\agy_office.py" install
 ```
 
 它會用 `agy plugin install` 裝一個叫 `pixel-office` 的 agy 外掛，裡面有：

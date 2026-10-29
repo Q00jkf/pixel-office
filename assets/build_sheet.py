@@ -1,7 +1,7 @@
 # 由 2dpig/PixelOfficeAssets.png 產生 Desktop 向量畫面用的素材表：
 #   assets/office-sheet.png —— 原素材表去掉天空（上 40 列）＋ 5 個人物 × 8 種上衣顏色
 #   hooks/sheet.ts          —— 上面那張的 base64 與每個圖素的裁切框（vector.ts 用）
-# 用法：python plugins/pixel-office/assets/build_sheet.py（改了這支或素材就重跑，兩個產物都進 repo）
+# 用法：python assets/build_sheet.py（改了這支或素材就重跑，兩個產物都進 repo）
 import base64, io, sys
 from pathlib import Path
 from PIL import Image

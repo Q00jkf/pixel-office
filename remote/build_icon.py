@@ -1,6 +1,6 @@
 # 手機主畫面圖示（jacky 2026-10-27 選 A：打電腦的人）：從 assets/office-sheet.png 拼 40 格，放大成 PNG。
 # Android 主畫面不吃 SVG 圖示（會退成網址字首「J」），要 PNG；maskable 版內容縮在中間 80%（安全區）。
-# 重跑：python plugins/pixel-office/remote/build_icon.py
+# 重跑：python remote/build_icon.py
 from pathlib import Path
 from PIL import Image, ImageDraw
 

@@ -1,4 +1,4 @@
-﻿// bun test plugins/pixel-office/remote（叫 .spec.ts：claude plugin test 會載入所有 .test.ts，而這是本機伺服器、不是 mod）
+﻿// bun test remote（叫 .spec.ts：claude plugin test 會載入所有 .test.ts，而這是本機伺服器、不是 mod）
 import { expect, test } from 'bun:test'
 
 import { layout } from '../hooks/scene'

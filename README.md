@@ -4,16 +4,20 @@
 
 <img src="docs/office.png" alt="像素辦公室截圖" width="420">
 
-llm-wiki marketplace 裡的 plugin：只要畫面可以不裝；**要多 session 協作就要裝**——協作做法（skill `team`）在這裡，llm-wiki 的 `wiki-collabteam` 只補 vault 專屬規則。
+只要畫面可以不裝；**要多 session 協作就要裝**——協作做法（skill `team`）在這裡。用 llm-wiki 知識庫的 vault，`wiki-collabteam` 只補 vault 專屬規則。
+
+> 2026-10-29 起從 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 搬出來獨立（歷史一起帶過來）。原本從 `llm-wiki` marketplace 裝的，換裝方式見「安裝」。
 
 > ⚠️ 使用 Claude Code 的 function hooks（early access，版本間可能變動）。2026-10-03 於 Claude Code 2.1.288 開發與測試。
 
 ## 安裝
 
 ```
-/plugin marketplace add Q00jkf/llm-wiki-plugin
-/plugin install pixel-office@llm-wiki
+/plugin marketplace add Q00jkf/pixel-office
+/plugin install pixel-office@pixel-office
 ```
+
+原本裝的是 `pixel-office@llm-wiki`：先 `/plugin uninstall pixel-office@llm-wiki` 再照上面裝（同名 plugin 不要兩個同時啟用）。辦公室資料夾 `~/.claude/pixel-office/` 不變，名牌、按鈕設定都保留。
 
 重開 Claude Code 後輸入 `/office` 開面板。
 
@@ -90,7 +94,7 @@ llm-wiki marketplace 裡的 plugin：只要畫面可以不裝；**要多 session
 最快的做法是複製 plugin 附的範例檔再改：
 
 ```
-cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-office/buttons.json
+cp "<plugin 目錄>/buttons.example.json" ~/.claude/pixel-office/buttons.json
 ```
 
 內容長這樣：
@@ -148,7 +152,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 最新回覆（0.23.0）：每個 session 每輪結束把最後的回覆寫到 `replies/<session>.json`（上限 8000 字），卡片顯示；回手機命令的那輪會標「回你：📱 …」。Markdown 照原文顯示
 - 團隊分區：手機只有 2 欄，一隊佔一整排（8 個位子）、由上往下，沒 team 的人坐下面；排不下就把畫面加長，頁面上下滑
 - 主畫面圖示：`remote/build_icon.py` 從素材表拼出 `icon-192.png`／`icon-512.png`／`icon-maskable.png`（Android 不吃 SVG 圖示），改圖就重跑
-- 測試：`bun test plugins/pixel-office/remote`（檔名 `.spec.ts`：`claude plugin test` 會載入所有 `.test.ts`）
+- 測試：`bun test remote`（檔名 `.spec.ts`：`claude plugin test` 會載入所有 `.test.ts`）
 
 ### 圖素：2dPig Pixel Office（CC0）
 
@@ -176,6 +180,6 @@ Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office�
 ## 開發
 
 ```
-claude plugin validate plugins/pixel-office
-claude plugin test plugins/pixel-office
+claude plugin validate .
+claude plugin test .
 ```
