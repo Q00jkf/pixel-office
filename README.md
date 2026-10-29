@@ -4,7 +4,7 @@
 
 <img src="docs/office.png" alt="像素辦公室截圖" width="420">
 
-llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
+llm-wiki marketplace 裡的 plugin：只要畫面可以不裝；**要多 session 協作就要裝**——協作做法（skill `team`）在這裡，llm-wiki 的 `wiki-collabteam` 只補 vault 專屬規則。
 
 > ⚠️ 使用 Claude Code 的 function hooks（early access，版本間可能變動）。2026-10-03 於 Claude Code 2.1.288 開發與測試。
 
@@ -28,7 +28,7 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | `/office who` | 列出在線每人的名牌、職稱、角色、ListAgents 名稱、目前狀態（見下方「名單」） |
 | `/office agent <名稱>` | 登記 ListAgents 名稱，別人傳訊息給你時才畫得出紙飛機 |
 | `/office buttons` | 重讀個人按鈕設定（`~/.claude/pixel-office/buttons.json`，見下方「個人按鈕」） |
-| `/office team <主管名稱>｜off` | 登記你是哪位主管的 peer（填主管的 ListAgents 名稱）；peer 坐最右邊那一區，其他人坐左邊 |
+| `/office team <主管名稱>｜off` | 登記你歸哪位主管（填主管的 ListAgents 名稱）；peer 坐最右邊那一區，其他人坐左邊。主管也可以填，填了就是**部門主管**（見「協作」） |
 | `/office auto on｜off` | 宣告這個 session 是 auto 權限模式；auto 的權限詢問交給分類器，不舉手 |
 | `/office approve on｜off` | 這個視窗開著面板時，要不要替別的 session 按權限核准（見下方「點人核准」）；**預設關**，重開後記得 |
 | `/office bite [名牌]` | 放貓咬人（小寶寶是爬過去抱大腿、山雀是飛過去唱歌）；不指定就隨機挑一位員工，主管在主管室不會被咬 |
@@ -40,6 +40,20 @@ llm-wiki marketplace 裡的**選裝** plugin，不裝不影響 llm-wiki。
 | **點家具** | 旁邊展開小選單，選一項就把 prompt 送進這個視窗（見下方「家具選單」）；再點同一件或按「取消」收起，同時只開一個 |
 
 模型也能自己設定：工具 `mcp__pixel-office__office_profile`，系統提示會提醒它「被指派或卸下主管時呼叫」。
+
+## 協作（skill `team`，0.25.0 起）
+
+一人開多個 session 時怎麼分工。外掛只當**輔助**（畫面、省 token），**不內建任何方法**：要照 AIMM、gstack 或專案自己的流程，說「照 <規則> 設角色」，它讀完列出角色與邊界，你核可才建卡（jacky 2026-10-29 定）。
+
+| 層 | 長相 | 辦公室 |
+|---|---|---|
+| 0 | 一個 session 自己做完 | 員工 |
+| 1 | 主管帶幾條線 | 主管坐主管室，peer 掛 `team` |
+| 2 | 專案主管底下分部門 | 部門主管＝`role=主管`＋`team=<專案主管>`，**坐自己部門那一區第一個位子**、那一區的地毯和「TEAM」是他的；名單標「部門主管」。上一層主管不在線時照舊當主管；互相掛不算 |
+
+- **升層**：session 提議、你說好才登記成主管；這時才建專案資料夾 `<主 repo>/.claude/office/`（worktree 一律寫回主 repo）：`collab.md`（狀態，只有主管寫）、`roles/<角色>.md`（定義，進 git）、`checkpoints/<角色>.md`（只往後加）；資料夾裡自帶 `.gitignore` 讓前一個和最後一個不進 git。外掛本身不寫專案檔，由 skill 建
+- **降層**：主管底下沒有在線的人滿 20 分鐘，外掛在你下一則指令附一句提醒給模型（一段沒人的期間只提醒一次），它會問你要不要降；**不自動改**
+- 細節在 `skills/team/`：`SKILL.md`（入口）、`roles.md`（產生角色、角色卡、接手、檢查點）、`lead.md`（升降層、collab.md、派工、回報）、`meet.md`（開會）
 
 ## 名單（`/office who`、工具 `office_roster`）
 
@@ -104,7 +118,7 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 - 登記為某位主管 peer 的人（`/office team`）坐那位主管的區：第一位主管最右一欄、第二位往左一欄…，各鋪一種地毯（金、藍、綠）、上方掛「TEAM <主管名牌>」；有人分不到區（沒有 team，或他的主管排不進分區）時，最左一欄留給他們，沒有就每欄都能當分區。一位主管時有沒有 peer 都鋪；兩位以上只給有 peer 在線的主管，坐不下桌子的主管也有分區。排得出兩欄才分區；換區時會起身走過去
 - 大門右邊是使用者的櫃台（下方外牆標 `YOU`），等核准的人拿紙來這裡排隊（見「點人核准」）；面板太窄（約 58 欄以下）放不下就不畫，改排大門口
 - 每人有固定座位，別人進出不會讓他換位
-- **開會**：llm-wiki 開會（說「開會」，skill `wiki-collabteam`）時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；不設期限，主持人散會（`action=end`）或參與者全都離線就清空；只是畫面，討論本身由 `wiki-collabteam` 的 `meet.md` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
+- **開會**：開會（說「開會」，skill `team` 的 `meet.md`）時呼叫工具 `office_meeting`，被點名的參與者（不限 team）閒著就走進會議室坐下，忙的做完再進，散會才走回原座位；不設期限，主持人散會（`action=end`）或參與者全都離線就清空；只是畫面，討論本身由 skill `team` 的 `meet.md` 跑。`/office meeting` 看狀態、`/office meeting off` 提早散會。底層是 `~/.claude/pixel-office/meeting.json` = `{"until": <epoch ms>, "topic": "…", "participants": ["<ListAgents 名稱或名牌>"]}`；沒有 `participants` 時改由主管的 peer 進場
 - **對外動作會跑腿**：寄信（Gmail 寄送／回覆／轉寄／草稿）拿著紙走去影印機；上傳文件（Google Drive、Notion 建立／更新）拿資料夾走去檔案櫃；`git push` 拿包裹走去大門口的郵筒；成功才算，走完回座位
 - 員工座位坐不下時左上角顯示 `+N`
 - 終端版用色塊（`▀`）即時畫、每秒 4 格；Claude Desktop 畫 SVG（`hooks/vector.ts`）：人、家具、黑貓、柯基用 2dPig 素材圖（白牆窗戶、藍磚地板、隔間桌；5 個人物依名字固定分配，再依名字換上衣顏色，主管穿深藍西裝），寶寶與山雀是同色盤手繪的像素圖（坐／爬、停／飛兩格）；檔案櫃素材沒有，照色盤畫；名牌、狀態泡泡（思考、出錯冒汗、等核准問號、紅牌、打瞌睡 z）、螢幕、團隊地毯用向量畫；走路左右腳交替（兩格跨步＋1 像素起伏，往左走翻面、上下走維持正面），打字上下輕跳；名牌與門牌可以是中文；員工區牆上時鐘顯示現在時間（本機時區），每 0.5 秒更新一次（約每秒 2 格），按鈕相同。兩邊座位、走路、貓、紙飛機用同一套計算

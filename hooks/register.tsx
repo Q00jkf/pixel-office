@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { GEOM, isAttendee, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, rejoin, walkerPos } from './scene'
+import { GEOM, isAttendee, isDeptLead, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, rejoin, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Seat, Walker } from './scene'
 import { STALE_MS, parseStatus } from './status'
 import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
@@ -263,7 +263,7 @@ export const MENUS: Record<Furniture, { label: string; prompt: string }[]> = {
     { label: '開工', prompt: '/llm-wiki:wiki-day 開工' },
     { label: '收工', prompt: '/llm-wiki:wiki-day 收工' },
   ],
-  meeting: [{ label: '開會', prompt: '/llm-wiki:wiki-collabteam 開會' }],
+  meeting: [{ label: '開會', prompt: '/pixel-office:team 開會' }],
 }
 
 /** 某件家具的選單：使用者在 buttons.json 有寫這件家具就整份用他的，沒有就用預設 */
@@ -601,6 +601,18 @@ function clashNotes(list: Coworker[]): string[] {
 
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
+export const DEMOTE_MS = 20 * 60000 // 主管底下沒有在線員工滿這麼久 → 下一則使用者指令附降層提醒（jacky 2026-10-29）
+export const DEMOTE_NOTE =
+  "Pixel office: you are registered as manager but nobody online has had team=you for 20 minutes. If multiple sessions are no longer needed, ask the user whether to step down (office_profile role=員工, then clear collab.md's 在線 rows per skill pixel-office:team). If windows are only closed for now, keep as is. Don't change it yourself."
+let reportsSeenAt: number | undefined // 最後一次看到有人掛在我底下（或我還不是主管）的時間
+let demoteNoted = false // 這段沒人的期間已經提醒過
+
+/** 有沒有在線的人掛在 self 底下（team 對到 ListAgents 名稱或名牌） */
+export const hasReports = (self: Coworker, others: Coworker[]) => others.some(c => c.team !== undefined && (c.team === self.agent || c.team === self.name))
+
+/** 該不該附降層提醒：主管、底下沒人滿 DEMOTE_MS（只提醒，不自動改；外掛不主動） */
+export const shouldRemindDemote = (role: Coworker['role'], seenAt: number | undefined, now: number, noted: boolean) =>
+  role === 'manager' && !noted && seenAt !== undefined && now - seenAt >= DEMOTE_MS
 
 /** 錯誤訊息 → 名單用的一行摘要：第一個非空行、空白壓成一格、最多 80 字 */
 export function summarizeError(text: string): string {
@@ -655,7 +667,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const doing = doingText(c, now) + (stale ? `・最新指令「${c.prompt!.text}」` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (自動)` : stale ? `${c.title}（${Math.round((now - c.titleAt!) / 60000)} 分前設）` : c.title
     const agent = c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role === 'manager' ? '主管' : '員工'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? '員工' : isDeptLead(c, list) ? '部門主管' : '主管'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const asking = sorted.filter(c => c.approval && now < c.approval.deadline)
@@ -769,6 +781,10 @@ async function refresh($: EngineInterface) {
   }
   others = found.filter(c => !c.oneshot)
   oneshots = found.filter(c => c.oneshot)
+  if (me.role !== 'manager' || hasReports(me, others) || reportsSeenAt === undefined) {
+    reportsSeenAt = now
+    demoteNoted = false
+  }
   // 進入／離開開會：名單沒變也要排走路（閒著的人沒有狀態變化，不會觸發 showCrew）
   // 臨時會議：~/.claude/pixel-office/meeting.json 的 {"until": <ms>} 在期限前算開會（主管寫檔，各視窗都看得到）
   let until = 0
@@ -848,7 +864,7 @@ async function applyProfile(
     const t = input.team.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
     if (t.length > 64) return `歸屬「${input.team}」太長：用主管在 ListAgents 上的名稱。`
     team = t.length > 0 && t !== 'off' ? t : undefined
-    notes.push(team ? `歸屬＝${team}（坐 peer 區）` : '歸屬已清除')
+    notes.push(team ? `歸屬＝${team}（${(input.role !== undefined ? parseRole(input.role) : me.role) === 'manager' ? '部門主管，坐自己部門那一區' : '坐 peer 區'}）` : '歸屬已清除')
   }
   let auto = me.auto
   if (input.auto !== undefined) {
@@ -897,8 +913,10 @@ async function applyProfile(
   if (input.role !== undefined) {
     const parsed = parseRole(input.role)
     if (parsed === undefined) return `看不懂角色「${input.role}」，請用 主管 或 員工。`
+    // 升層＝員工改主管：協作資料夾由 skill 建（外掛不寫專案檔）
+    if (parsed === 'manager' && me.role !== 'manager') notes.push(`角色＝${ROLE_LABEL[parsed]}（升層：照 skill pixel-office:team 建或接手 <主 repo>/.claude/office/）`)
+    else notes.push(`角色＝${ROLE_LABEL[parsed]}`)
     role = parsed
-    notes.push(`角色＝${ROLE_LABEL[role]}`)
   }
   if (input.name !== undefined) {
     if (!validName(input.name)) return `名牌「${input.name}」不行：只能用英數字與符號、1～12 字、不含空白（中文在像素畫裡寬兩格放不下）。`
@@ -1337,38 +1355,37 @@ export const register: Register = on => {
     await $.command.register({ name: 'office', description: 'pixel-office: open the shared pixel office pane' })
     await $.tool.register({
       name: 'office_profile',
-      description:
-        '設定你在「像素辦公室」裡的角色、名牌與 ListAgents 名稱。知道自己是主管（例如被指派為協作主管）就設 role="主管"，一般 session 設 "員工"；name 是桌上名牌，只能英數字 1～12 字，建議用你的短代號（例如 58、e2）；agent 是 ListAgents 顯示的「This session is X」裡的 X，登記後別人傳訊息給你時辦公室會畫紙飛機。只影響辦公室畫面，不影響任何權限或檔案。',
+      description: "Set your pixel-office identity (role, nameplate, ListAgents name). Display only; no effect on permissions or files.",
       inputSchema: {
         type: 'object',
         properties: {
-          role: { type: 'string', enum: ['主管', '員工'], description: '主管 或 員工' },
-          name: { type: 'string', description: '名牌，英數字 1～12 字' },
-          agent: { type: 'string', description: 'ListAgents 上你自己的名稱（This session is 後面那個）；整串含 [ref] 貼進來也可以' },
-          ref: { type: 'string', description: 'ListAgents 名稱後面那組碼（例如 180a9b）。和別的 session 同名時，SendMessage 靠它分辨' },
-          title: { type: 'string', description: '職稱，自由填寫最多 16 字（例如 IT、查證、ArduPilot），可用中文' },
-          team: { type: 'string', description: '你是哪位主管的 peer：填主管的 ListAgents 名稱（例如 user-30）；不再是 peer 時填 off' },
-          auto: { type: 'boolean', description: '你的 session 是 auto 權限模式（系統提示寫 auto mode is active）就設 true；否則 false' },
+          role: { type: 'string', enum: ['主管', '員工'], description: '主管=manager, 員工=staff' },
+          name: { type: 'string', description: 'Nameplate, 1-12 alphanumerics; use your short code (e.g. 58, e2)' },
+          agent: { type: 'string', description: 'Your ListAgents name (X in "This session is X"); the full string with [ref] is fine' },
+          ref: { type: 'string', description: 'Code after your ListAgents name (e.g. 180a9b); tells same-named sessions apart' },
+          title: { type: 'string', description: 'Your current job, max 16 chars, Chinese OK' },
+          team: { type: 'string', description: "Your manager's ListAgents name (a manager who sets it becomes a department lead); off to leave" },
+          auto: { type: 'boolean', description: 'true if your system prompt says auto mode is active' },
         },
       },
     })
     await $.tool.register({
       name: 'office_roster',
       description:
-        '查「像素辦公室」名單：目前在線的每個 Claude Code session 的名牌、職稱、角色（主管／員工）、ListAgents 名稱與 ref（傳 SendMessage 用）與正在做什麼。要找主管、找負責某件事的人、或確認對方身分時用。兩個 session 同名時表頭會直接給 `名稱 [ref]` 的定址字串，不用再跑一次 ListAgents。只讀，不改任何東西。',
+        'List online sessions: nameplate, title, role, ListAgents name and ref (for SendMessage), current activity. Use to find a manager or owner, or confirm who someone is. Read-only.',
       inputSchema: { type: 'object', properties: {} },
     })
     await $.tool.register({
       name: 'office_meeting',
       description:
-        '像素辦公室的會議室：action=start 讓參與者走進會議室（participants 填 ListAgents 名稱或名牌，不限 team），不設期限；action=end 散會（參與者全都離線也會自動散會）。只是畫面，不會替你開會或傳訊息。llm-wiki 的 wiki-meet 開會與散會時呼叫。',
+        'Meeting-room display: action=start walks participants in, end dismisses (also automatic when all are offline). Display only; sends nothing. Called by skill pixel-office:team meet.md.',
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['start', 'end'], description: 'start 開會、end 散會' },
-          topic: { type: 'string', description: '題目，60 字內' },
-          participants: { type: 'array', items: { type: 'string' }, description: '參與者的 ListAgents 名稱、名牌或 ref。兩個 session 同名時寫成 `名稱 [ref]`（ref 見 office_roster），只有那一個會進會議室' },
-          minutes: { type: 'number', description: '可選：幾分鐘後自動散會；不填就不設期限' },
+          action: { type: 'string', enum: ['start', 'end'] },
+          topic: { type: 'string', description: 'Max 60 chars' },
+          participants: { type: 'array', items: { type: 'string' }, description: 'ListAgents names, nameplates or refs; `name [ref]` for same-named sessions' },
+          minutes: { type: 'number', description: 'Optional: auto-end after N minutes' },
         },
         required: ['action'],
       },
@@ -1417,13 +1434,13 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 系統提示加一句：角色變了要更新辦公室（每輪多讀約 60 字）
+  // 系統提示加一段（英文較省 token；每輪約 900 字元）
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     const section = {
       id: 'pixel-office:role',
       text:
-        '像素辦公室：使用者有開一個辦公室面板顯示每個 session，靠名牌分辨你和同資料夾的其他 session。(1) 你用 ListAgents 時辦公室會自動登記你的名稱並把名牌設成短代號；若沒有，請用 mcp__pixel-office__office_profile(agent=X, name=<X 的最後一段>) 登記一次。(2) 接到新工作或換工作時，用同一個工具更新 title（你正在負責的事，16 字內，例如 請購單、FOG 論文）；名單顯示你的職稱過期（N 分前設）時，請更新 title；被指派或卸下主管時更新 role（主管／員工）。(3) 要找主管、找負責某件事的人或確認對方身分時，呼叫 mcp__pixel-office__office_roster 看名單；沒有名稱的人照抄名單上的 to=uds:…（Windows 開頭是兩個反斜線，少一個會報 no-key）。(4) 若你的系統提示寫明 auto mode is active，登記時一併設 auto=true（auto 模式的權限詢問交給分類器，辦公室才不會誤報你在等使用者核准）；之後切換模式時再更新。(5) 被主管派工、成為某位主管的 peer 時，設 team=<主管的 ListAgents 名稱>，辦公室會把你排到 peer 區；不再是 peer 時設 team=off。只影響畫面，不影響權限。',
+        'Pixel office (a pane drawing every session; nameplates tell sessions apart). (1) Calling ListAgents registers you; if it did not, call mcp__pixel-office__office_profile(agent=X, name=<last part of X>) once. (2) On a new task, update title (max 16 chars, e.g. 請購單); update it when the roster marks it stale. Update role (主管/員工) when made or released as manager. (3) To find a manager or an owner, or confirm identity: mcp__pixel-office__office_roster; for someone without a name copy its to=uds:… exactly (Windows: two leading backslashes). (4) If your system prompt says auto mode is active, register auto=true; update on mode change. (5) Dispatched by a manager → team=<their ListAgents name>; done → team=off. Department lead = role=主管 + team=<upper manager>. (6) Multi-session work (becoming manager, role cards, dispatch, meetings): skill pixel-office:team. Display only.',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
@@ -1558,7 +1575,7 @@ export const register: Register = on => {
     if (sub === 'role') return { text: await applyProfile($, { role: value }) }
     if (sub === 'meeting') {
       if (value === 'off') return { text: await setMeeting($, { action: 'end' }) }
-      return { text: meeting ? `開會中：${meetingTopic || '（沒有題目）'}；參與者 ${attendees.length > 0 ? attendees.join('、') : '主管的 peer'}。散會用 /office meeting off` : '目前沒有開會。開會由 llm-wiki 的 /wiki-meet 發起（或模型呼叫 office_meeting）。' }
+      return { text: meeting ? `開會中：${meetingTopic || '（沒有題目）'}；參與者 ${attendees.length > 0 ? attendees.join('、') : '主管的 peer'}。散會用 /office meeting off` : '目前沒有開會。開會由 skill pixel-office:team 發起（說「開會」，或模型呼叫 office_meeting）。' }
     }
     if (sub === 'pet') {
       const text = await setPet($, value)
@@ -1655,6 +1672,10 @@ export const register: Register = on => {
         const head = promptHead(e.text)
         if (head) me = { ...me, prompt: { text: head, at: now } }
         await autoTitle($, head, now)
+        if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
+          demoteNoted = true
+          e = { ...e, context: [...(e.context ?? []), DEMOTE_NOTE] }
+        }
       }
       await setMode($, 'thinking')
     } catch {}

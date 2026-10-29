@@ -1973,7 +1973,7 @@ test('furniture menus: every object has its default menu; buttons.json with the 
   expect(MENUS.calendar.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-agenda', '/llm-wiki:wiki-agenda add'])
   expect(MENUS.vending.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-doctor', '/llm-wiki:wiki'])
   expect(MENUS.clock.map(i => i.prompt)).toEqual(['/llm-wiki:wiki-day 開工', '/llm-wiki:wiki-day 收工'])
-  expect(MENUS.meeting).toEqual([{ label: '開會', prompt: '/llm-wiki:wiki-collabteam 開會' }])
+  expect(MENUS.meeting).toEqual([{ label: '開會', prompt: '/pixel-office:team 開會' }])
   for (const f of FURNITURE) expect(MENUS[f].length).toBeGreaterThan(0)
 
   const mine = parseButtons([
@@ -2494,4 +2494,56 @@ test('/office runs ListAgents itself (no model) to register the ListAgents name;
   expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('/rename')
   decision = 'ask'
   expect((await $.command.run({ command: 'office', args: '' } as any)).text).toContain('沒能自動登記')
+})
+
+// ---------- 0.25.0：部門主管（第 2 層）、降層提醒（jacky 2026-10-29） ----------
+
+import { isDeptLead } from './scene'
+import { DEMOTE_MS, hasReports, shouldRemindDemote } from './register'
+
+test('a manager with team on another online manager is a department lead: sits first in their own zone, not in the manager office', () => {
+  const top = boss('t', 'tt', 'm-t')
+  const dept = { ...boss('d', 'dd', 'm-d'), team: 'm-t' }
+  const crew = [top, dept, { ...P('s1', 's1'), team: 'm-d' }, { ...P('s2', 's2'), team: 'm-t' }]
+  expect(isDeptLead(dept, crew)).toBe(true)
+  expect(isDeptLead(top, crew)).toBe(false)
+  expect(isDeptLead(dept, [dept])).toBe(false) // 上一層主管不在線：照舊當主管
+  // 互相掛不算，免得主管室沒人
+  expect(isDeptLead({ ...top, team: 'm-d' }, [{ ...top, team: 'm-d' }, dept])).toBe(false)
+  const L = layout(112, 60)
+  const colOf = (x: number) => L.clusters.findIndex((k, i) => i < L.cols && x >= k.x && x < k.x + 23)
+  const seats = assignSeats(crew, 112, 60)
+  expect(seats.get('t')!.kind).toBe('boss')
+  expect(seats.get('d')!.kind).toBe('staff')
+  expect(colOf(seats.get('s2')!.seat.x)).toBe(2) // 頂層主管：最右欄
+  expect(colOf(seats.get('d')!.seat.x)).toBe(1) // 部門主管：自己那一區
+  expect(colOf(seats.get('s1')!.seat.x)).toBe(1)
+  const zoneSlots = [...seats.values()].filter(p => p.kind === 'staff' && colOf(p.seat.x) === 1).map(p => p.slot)
+  expect(seats.get('d')!.slot).toBe(Math.min(...zoneSlots)) // 那一區第一個位子
+  expect(bossSeating(crew, 112, 60).order.filter(Boolean).map(b => b!.id)).toEqual(['t'])
+  const text = cellText(encode(drawScene(crew, 0, 112, 60)), 112, 60).join('\n')
+  expect(text).toContain('TEAM dd')
+  expect(roster(crew, 0)).toContain('部門主管')
+})
+
+test('a department lead with nobody under them sits in their manager zone like a peer', () => {
+  const top = boss('t', 'tt', 'm-t')
+  const dept = { ...boss('d', 'dd', 'm-d'), team: 'm-t' }
+  const L = layout(112, 60)
+  const colOf = (x: number) => L.clusters.findIndex((k, i) => i < L.cols && x >= k.x && x < k.x + 23)
+  const seats = assignSeats([top, dept], 112, 60)
+  expect(seats.get('d')!.kind).toBe('staff')
+  expect(colOf(seats.get('d')!.seat.x)).toBe(2)
+})
+
+test('demotion reminder: only a manager, only after 20 minutes with nobody under them, only once', () => {
+  const me = boss('m', 'mm', 'm-m')
+  expect(hasReports(me, [{ ...P('s', 's'), team: 'm-m' }])).toBe(true)
+  expect(hasReports(me, [{ ...P('s', 's'), team: 'mm' }])).toBe(true)
+  expect(hasReports(me, [P('s', 's')])).toBe(false)
+  expect(shouldRemindDemote('manager', 0, DEMOTE_MS - 1, false)).toBe(false)
+  expect(shouldRemindDemote('manager', 0, DEMOTE_MS, false)).toBe(true)
+  expect(shouldRemindDemote('manager', 0, DEMOTE_MS, true)).toBe(false)
+  expect(shouldRemindDemote('staff', 0, DEMOTE_MS, false)).toBe(false)
+  expect(shouldRemindDemote('manager', undefined, DEMOTE_MS, false)).toBe(false)
 })

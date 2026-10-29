@@ -179,22 +179,37 @@ export function zoneUnits(L: { cols: number; clusters: Seat[] }): number[][] {
 const matchesLead = (c: Coworker, lead: Coworker) => c.team !== undefined && (c.team === lead.agent || c.team === lead.name)
 
 /**
+ * 部門主管（第 2 層）：自己是主管、team 又掛在另一位在線主管底下 —— 不進主管室，坐自己部門那一區的第一個位子。
+ * 互相掛（A 掛 B、B 掛 A）不算，兩位都當頂層主管，免得主管室沒人。（jacky 2026-10-29）
+ */
+export function isDeptLead(c: Coworker, crew: Coworker[]): boolean {
+  return c.role === 'manager' && crew.some(m => m.id !== c.id && m.role === 'manager' && matchesLead(c, m) && !matchesLead(m, c))
+}
+
+/** 坐主管室的主管（不含部門主管） */
+const isTopBoss = (crew: Coworker[]) => (c: Coworker) => c.role === 'manager' && !isDeptLead(c, crew)
+
+/**
  * 各主管的 peer 區：依主管桌順序從最右欄往左排，最左一欄留給沒有 team 的人。
  * 只有一位主管時照舊（有沒有 peer 都鋪）；兩位以上只給有 peer 在線的主管。
+ * leads 裡的部門主管自己有區，不算上一層主管的 peer。
  */
 export function teamZones(leads: Coworker[], crew: Coworker[], cols: number): Coworker[] {
   if (cols < 2 || leads.length === 0) return []
   if (leads.length === 1) return leads
-  const withPeers = leads.filter(m => crew.some(c => matchesLead(c, m)))
+  const lead = new Set(leads.map(m => m.id))
+  const ofLead = (c: Coworker, m: Coworker) => !lead.has(c.id) && matchesLead(c, m)
+  const withPeers = leads.filter(m => crew.some(c => ofLead(c, m)))
   // 最左一欄只在真的有人分不到區（沒 team、或他的主管排不進分區）時才留給他們；沒有就每欄都可當分區（主管 office 2026-10-26 裁示）
   const all = withPeers.slice(0, cols)
-  const loose = crew.some(c => c.role !== 'manager' && !all.some(m => matchesLead(c, m)))
+  const top = isTopBoss(crew)
+  const loose = crew.some(c => !top(c) && !all.some(m => m.id === c.id || matchesLead(c, m)))
   return loose ? withPeers.slice(0, cols - 1) : all
 }
 
-/** 主管室座位：先坐回上次那張桌，新來的依編號補空桌；坐不下的不畫（overflow，名牌 +N） */
+/** 主管室座位：先坐回上次那張桌，新來的依編號補空桌；坐不下的不畫（overflow，名牌 +N）。部門主管不進主管室，接在分區順序最後 */
 function seatBosses(crew: Coworker[], deskCount: number, previous?: Map<string, Placement>): { order: (Coworker | undefined)[]; extra: number; leads: Coworker[] } {
-  const bosses = crew.filter(c => c.role === 'manager')
+  const bosses = crew.filter(isTopBoss(crew))
   const order: (Coworker | undefined)[] = new Array(deskCount).fill(undefined)
   const rest: Coworker[] = []
   for (const b of bosses) {
@@ -209,7 +224,7 @@ function seatBosses(crew: Coworker[], deskCount: number, previous?: Map<string, 
     else overflow.push(b)
   }
   // 分區的主管順序：有桌的依桌號，沒桌的接在後面 —— 沒桌子的主管，他的 peer 照樣有一區
-  const leads = [...order.filter((b): b is Coworker => b !== undefined), ...overflow]
+  const leads = [...order.filter((b): b is Coworker => b !== undefined), ...overflow, ...crew.filter(c => isDeptLead(c, crew) && crew.some(s => s.id !== c.id && matchesLead(s, c)))]
   return { order, extra: overflow.length, leads }
 }
 
@@ -275,7 +290,7 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
     const stand = seated.length === 1 ? { x: L.manager.x + 7, y: L.manager.y + 7 } : { x: seat.x + 4, y: seat.y + 7 }
     out.set(b.id, { kind: 'boss', slot, seat, stand, cluster: seat })
   })
-  const isBoss = (c: Coworker) => c.role === 'manager' // 坐不下的主管也不排去員工座位（算在最後一張桌的 +N）
+  const isBoss = isTopBoss(crew) // 坐不下的主管也不排去員工座位（算在最後一張桌的 +N）；部門主管坐員工區
   const n = L.seats.length
   const taken: boolean[] = new Array(n).fill(false)
   const put = (c: Coworker, slot: number) => {
@@ -288,7 +303,10 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
   const isPeer = (c: Coworker) => c.team !== undefined && managers.has(c.team)
   const units = zoneUnits(L)
   const zones = teamZones(leads, crew, units.length)
-  const zoneOfPeer = (c: Coworker) => zones.findIndex(m => matchesLead(c, m))
+  const zoneOfPeer = (c: Coworker) => {
+    const own = zones.findIndex(m => m.id === c.id) // 部門主管坐自己那一區
+    return own >= 0 ? own : zones.findIndex(m => matchesLead(c, m))
+  }
   // 開會：有參與者名單（ListAgents 名稱或名牌，不限 team）就照名單，沒有就是主管的 peer。
   // 閒著才進會議室，忙的做完再進；進去了就待到散會（開會中被叫去回話也不起身）
   const onList = attendees && attendees.length > 0 ? isAttendee(attendees) : undefined
@@ -331,9 +349,11 @@ export function assignSeats(crew: Coworker[], width: number, rows: number, previ
     else rest.push(c)
   }
   const overflow: Coworker[] = []
+  const leadsZone = (c: Coworker) => zones.some(m => m.id === c.id)
+  rest.sort((a, b) => Number(leadsZone(b)) - Number(leadsZone(a)))
   for (const c of rest) {
-    // 先在自己那一區找（依編號的預設位子往後找），找不到再坐另一區的空位
-    let slot = hash(c.id) % n
+    // 先在自己那一區找（依編號的預設位子往後找；部門主管從頭找＝那一區第一個空位），找不到再坐另一區的空位
+    let slot = leadsZone(c) ? 0 : hash(c.id) % n
     let tries = 0
     while ((taken[slot] || !fits(c, slot)) && tries < n) {
       slot = (slot + 1) % n

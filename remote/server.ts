@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Coworker } from '../types'
-import { MIN_ROWS, assignSeats, layout, setSpread } from '../hooks/scene'
+import { MIN_ROWS, assignSeats, isDeptLead, layout, setSpread } from '../hooks/scene'
 import { STALE_MS, parseStatus } from '../hooks/status'
 import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 
@@ -62,11 +62,13 @@ let box = { w: 64, h: 128 } // 上一張圖的 viewBox，給點人換算座標
 
 /** 手機要幾排桌：有 peer 在線的主管一隊一排（只有一位主管時照舊有一排），沒 team 的人每 8 個一排、至少一排 */
 export function deskRowsNeeded(people: Coworker[]): number {
-  const bosses = people.filter(c => c.role === 'manager')
-  const ofBoss = (c: Coworker, m: Coworker) => c.team !== undefined && (c.team === m.agent || c.team === m.name)
-  const staff = people.filter(c => c.role !== 'manager')
-  const teams = bosses.length === 1 ? 1 : bosses.filter(m => staff.some(c => ofBoss(c, m))).length
-  const loose = staff.filter(c => !bosses.some(m => ofBoss(c, m))).length
+  const ofBoss = (c: Coworker, m: Coworker) => c !== m && c.team !== undefined && (c.team === m.agent || c.team === m.name)
+  const tops = people.filter(c => c.role === 'manager' && !isDeptLead(c, people))
+  // 部門主管底下有人才自成一隊，否則跟一般 peer 一樣坐上一層主管那一隊
+  const bosses = [...tops, ...people.filter(c => isDeptLead(c, people) && people.some(s => ofBoss(s, c)))]
+  const staff = people.filter(c => !tops.includes(c))
+  const teams = bosses.length === 1 ? 1 : bosses.filter(m => staff.some(c => !bosses.includes(c) && ofBoss(c, m))).length
+  const loose = staff.filter(c => !bosses.some(m => m === c || ofBoss(c, m))).length
   return teams + Math.max(1, Math.ceil(loose / 8))
 }
 
