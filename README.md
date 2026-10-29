@@ -91,7 +91,7 @@ Run several projects at once, each with its own manager: the manager's room hold
 ### Role design
 
 - **No built-in methodology**: say "set up roles following <rules>" (AIMM, gstack, your own process); it lists roles and boundaries, and creates them only after you approve
-- **Role cards** live in the project's `.claude/office/roles/` (committed to git): responsibilities, boundaries, deliverables; progress goes into checkpoints, so a new session can pick up where the last one left off
+- **Role cards** live in the project's `.claude/office/roles/` by default (committed to git; another folder can be set per project in `~/.claude/office/projects.json`): responsibilities, boundaries, deliverables; progress goes into checkpoints, so a new session can pick up where the last one left off
 - **Squads**: save a set of roles you use often (e.g. "dev + test", "PM + purchasing") in `~/.claude/office/squads/`, shared across the machine; pick one when opening layer 2
 
 ### Meetings

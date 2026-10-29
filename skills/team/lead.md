@@ -11,7 +11,7 @@
 使用者說好之後：
 
 1. `office_profile(role=主管)`。
-2. 找 `<主 repo>`（`SKILL.md`）。沒有 `.claude/office/` 就建：`.gitignore`（`collab.md`、`checkpoints/` 兩行）＋ `collab.md`（§2 骨架）；已經有 → 讀 `collab.md`，看「主管」段：
+2. 找 `<office>`（`SKILL.md`）。還沒有就建：`.gitignore`（`collab.md`、`checkpoints/` 兩行）＋ `collab.md`（§2 骨架）；已經有 → 讀 `collab.md`，看「主管」段：
    - 範圍跟你重疊的主管還在線（對 `office_roster`）→ **先問使用者**（換人或切範圍）。
    - 已離線的主管列直接刪。
    

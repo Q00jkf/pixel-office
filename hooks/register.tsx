@@ -914,7 +914,7 @@ async function applyProfile(
     const parsed = parseRole(input.role)
     if (parsed === undefined) return `Unknown role "${input.role}": use manager or staff.`
     // 升層＝員工改主管：協作資料夾由 skill 建（外掛不寫專案檔）
-    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: create or take over <main repo>/.claude/office/ per skill pixel-office:team)`)
+    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: create or take over the collab dir per skill pixel-office:team: ~/.claude/office/projects.json, else <main repo>/.claude/office/)`)
     else notes.push(`role=${ROLE_LABEL[parsed]}`)
     role = parsed
   }

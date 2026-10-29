@@ -26,12 +26,18 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 - **升層**：session 判斷要多開人時**提議**，使用者說好才登記成主管（`lead.md` §1）。
 - **降層**：主管（含部門主管）底下沒有在線的人滿 20 分鐘，外掛會在下一則指令附提醒；**問使用者**，只是暫時關視窗就照舊。外掛不自動改。
 
-## 專案資料夾 `<主 repo>/.claude/office/`
+## 協作目錄 `<office>`
 
 **有人登記成主管時才建**（第 0 層用不到）。`<主 repo>`：git repo 取 `git rev-parse --path-format=absolute --git-common-dir` 的上一層（所有 worktree 寫回同一處）；不是 git repo 就是目前資料夾。
 
+`<office>` 怎麼定：
+1. 讀 `~/.claude/office/projects.json`（`{"<主 repo 絕對路徑>": "<目錄>"}`；目錄可相對 `<主 repo>` 或絕對）。比對 key 不分大小寫、`\` 與 `/` 視為相同。有這個專案 → 用它。
+2. 沒有 → `<主 repo>/.claude/office/`。
+3. **寫不進去**（權限或守門腳本擋下）→ 不重試、不自己換地方，問使用者：「這裡寫不進去，協作紀錄要放哪？」（專案裡若有給 AI 寫的區，例如 `_extras/`，可建議 `_extras/office`）。答案寫進 `projects.json`（沒有就建），再寫到新位置。
+4. 換了位置、舊的 `.claude/office/` 還有 `roles/`、`checkpoints/` → 問使用者要不要搬，不自動搬。
+
 ```
-.claude/office/
+<office>/
 ├─ .gitignore            ← 兩行：collab.md、checkpoints/
 ├─ collab.md             ← 狀態：誰在線、負責什麼、佔用、待裁示。只有主管寫
 ├─ roles/<角色>.md        ← 角色定義，進 git。使用者核可才建、才改

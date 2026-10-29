@@ -7,6 +7,17 @@
 
 ---
 
+## 0.33.0 — 2026-10-29
+
+- **改了什麼**：team skill 的協作目錄（collab.md、roles/、checkpoints/）可以指定位置
+  - 新設定 `~/.claude/office/projects.json` = `{"<主 repo 絕對路徑>": "<目錄>"}`，目錄可相對專案或絕對；有設定就用，沒有照舊 `<主 repo>/.claude/office/`（`skills/team/SKILL.md`「協作目錄」段；`lead.md`／`roles.md`／`squad.md` 改引用它）
+  - 寫不進去（權限或守門腳本擋下）→ 問使用者放哪、記進 projects.json 再寫；提示文字可建議 `_extras/office`，程式不寫死。換位置時舊 roles／checkpoints 問過才搬
+  - 升主管的提示（`register.tsx`）提到 projects.json；README、使用說明補一句
+  - 邊界：llm-wiki（已凍結）的 `role_cards.py migrate` 仍只搬到 `.claude/office/`
+- **為什麼**：jacky 2026-10-29 定（willy主管辦公室轉達）：willy 知識庫的 `.claude/` 擋 AI 寫入，設定要放專案外、協作檔要能改放知識庫內 AI 可寫的區（willy #21 的 `_extras`）
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.32.0 — 2026-10-29
 
 - **改了什麼**：看得到的介面全改英文

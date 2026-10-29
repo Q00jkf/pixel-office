@@ -1,7 +1,7 @@
 # 角色：產生、接手、檢查點
 
 為什麼要角色卡：session 沒有跨視窗記憶，ListAgents 名稱重開就變。卡把「這個角色做什麼、讀什麼」固定在專案裡，新 session 照卡接手。
-卡在 `<主 repo>/.claude/office/roles/`（位置規則見 `SKILL.md`）。
+卡在 `<office>/roles/`（`<office>` 怎麼定見 `SKILL.md`）。
 
 ## 1. 從規則產生角色（「照 <規則路徑> 設這個專案的角色」）
 
