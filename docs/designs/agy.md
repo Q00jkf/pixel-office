@@ -26,6 +26,12 @@
 - `--conversation <id>` 只會另起一個行程，兩個行程搶同一份紀錄。
 - `injectSteps`：`userMessage`（永久留在對話）、`systemMessage`（巢狀物件）、`ephemeralMessage`（只這一輪）。`Stop` 回 `{"decision":"continue","reason":…}` 會把 reason 當系統訊息繼續下一輪。
 
+## Stop hook 長輪詢：不採用
+
+構想：一輪結束時 Stop hook 先等收件夾最多 N 分鐘，有信就 `continue`、等滿就 `stop`，等的時候不呼叫模型。
+agy 回覆（2026-10-29，經 `agy_office.py send` 來回，轉述／未親驗）：`timeout` 文件沒寫上限、超時被 kill 後當 stop；**hook 會擋住 agent 迴圈，等待中沒有輸入框、一直轉圈，使用者會以為當機**。
+→ 跟「使用者看得到過程、隨時可打字」衝突，不做。外部模擬按 Enter 叫醒也不做（會撞上使用者正在打的字，且空的一輪也花 token）。要即時就走 B。
+
 ## A／B 兩條路（選 A）
 
 | | A 互動視窗＋收件夾（採用） | B 橋接程式常駐 agy |
