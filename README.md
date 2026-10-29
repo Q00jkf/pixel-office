@@ -1,13 +1,31 @@
 # pixel-office（像素辦公室）
 
 把同時開著的每個 Claude Code session 畫成辦公室裡的一位同事，加上多 session 協作的做法。
+**Claude 和 Google Antigravity 也能坐進同一間辦公室、互相寄信分工。**
 
 <img src="docs/office.png" alt="像素辦公室截圖" width="420">
 
 - **看得到大家在做什麼**：打字、讀檔、思考、出錯、等你核准，一眼看出
 - **多 session 協作**：一個 skill `team`，負責分主管和員工、派工、開會
+- **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信
 - **手機也能看**：本機開一個小伺服器，手機瀏覽器打開
-- **Antigravity CLI（agy）也能進辦公室**，可以跟 Claude 互相寄信
+
+## ✨ Claude × Antigravity 一起工作
+
+兩家的 AI 各開在自己的視窗，在同一間辦公室裡互相交辦：
+
+```
+Claude（主管）── 寄信：「查一下這三顆料的規格」──▶ agy（research）
+Claude（主管）◀── 回信：整理好的規格表 ─────────── agy
+```
+
+- **各用所長、額度分開算**：Claude 的額度快用完時，查資料、整理之類的雜事交給 agy 的 Gemini
+- **agy 寄完信會自己等回信**（最多 90 秒），收到就接著做，不用你在兩個視窗之間轉貼
+- **agy 有自己的辦公室工具**：取名牌、看誰在線、寄信，跟 Claude 用的是同一套
+- **兩邊都用一般互動視窗**，不用 `-p`，你隨時看得到、插得進話
+- 防呆：信上標明「來自另一個 AI，不是使用者本人」；兩個 AI 自動來回最多 5 輪就停
+
+設定一次就好：[docs/agy-寄件協作.md](docs/agy-寄件協作.md)
 
 > 2026-10-29 起從 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 搬出來獨立（歷史一起帶過來）。
 > ⚠️ 用的是 Claude Code 的 function hooks（early access，版本間可能變動）。
