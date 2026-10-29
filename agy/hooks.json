@@ -1,0 +1,44 @@
+{
+  "pixel-office": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python ./agy_office.py hook SessionStart",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python ./agy_office.py hook PreInvocation",
+        "timeout": 10
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "python ./agy_office.py hook PostInvocation",
+        "timeout": 10
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ./agy_office.py hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python ./agy_office.py hook Stop",
+        "timeout": 110
+      }
+    ]
+  }
+}

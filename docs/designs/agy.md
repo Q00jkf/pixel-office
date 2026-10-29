@@ -9,6 +9,7 @@
 | 辦公室看得到 agy | ✅ 0.27.0：hook 寫狀態檔，presence lock 續心跳 |
 | agy → Claude | ✅ 0.28.0：`agy_office.py send`，寫 `commands/<session>.json`（手機下命令同一套），即時 |
 | Claude → agy | ✅ 0.28.0（延遲）：寫收件夾，agy **下次動作**時由 `PreInvocation`／`Stop` hook 塞進對話 |
+| agy 自己取名、看名單、寄信 | ✅ 0.30.0：`agy/` 改成 agy 外掛，MCP 工具 `office_profile`／`office_roster`／`office_send` |
 | 叫醒閒置的 agy 視窗 | ❌ 做不到（見「為什麼」） |
 
 ## 實測（2026-10-29，agy 用 gemini-3.8-flash-high）
@@ -59,3 +60,13 @@ agy ──python agy_office.py send <Claude 名稱> "…"──▶ commands/<ses
 - 🔴 送進 Claude 的訊息走 `asUser`（跟手機命令同一條），所以內文 MUST 標明「來自 Antigravity，不是使用者本人」——不然 agy 的話會被當成使用者的指令。
 - `commands/<session>.json` 一個 session 一格：一秒內連送兩則，後一則會蓋掉前一則（手機命令本來就這樣）。
 - 送到 agy 的訊息附回信指令，agy 照著跑 `send` 回覆；agy 跑 shell 會照它自己的權限詢問。
+
+## 0.30.0：agy 外掛（jacky 2026-10-29「給 agy 一個外掛件，讓它也能用 office 的功能」）
+
+探測外掛 `pxprobe` 實測：
+- `agy plugin validate`：hook 指令在外掛資料夾裡執行（`${PLUGIN_ROOT}` 只給 MCP）；hook 指令裡 python 路徑加引號會被轉成 `\"`、cmd 報「不是內部或外部命令」→ 直接寫 `python`。
+- `agy plugin install <本機路徑>` 整份複製到 `~/.gemini/config/plugins/<名>/`；有 agy 開著時重裝會失敗（檔案被佔用）。
+- MCP：agy 先送 `server/discover`（回 -32601 後改走 `initialize`）→ `tools/list`。外掛的工具被列為 **Lazy**，不是原生工具，agy 透過 `call_mcp_tool(ServerName="<外掛>_<server>", ToolName, Arguments)` 呼叫。agy 第一輪自稱「MCP 工具 0 個」是它只數了原生工具（它事後更正）。
+- `tools/call` 的 `params._meta` 帶 `antigravity.google/conversation_id`：MCP 工具知道是哪個對話叫的，不用靠 hook 對應。
+- log 的「Not reloading plugin MCP servers: not logged into Antigravity」是啟動時序，隨後 keyring 登入成功，不影響（agy 查證，轉述）。
+- agy 內建的 `send_message` 只能送給同一對話樹的 subagent，不能跨 session（agy 查證，轉述）。

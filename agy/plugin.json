@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "pixel-office",
+  "description": "Pixel office for Antigravity CLI: shows this agy conversation in the Claude Code pixel office and lets it message Claude sessions (office_profile / office_roster / office_send)."
+}

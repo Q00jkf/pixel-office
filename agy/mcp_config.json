@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "office": {
+      "command": "python",
+      "args": [
+        "${PLUGIN_ROOT}/agy_office.py",
+        "mcp"
+      ]
+    }
+  }
+}

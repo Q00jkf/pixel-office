@@ -155,19 +155,19 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office」](https://2dpig.itch.io/pixel-office)（CC0，原檔與授權在 `assets/2dpig/`）。
 `assets/build_sheet.py` 從原素材表去掉天空、加上換色人物，產生 `assets/office-sheet.png` 與 `hooks/sheet.ts`（base64＋裁切框）；改素材或換色就重跑，兩個產物都進 repo。SVG 裡素材表只嵌一次，每個圖素是巢狀 `<svg viewBox>` 以 `<use>` 裁切引用。
 
-## Antigravity CLI（agy，0.27.0 起顯示、0.28.0 起互傳訊息）
+## Antigravity CLI（agy，0.27.0 起顯示、0.28.0 起互傳訊息、0.30.0 起是 agy 外掛）
 
-`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事（名牌＝工作資料夾名），並跟 Claude session 互傳訊息。給使用者的安裝與用法：`docs/agy-寄件協作.md`；設計與實測紀錄：`docs/designs/agy.md`。
+`agy/` 本身是一個 **agy 外掛**（`plugin.json`、`hooks.json`、`mcp_config.json`、`skills/office/`、`agy_office.py`）：把 agy 的對話畫成辦公室裡的同事，給 agy 三個 MCP 工具，並跟 Claude session 互傳訊息。給使用者的安裝與用法：`docs/agy-寄件協作.md`；設計與實測紀錄：`docs/designs/agy.md`。
 
-- 安裝：`python <plugin>/agy/agy_office.py install` —— 複製到 `~/.claude/pixel-office/agy/`，在 `~/.gemini/config/hooks.json` 加「pixel-office」一組 hook（別的設定不動）；**新開的 agy 視窗**才生效。移除：`… uninstall`。外掛升版後重跑一次 install 才會換新腳本
-- hook 只接 `SessionStart`／`PreInvocation`／`PostInvocation`／`PostToolUse`／`Stop`，不接 `PreToolUse`（不碰 agy 的權限判斷）；任何錯都吞掉、exit 0，壞了也不會卡住 agy
-- 心跳：agy 閒著時沒有事件，由背景看守每 5 秒檢查 `~/.gemini/antigravity-cli/presence/<對話>.lock` 是否還被鎖（2026-10-29 實測：開著鎖、關掉放）；沒有 agy 在線 60 秒看守自己結束
+- 安裝：關掉所有 agy 視窗 → `python <plugin>/agy/agy_office.py install`（移除 0.27～0.29 的全域 hook，`agy plugin install` 這個資料夾；agy 整份複製，升版要重跑）。移除：`… uninstall`
+- MCP 工具（server `pixel-office_office`，agy 列為 lazy、經 `call_mcp_tool` 呼叫）：`office_profile(name, title)`、`office_roster()`、`office_send(to, text)`。呼叫者的對話 id 由 agy 放在 `_meta["antigravity.google/conversation_id"]`
+- hook 只接 `SessionStart`／`PreInvocation`／`PostInvocation`／`PostToolUse`／`Stop`，不接 `PreToolUse`（不碰 agy 的權限判斷）；任何錯都吞掉、exit 0。hook 在外掛資料夾裡執行，指令寫 `python ./agy_office.py …`（python 路徑加引號會被 agy 轉成 `\"` 而失敗）
+- 名牌：預設工作資料夾名的英數字，跟在線 agy 撞名就接對話 id 前 4 碼；agy 可用 `office_profile` 改
+- 心跳：agy 閒著時沒有事件，由背景看守每 5 秒檢查 `~/.gemini/antigravity-cli/presence/<對話>.lock` 是否還被鎖；看守跑 `~/.claude/pixel-office/agy/` 那份、工作目錄也在那裡（不佔外掛資料夾）
 - 不存使用者打的字（hook 收到的 `lastUserInput` 直接丟掉）
-- 傳訊：`python ~/.claude/pixel-office/agy/agy_office.py send <收件者> "<訊息>" --from <自己的名稱>`；收件者認 ListAgents 名稱、名牌、id
-  - Claude → agy：放進 `agy/inbox/<對話>.jsonl`，agy **下次動作**時（`PreInvocation` 用 `injectSteps`；一輪剛結束用 `Stop` 的 `continue`）塞進對話。**閒著的 agy 叫不醒**（沒有本機管道，見設計筆記）
-  - agy → Claude：寫 `commands/<session>.json`（手機下命令同一套），對方外掛每秒拿；對話裡顯示「📨 <寄件者>（Antigravity，不是使用者本人）：…」，不會被當成使用者的話
-  - 送進去的訊息都附回信指令，對方照著跑就能回
-  - 寄完等回信（0.29.0）：agy 這一輪跑過 `send`，一輪結束時 Stop hook 最多等 90 秒回信，等到就帶著信繼續；沒寄信的輪照常立刻停。等待中 agy 轉圈、不能打字（Esc 可中斷）；沒有使用者介入最多自動續跑 5 輪
+- Claude → agy：`python ~/.claude/pixel-office/agy/agy_office.py send <agy 名牌> "<訊息>" --from <自己的名稱>`（hook 每次把腳本同步到這裡）→ 收件夾，agy **下次動作**時（`PreInvocation` 的 `injectSteps`；一輪剛結束用 `Stop` 的 `continue`）塞進對話。**閒著的 agy 叫不醒**
+- agy → Claude：`office_send` 寫 `commands/<session>.json`（手機下命令同一套），對話裡顯示「📨 <寄件者>（Antigravity，不是使用者本人）：…」
+- 寄完等回信（0.29.0）：這一輪寄過信，Stop hook 最多等 90 秒回信；沒寄信的輪照常立刻停。最多自動續跑 5 輪
 
 ## 運作方式
 
