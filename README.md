@@ -5,12 +5,12 @@
 
 <img src="docs/office.png" alt="像素辦公室（Desktop）：主管室兩位主管、三個團隊區、部門主管 dev 帶自己的小隊、agy 名牌帶 G 徽章" width="720">
 
-<sub>Claude Desktop 畫面：主管室坐兩位主管（★willy、★jacky）；部門主管 ★dev 坐在自己的「TEAM dev」區帶小隊；research、wengpun 是 Antigravity（G）。</sub>
+<sub>Claude Desktop 畫面。★ 是主管：★willy、★jacky 是頂層主管，坐主管室；★dev 是**第 2 層的部門主管**，不進主管室，坐在自己的「TEAM dev」區第一個位子帶小隊。research、wengpun 是 Antigravity（G）。</sub>
 
 - **看得到大家在做什麼**：打字、讀檔、思考、出錯、等你核准，一眼看出
 - **多 session 協作**：一個 skill `team`，負責分主管和員工、派工、開會
 - **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信
-- **手機也能看**：本機開一個小伺服器，手機瀏覽器打開
+- **人在外面也能管**：接上 Cloudflare，手機隨時看辦公室、對任一個 session 下指令
 
 ## ✨ Claude × Antigravity 一起工作
 
@@ -31,6 +31,18 @@ Claude（主管）◀── 回信：整理好的規格表 ───────
 
 > 2026-10-29 起從 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 搬出來獨立（歷史一起帶過來）。
 > ⚠️ 用的是 Claude Code 的 function hooks（early access，版本間可能變動）。
+
+## 📱 人在外面也能管（Cloudflare 遠端）
+
+本機跑一個小伺服器畫同一間辦公室，用 Cloudflare Tunnel 接到外面，手機瀏覽器打開（可以加到主畫面）：
+
+- **看**：誰在做什麼、誰卡住、誰在等你
+- **點人**：看職稱、狀態、最近的錯誤，還有它最後回了什麼
+- **下指令**：在卡片打字送出，那個 session 會當成你打的字照做（前面標 📱）
+- **只有你進得來**：前面掛 Cloudflare Access，只放行你登入的帳號；伺服器本身只聽本機
+- 不用開著任何 session 的面板，電腦開著就好。權限核准還是要回電腦按
+
+設定方式：[docs/使用說明.md](docs/使用說明.md) 的「手機版」
 
 ## 安裝
 
