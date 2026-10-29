@@ -35,6 +35,9 @@ EVENTS = ["SessionStart", "PreInvocation", "PostInvocation", "PostToolUse", "Sto
 BEAT = 5          # 看守多久續一次心跳（秒）；辦公室 20 秒沒心跳就當離開
 IDLE_EXIT = 60    # 沒有 agy 在線這麼久，看守自己結束
 READ_TOOLS = re.compile(r"view|read|list|grep|search|find|glob|fetch|browser_get", re.I)
+AWAIT = HERE / "awaiting"  # agy 這一輪寄過信 → Stop 等回信；內容＝這一串已自動續跑幾輪
+WAIT_S = 90       # Stop 最多等回信幾秒（等待中 agy 轉圈、不能打字，Esc 可中斷）
+MAX_CHAIN = 5     # 沒有使用者介入時，最多自動續跑幾輪（防兩個 AI 無限互回）
 
 
 def status_file(cid: str) -> Path:
@@ -143,6 +146,39 @@ def take_mail(cid: str, me: str) -> str:
     return "\n\n".join(lines)
 
 
+SENT = re.compile(r"agy_office\.py\S*\s+send\s")
+
+
+def mark_awaiting(cid: str) -> None:
+    """agy 跑了 send：這一輪結束時等回信"""
+    AWAIT.mkdir(parents=True, exist_ok=True)
+    (AWAIT / cid).touch()
+
+
+def wait_reply(cid: str, me: str) -> str:
+    """這一輪寄過信才等：最多 WAIT_S 秒、每秒看收件夾。
+    <cid>＝這一輪寄過信（用一次就刪）；<cid>.n＝這一串已自動續跑幾輪，沒等到或續跑滿 MAX_CHAIN 就歸零"""
+    armed, count = AWAIT / cid, AWAIT / f"{cid}.n"
+    if not armed.exists():
+        count.unlink(missing_ok=True)  # 這一輪沒寄信＝一串結束
+        return ""
+    armed.unlink(missing_ok=True)
+    try:
+        n = int(count.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        n = 0
+    if n < MAX_CHAIN:
+        end = time.time() + WAIT_S
+        while time.time() < end:
+            time.sleep(1)
+            mail = take_mail(cid, me)
+            if mail:
+                count.write_text(str(n + 1), encoding="utf-8")
+                return mail
+    count.unlink(missing_ok=True)
+    return ""
+
+
 def hook(event: str) -> None:
     out = {"decision": "stop"} if event == "Stop" else {}
     try:
@@ -153,8 +189,12 @@ def hook(event: str) -> None:
             mail = take_mail(cid, me)
             if mail and event == "PreInvocation":
                 out = {"injectSteps": [{"userMessage": mail}]}
-            elif mail:  # 一輪剛結束：不停，帶著信再跑一輪
-                out = {"decision": "continue", "reason": mail}
+            elif event == "Stop":
+                mail = mail or wait_reply(cid, me)
+                if mail:  # 一輪剛結束：不停，帶著信再跑一輪
+                    out = {"decision": "continue", "reason": mail}
+        if cid and event == "PostToolUse" and SENT.search(str(((d.get("toolCall") or {}).get("args") or {}).get("CommandLine", ""))):
+            mark_awaiting(cid)
         if cid:
             SESSIONS.mkdir(parents=True, exist_ok=True)
             p = status_file(cid)
@@ -268,7 +308,7 @@ def install() -> None:
         sys.exit(f"{HOOKS} 讀不懂（不是 JSON），不覆蓋；請先修好")
     entry = {}
     for e in EVENTS:
-        h = {"type": "command", "command": str(HERE / f"{e}.cmd"), "timeout": 10}
+        h = {"type": "command", "command": str(HERE / f"{e}.cmd"), "timeout": WAIT_S + 20 if e == "Stop" else 10}
         entry[e] = [{"matcher": ".*", "hooks": [h]}] if e == "PostToolUse" else [h]
     cfg[NAME] = entry
     HOOKS.parent.mkdir(parents=True, exist_ok=True)

@@ -167,6 +167,7 @@ Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office�
   - Claude → agy：放進 `agy/inbox/<對話>.jsonl`，agy **下次動作**時（`PreInvocation` 用 `injectSteps`；一輪剛結束用 `Stop` 的 `continue`）塞進對話。**閒著的 agy 叫不醒**（沒有本機管道，見設計筆記）
   - agy → Claude：寫 `commands/<session>.json`（手機下命令同一套），對方外掛每秒拿；對話裡顯示「📨 <寄件者>（Antigravity，不是使用者本人）：…」，不會被當成使用者的話
   - 送進去的訊息都附回信指令，對方照著跑就能回
+  - 寄完等回信（0.29.0）：agy 這一輪跑過 `send`，一輪結束時 Stop hook 最多等 90 秒回信，等到就帶著信繼續；沒寄信的輪照常立刻停。等待中 agy 轉圈、不能打字（Esc 可中斷）；沒有使用者介入最多自動續跑 5 輪
 
 ## 運作方式
 
