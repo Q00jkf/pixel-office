@@ -666,7 +666,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const stale = titleStale(c)
     const doing = doingText(c, now) + (stale ? `・最新指令「${c.prompt!.text}」` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (自動)` : stale ? `${c.title}（${Math.round((now - c.titleAt!) / 60000)} 分前設）` : c.title
-    const agent = c.kind === 'agy' ? 'Antigravity（不能傳訊）' : c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
+    const agent = c.kind === 'agy' ? `Antigravity：\`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <你的名稱>\`（它下次動作才收到）` : c.agent ?? (c.addr ? `（沒有名稱）SendMessage 用 \`to=${c.addr}\`` : '（未登記，傳訊息找不到）')
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? '員工' : isDeptLead(c, list) ? '部門主管' : '主管'}${c.auto ? '（auto）' : ''}${c.team ? `・屬 ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
@@ -1038,6 +1038,8 @@ const decisionFile = (sessionsDir: string, sid: string) => `${officeRoot(session
 // 手機下的命令（remote/server.ts 寫 commands/<session>.json）：nonce 跟 <session>.done.json 不同才送，
 // 先寫 done 再送，重載外掛也不會送兩次（MOD 的 $.fs 不能刪檔）。當成使用者自己打的字（jacky 2026-10-27 選），前面加 📱
 const commandFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/commands/${sid}.json`
+/** 命令 → 送進對話的字：手機的前面加 📱；別的 AI 寄的（agy_office.py send，帶 from）標寄件者，不能被當成使用者的話 */
+export const commandText = (c: { text: string; from?: unknown }) => (typeof c.from === 'string' && c.from !== '' ? `📨 ${c.from}：${c.text}` : `📱 ${c.text}`)
 export const COMMAND_TTL_MS = 10 * 60 * 1000 // 送出超過 10 分鐘還沒被收的命令作廢（例如對方關了視窗）
 async function takeCommand($: EngineInterface, d: string, now: number) {
   if (me.id === 'me' || me.oneshot) return
@@ -1052,7 +1054,7 @@ async function takeCommand($: EngineInterface, d: string, now: number) {
     if (done === c.nonce) return
     await $.fs.write(doneFile, JSON.stringify({ nonce: c.nonce, at: now }))
     phoneAsk = c.text
-    void $.prompt.submit({ text: `📱 ${c.text}`, asUser: true }).catch(() => undefined)
+    void $.prompt.submit({ text: commandText(c), asUser: true }).catch(() => undefined)
   } catch {}
 }
 

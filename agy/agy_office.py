@@ -1,10 +1,13 @@
-"""Antigravity CLI（agy）→ 像素辦公室：把 agy 的對話畫成辦公室裡的同事（只顯示，不能傳訊）。
+"""Antigravity CLI（agy）↔ 像素辦公室：把 agy 的對話畫成辦公室裡的同事，並跟 Claude session 互傳訊息。
 
 用法：
   python agy_office.py install     複製到 ~/.claude/pixel-office/agy/，把 hook 加進 ~/.gemini/config/hooks.json
   python agy_office.py uninstall   移除 hook（hooks.json 其他人的設定不動）
   python agy_office.py hook <事件>  agy 呼叫：讀 stdin、寫狀態檔、印 agy 要的輸出
   python agy_office.py watch       背景看守：agy 的 presence lock 還鎖著就續心跳，放掉就標離開
+  python agy_office.py send <收件者> <訊息> [--from <寄件者>]
+                                   收件者是 agy → 放進它的收件夾，agy 下次動作時塞進對話（閒著叫不醒）
+                                   收件者是 Claude session → 寫 commands/<session>.json，對方外掛每秒來拿
 
 🔴 hook 失敗（exit 非 0）會中斷 agy 那一輪：hook 模式的每一步都吞例外、一律 exit 0。
 不存 lastUserInput（使用者打的話）。實測 2026-10-29：agy 開著時 presence/<conversationId>.lock 被鎖、關掉就放掉。
@@ -16,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 HOME = Path.home()
@@ -23,6 +27,9 @@ SESSIONS = HOME / ".claude" / "pixel-office" / "sessions"
 HERE = HOME / ".claude" / "pixel-office" / "agy"
 PRESENCE = HOME / ".gemini" / "antigravity-cli" / "presence"
 HOOKS = HOME / ".gemini" / "config" / "hooks.json"
+INBOX = HERE / "inbox"
+COMMANDS = HOME / ".claude" / "pixel-office" / "commands"
+STALE_MS = 20000  # 同 hooks/status.ts
 NAME = "pixel-office"
 EVENTS = ["SessionStart", "PreInvocation", "PostInvocation", "PostToolUse", "Stop"]
 BEAT = 5          # 看守多久續一次心跳（秒）；辦公室 20 秒沒心跳就當離開
@@ -116,11 +123,38 @@ def ensure_watch() -> None:
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
 
 
+def take_mail(cid: str, me: str) -> str:
+    """收件夾整份拿走（先改名再讀，不跟同時寄進來的搶）→ 給 agy 看的一段文字；沒信回空字串"""
+    box = INBOX / f"{cid}.jsonl"
+    if not box.exists():
+        return ""
+    taking = box.with_suffix(f".{os.getpid()}.taking")
+    os.replace(box, taking)
+    lines = []
+    for ln in taking.read_text(encoding="utf-8").splitlines():
+        try:
+            m = json.loads(ln)
+        except Exception:
+            continue
+        frm = m.get("from") or "未署名"
+        lines.append(f"📨 像素辦公室訊息，來自 {frm}（另一個 AI session，不是使用者本人）：{m.get('text', '')}\n"
+                     f"要回覆就跑：python \"{HERE / 'agy_office.py'}\" send {frm} \"<回覆>\" --from {me}")
+    taking.unlink(missing_ok=True)
+    return "\n\n".join(lines)
+
+
 def hook(event: str) -> None:
     out = {"decision": "stop"} if event == "Stop" else {}
     try:
         d = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
         cid = str(d.get("conversationId") or "")
+        if cid and event in ("PreInvocation", "Stop"):
+            me = load(status_file(cid)).get("name") or plate(d.get("workspacePaths") or [])
+            mail = take_mail(cid, me)
+            if mail and event == "PreInvocation":
+                out = {"injectSteps": [{"userMessage": mail}]}
+            elif mail:  # 一輪剛結束：不停，帶著信再跑一輪
+                out = {"decision": "continue", "reason": mail}
         if cid:
             SESSIONS.mkdir(parents=True, exist_ok=True)
             p = status_file(cid)
@@ -178,6 +212,49 @@ def watch() -> None:
         time.sleep(BEAT)
 
 
+def live_crew() -> list:
+    now = time.time() * 1000
+    out = []
+    for p in SESSIONS.glob("*.json"):
+        s = load(p)
+        if s and not s.get("left") and isinstance(s.get("updatedAt"), (int, float)) and now - s["updatedAt"] < STALE_MS:
+            out.append(s)
+    return out
+
+
+def send(args: list) -> None:
+    frm = "未署名"
+    if "--from" in args:
+        i = args.index("--from")
+        frm = " ".join(args[i + 1:i + 2]) or frm
+        args = args[:i] + args[i + 2:]
+    if len(args) < 2:
+        sys.exit("用法：send <收件者> <訊息> [--from <寄件者>]")
+    to, text = args[0], " ".join(args[1:]).strip()
+    want = re.sub(r"\s*\[[0-9a-f]+\]$", "", to.strip())
+    hits = [s for s in live_crew() if want in (s.get("agent"), s.get("name"), s.get("id"))]
+    if len(hits) != 1:
+        names = "、".join(f"{s.get('name')}（{s.get('agent') or s.get('kind') or '—'}）" for s in live_crew())
+        sys.exit(f"找不到唯一的收件者「{to}」（符合 {len(hits)} 個）。在線：{names or '無'}")
+    s = hits[0]
+    if not text or len(text) > 4000:
+        sys.exit("訊息是空的或太長（上限 4000 字）")
+    now = int(time.time() * 1000)
+    if s.get("kind") == "agy":
+        INBOX.mkdir(parents=True, exist_ok=True)
+        cid = str(s["id"])[len("agy-"):]
+        with open(INBOX / f"{cid}.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"from": frm, "text": text, "at": now}, ensure_ascii=False) + "\n")
+        print(f"已放進 {s.get('name')} 的收件夾：它下次動作（使用者打字或正在跑的這一輪結束）時收到；閒著時叫不醒")
+        return
+    COMMANDS.mkdir(parents=True, exist_ok=True)
+    reply = f"python \"{HERE / 'agy_office.py'}\" send {frm} \"<回覆>\" --from <你的 ListAgents 名稱>"
+    body = {"nonce": uuid.uuid4().hex, "at": now, "from": f"{frm}（Antigravity，不是使用者本人）",
+            "text": f"{text}\n（回覆用 {reply}；對方下次動作才收到）"}
+    save(COMMANDS / f"{s['id']}.json", body)
+    print(f"已送給 {s.get('agent') or s.get('name')}：對方外掛每秒來拿，10 分鐘沒被拿就作廢")
+
+
 def install() -> None:
     HERE.mkdir(parents=True, exist_ok=True)
     dst = HERE / "agy_office.py"
@@ -218,4 +295,7 @@ if __name__ == "__main__":
         sys.exit(0)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    {"install": install, "uninstall": uninstall, "watch": watch}.get(cmd, lambda: print(__doc__))()
+    if cmd == "send":
+        send(sys.argv[2:])
+    else:
+        {"install": install, "uninstall": uninstall, "watch": watch}.get(cmd, lambda: print(__doc__))()

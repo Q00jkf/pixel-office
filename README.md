@@ -155,15 +155,18 @@ cp "<plugin 目錄>/plugins/pixel-office/buttons.example.json" ~/.claude/pixel-o
 Desktop 畫面的人物、家具、黑貓、柯基來自 [2dPig「Pixel Office」](https://2dpig.itch.io/pixel-office)（CC0，原檔與授權在 `assets/2dpig/`）。
 `assets/build_sheet.py` 從原素材表去掉天空、加上換色人物，產生 `assets/office-sheet.png` 與 `hooks/sheet.ts`（base64＋裁切框）；改素材或換色就重跑，兩個產物都進 repo。SVG 裡素材表只嵌一次，每個圖素是巢狀 `<svg viewBox>` 以 `<use>` 裁切引用。
 
-## Antigravity CLI（agy，0.27.0 起：只顯示）
+## Antigravity CLI（agy，0.27.0 起顯示、0.28.0 起互傳訊息）
 
-`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事：名牌＝工作資料夾名、名單標「Antigravity（不能傳訊）」。
+`agy/agy_office.py` 把 agy 的對話畫成辦公室裡的同事（名牌＝工作資料夾名），並跟 Claude session 互傳訊息。設計與實測紀錄：`docs/designs/agy.md`。
 
-- 安裝：`python <plugin>/agy/agy_office.py install` —— 複製到 `~/.claude/pixel-office/agy/`，在 `~/.gemini/config/hooks.json` 加「pixel-office」一組 hook（別的設定不動）；**新開的 agy 視窗**才生效。移除：`… uninstall`
+- 安裝：`python <plugin>/agy/agy_office.py install` —— 複製到 `~/.claude/pixel-office/agy/`，在 `~/.gemini/config/hooks.json` 加「pixel-office」一組 hook（別的設定不動）；**新開的 agy 視窗**才生效。移除：`… uninstall`。外掛升版後重跑一次 install 才會換新腳本
 - hook 只接 `SessionStart`／`PreInvocation`／`PostInvocation`／`PostToolUse`／`Stop`，不接 `PreToolUse`（不碰 agy 的權限判斷）；任何錯都吞掉、exit 0，壞了也不會卡住 agy
 - 心跳：agy 閒著時沒有事件，由背景看守每 5 秒檢查 `~/.gemini/antigravity-cli/presence/<對話>.lock` 是否還被鎖（2026-10-29 實測：開著鎖、關掉放）；沒有 agy 在線 60 秒看守自己結束
 - 不存使用者打的字（hook 收到的 `lastUserInput` 直接丟掉）
-- 還不能傳訊：agy 沒有 SendMessage。官方文件說 `PreInvocation` 可回 `injectSteps` 塞訊息進對話，未實測
+- 傳訊：`python ~/.claude/pixel-office/agy/agy_office.py send <收件者> "<訊息>" --from <自己的名稱>`；收件者認 ListAgents 名稱、名牌、id
+  - Claude → agy：放進 `agy/inbox/<對話>.jsonl`，agy **下次動作**時（`PreInvocation` 用 `injectSteps`；一輪剛結束用 `Stop` 的 `continue`）塞進對話。**閒著的 agy 叫不醒**（沒有本機管道，見設計筆記）
+  - agy → Claude：寫 `commands/<session>.json`（手機下命令同一套），對方外掛每秒拿；對話裡顯示「📨 <寄件者>（Antigravity，不是使用者本人）：…」，不會被當成使用者的話
+  - 送進去的訊息都附回信指令，對方照著跑就能回
 
 ## 運作方式
 

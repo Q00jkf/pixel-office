@@ -359,7 +359,7 @@ test('the system prompt gets one short pixel-office section', async ($, on) => {
 // ---------- 紙飛機、等待核准 ----------
 
 import { PLANE_FRAMES, planePos } from './scene'
-import { findRecipient, waitsForApproval } from './register'
+import { commandText, findRecipient, waitsForApproval } from './register'
 
 test('waiting for permission: raised hand, yellow ? and a yellow screen', () => {
   const s = drawScene([P('a', 'x', 'waiting', true)], 2, 60, 40)
@@ -2554,7 +2554,13 @@ test('an Antigravity (agy) status file shows up as a coworker that cannot be mes
   const s = { id: 'agy-c1', kind: 'agy', name: 'wtoffice', mode: 'typing', tool: 'run_command', updatedAt: now - 1000, left: false, addr: 'x' }
   const c = parseStatus(s, now)!
   expect(c.kind).toBe('agy')
-  expect(roster([c], now)).toContain('| wtoffice | — | 員工 | Antigravity（不能傳訊） |')
+  expect(roster([c], now)).toContain('| wtoffice | — | 員工 | Antigravity：`python ~/.claude/pixel-office/agy/agy_office.py send wtoffice "…" --from <你的名稱>`（它下次動作才收到） |')
   expect(parseStatus({ ...s, left: true }, now)).toBeUndefined()
   expect(parseStatus({ ...s, kind: 'other' }, now)!.kind).toBeUndefined()
+})
+
+test('a command written by another AI is labeled with its sender, never as the user', () => {
+  expect(commandText({ text: 'hi' })).toBe('📱 hi')
+  expect(commandText({ text: 'hi', from: 'wtoffice（Antigravity，不是使用者本人）' })).toBe('📨 wtoffice（Antigravity，不是使用者本人）：hi')
+  expect(commandText({ text: 'hi', from: 3 })).toBe('📱 hi')
 })
