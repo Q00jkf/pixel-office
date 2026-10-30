@@ -28,7 +28,7 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 
 ## 協作目錄 `<office>`
 
-**有人登記成主管時才建**（第 0 層用不到）。`<主 repo>`：git repo 取 `git rev-parse --path-format=absolute --git-common-dir` 的上一層（所有 worktree 寫回同一處）；不是 git repo 就是目前資料夾。
+**有人登記成主管時才建**（第 0 層用不到）。`<主 repo>`：git repo 取 `git rev-parse --path-format=absolute --git-common-dir` 的上一層（所有 worktree 寫回同一處）；不是 git repo（`rev-parse` 失敗，環境資訊寫什麼不算）就是目前資料夾。
 
 `<office>` 怎麼定：
 1. 讀 `~/.claude/office/projects.json`（`{"<主 repo 絕對路徑>": "<目錄>"}`；目錄可相對 `<主 repo>` 或絕對）。比對 key 不分大小寫、`\` 與 `/` 視為相同。有這個專案 → 用它。設定在＝使用者同意 AI 讀寫這個目錄，就算它在專案「平常不讀」的區裡；只碰 `<office>` 底下，同一區的其他檔照專案規則不讀不搜。
