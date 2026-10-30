@@ -7,6 +7,19 @@
 
 ---
 
+## 0.36.0 — 2026-10-31
+
+- **改了什麼**：外掛提供「開角色視窗」入口，開的時候順便登記辦公室
+  - `scripts/open_role.py`（新）：`--role --dir --kickoff [--team --title --plate --plugin-dir --dry-run]`。子程序環境拿掉 `CLAUDE_CODE_CHILD_SESSION`、`ANTHROPIC_API_KEY`；指令用 `-EncodedCommand` 傳（不經 `-Command` 的引號剖析，不必 UTF-8 BOM）；路徑不存在報錯不開；`--dry-run` 只印指令與預設登記
+  - 先產生 session id 帶 `--session-id`，寫 `~/.claude/pixel-office/presets/<id>.json`（title＝角色、role=staff、team、名牌）
+  - `hooks/register.tsx`：`applyPreset` —— 這個 session 編號沒有任何存過的身分（全新）才讀預設登記檔、經 `applyProfile` 套用；resume 已有存檔，不蓋。agent／ref 本來就由 `selfRegister` 讀 ListAgents 自己填
+  - `skills/team/lead.md` §1 第 3 步改叫 `open_role.py`；`roles.md` §3：預先登記的那列是自己、不算撞角色，已登記就跳過第 4 步
+  - 團隊視窗（不在本 repo）的 pty 分頁改 import `open_role.child_env`，不再自己寫一份清單
+- **為什麼**：jacky 2026-10-31 同意（willy主管辦公室派工）：健康檢查 14 天裡手組 `Start-Process powershell` 開角色 53 次，只有 wiki-studio 有一支臨時腳本（`ops/開角色.ps1`）；開場檔每次都要寫「開工先登記辦公室」一段
+- **實測**：2026-10-31 `claude plugin test .` 180 過（新 3 個：預設檔欄位過濾、全新 session 套用、resume 不蓋）；`--dry-run` 跑含單雙引號與中文的角色名（引號照原樣進 `--name`）、不存在的路徑（報錯、exit 1）。開真視窗的實測裝到本機後補在下一個 commit
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.35.0 — 2026-10-30
 
 - **改了什麼**：手機面板（`remote/`）卡片的「Latest reply」用 Markdown 畫：表格、清單、粗體、行內 code、程式碼區塊；表格太寬橫向捲動

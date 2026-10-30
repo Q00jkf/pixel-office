@@ -2564,3 +2564,58 @@ test('a command written by another AI is labeled with its sender, never as the u
   expect(commandText({ text: 'hi', from: 'wtoffice (Antigravity, not the user)' })).toBe('📨 wtoffice (Antigravity, not the user): hi')
   expect(commandText({ text: 'hi', from: 3 })).toBe('📱 hi')
 })
+
+// ---------- 0.36.0：open_role.py 開角色時寫 presets/<session>.json，全新 session 自動登記 ----------
+
+import { presetInput } from './register'
+
+test('preset file → office_profile input: strings only, empty fields dropped, nothing usable is undefined', () => {
+  expect(presetInput({ title: '實作', role: 'staff', team: 'willy主管辦公室', name: 'impl', junk: 1 })).toEqual({ title: '實作', role: 'staff', team: 'willy主管辦公室', name: 'impl' })
+  expect(presetInput({ title: ' ', team: 3 })).toBeUndefined()
+  expect(presetInput('x')).toBeUndefined()
+  expect(presetInput(null)).toBeUndefined()
+})
+
+async function startWithPreset($: any, on: any, files: Record<string, string>, sid: string) {
+  mock.clock(on, { now: 1_000_000 })
+  const key = (p: string) => p.split(/[\\/]/).slice(-2).join('/')
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }))
+  on('fs.read', (_$: any, e: any) => {
+    if (!(key(e.path) in files)) throw new Error('ENOENT') // 跟真的一樣：沒有檔就丟錯
+    return { value: files[key(e.path)] }
+  })
+  on('fs.write', (_$: any, e: any) => {
+    files[key(e.path)] = e.text
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: sid }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await $.session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+}
+
+test('a brand-new session with a preset file starts with its title, team and nameplate', async ($, on) => {
+  const files: Record<string, string> = { 'presets/cccc3333.json': JSON.stringify({ title: '試做員', role: 'staff', team: 'office設計', name: 'tryer' }) }
+  await startWithPreset($, on, files, 'cccc3333')
+  const s = JSON.parse(files['sessions/cccc3333.json'])
+  expect(s.title).toBe('試做員')
+  expect(s.team).toBe('office設計')
+  expect(s.name).toBe('tryer')
+  expect(s.role).toBe('staff')
+})
+
+test('a resumed session keeps what it saved: the preset does not overwrite it', async ($, on) => {
+  const files: Record<string, string> = {
+    'presets/dddd4444.json': JSON.stringify({ title: '試做員', team: 'office設計' }),
+    'sessions/dddd4444.json': JSON.stringify({ id: 'dddd4444', name: 'later', role: 'staff', title: '改過的', updatedAt: 0, left: true }),
+  }
+  await startWithPreset($, on, files, 'dddd4444')
+  const s = JSON.parse(files['sessions/dddd4444.json'])
+  expect(s.title).toBe('改過的')
+  expect(s.team).toBeUndefined()
+})

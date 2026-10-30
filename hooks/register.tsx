@@ -495,6 +495,27 @@ async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile &
   }
 }
 
+let fresh = false // 這個 session 編號沒有任何存過的身分（全新開的），預設登記檔只在這時套用
+
+/** scripts/open_role.py 開角色時寫的 presets/<session>.json → office_profile 的參數；欄位錯的丟掉，由 applyProfile 驗 */
+export function presetInput(raw: unknown): { role?: string; name?: string; title?: string; team?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const out: { role?: string; name?: string; title?: string; team?: string } = {}
+  for (const k of ['role', 'name', 'title', 'team'] as const) if (typeof r[k] === 'string' && (r[k] as string).trim() !== '') out[k] = r[k] as string
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** 全新 session 有預設登記檔就套用（resume 已有存檔，不蓋掉使用者後來改的） */
+async function applyPreset($: EngineInterface) {
+  if (!fresh || me.oneshot || me.id === 'me') return
+  const f = `${officeRoot(await sharedDir($))}/presets/${me.id}.json`
+  if (!(await $.fs.exists(f).catch(() => false))) return
+  const raw = await $.fs.read(f).catch(() => undefined)
+  const input = presetInput(typeof raw === 'string' ? (() => { try { return JSON.parse(raw) } catch { return undefined } })() : undefined)
+  if (input) await applyProfile($, input)
+}
+
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
@@ -507,6 +528,7 @@ async function adopt($: EngineInterface, id: string) {
   if (clash) warnCollision($)
   const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
   const saved = mergeProfile(stored, own)
+  fresh = !saved
   if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
   if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
   const savedAgent = (saved as { agent?: unknown } | undefined)?.agent
@@ -1399,6 +1421,7 @@ export const register: Register = on => {
     }
     oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
+    await applyPreset($).catch(() => undefined)
     if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
     const savedPet = await $.store.get('pet').catch(() => undefined)
