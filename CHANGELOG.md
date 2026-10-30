@@ -14,6 +14,7 @@
   - `roles.md`：卡片可多加節（`啟動位置`、`踩過的坑`），接手照讀、先到啟動位置；報到對象＝`collab.md` 登記的主管，沒有就當無主管，不找名單上別專案的主管
   - `lead.md`：目錄在、`collab.md` 不在 → 補建 `collab.md`，roles／checkpoints 照用
 - **為什麼**：jacky 2026-10-30「執行」（willy主管辦公室轉達）：willy #21 的 `_extras` 規則是「平常不讀、檔案工具寫放行、指令寫擋、交貨前要空」；團隊卡（wiki-studio a46ee33）多了啟動位置、踩過的坑兩節；2026-10-29 在 obsidion-book 實測接手，回報「目錄在但沒 collab.md 算不算已建」「reports_to 是角色名，會報錯主管」
+- **實測**：2026-10-30 在 willy #21 確認複本（`總資料夾-第2輪`，載 willy-wt-彈性區）把協作目錄指到 `_extras/office`：Write 建 `.gitignore`、`collab.md` 放行；Bash `echo >` 被擋（「用指令改的退不回來，請用檔案工具改。」，ledger `Z12 shell_write`）。複本停用了 pixel-office、本機裝的是 0.33.0，skill 是照原始碼手動走，名單升降層沒測。依此在「寫不進去」補「shell 被擋先改用檔案工具」
 - **commit**：（本版）
 - **issue**：無
 
