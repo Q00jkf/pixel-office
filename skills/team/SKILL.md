@@ -31,10 +31,12 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 **有人登記成主管時才建**（第 0 層用不到）。`<主 repo>`：git repo 取 `git rev-parse --path-format=absolute --git-common-dir` 的上一層（所有 worktree 寫回同一處）；不是 git repo 就是目前資料夾。
 
 `<office>` 怎麼定：
-1. 讀 `~/.claude/office/projects.json`（`{"<主 repo 絕對路徑>": "<目錄>"}`；目錄可相對 `<主 repo>` 或絕對）。比對 key 不分大小寫、`\` 與 `/` 視為相同。有這個專案 → 用它。
+1. 讀 `~/.claude/office/projects.json`（`{"<主 repo 絕對路徑>": "<目錄>"}`；目錄可相對 `<主 repo>` 或絕對）。比對 key 不分大小寫、`\` 與 `/` 視為相同。有這個專案 → 用它。設定在＝使用者同意 AI 讀寫這個目錄，就算它在專案「平常不讀」的區裡；只碰 `<office>` 底下，同一區的其他檔照專案規則不讀不搜。
 2. 沒有 → `<主 repo>/.claude/office/`。
-3. **寫不進去**（權限或守門腳本擋下）→ 不重試、不自己換地方，問使用者：「這裡寫不進去，協作紀錄要放哪？」（專案裡若有給 AI 寫的區，例如 `_extras/`，可建議 `_extras/office`）。答案寫進 `projects.json`（沒有就建），再寫到新位置。
+3. **寫不進去**（權限或守門腳本擋下）→ 不重試、不自己換地方，問使用者：「這裡寫不進去，協作紀錄要放哪？」（專案裡若有給 AI 寫的區，例如 `_extras/`，可建議 `_extras/office`；專案還在建置、要交給別人的，建議指到團隊自己的地方，那一區可能交付前要清空，office 不會替你清）。答案寫進 `projects.json`（沒有就建），再寫到新位置。
 4. 換了位置、舊的 `.claude/office/` 還有 `roles/`、`checkpoints/` → 問使用者要不要搬，不自動搬。
+
+建資料夾、寫 `<office>` 與 `projects.json` 一律用檔案工具（Write／Edit；Write 會自己建資料夾），不用 shell 的 `mkdir`、`echo >`：有些專案只放行檔案工具寫入。
 
 ```
 <office>/
