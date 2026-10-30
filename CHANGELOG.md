@@ -7,6 +7,17 @@
 
 ---
 
+## 0.35.0 — 2026-10-30
+
+- **改了什麼**：手機面板（`remote/`）卡片的「Latest reply」用 Markdown 畫：表格、清單、粗體、行內 code、程式碼區塊；表格太寬橫向捲動
+  - `page.html`：`marked.parse` 轉出的 HTML 一律過 `DOMPurify.sanitize` 才放進頁面；兩個檔沒載到退回純文字
+  - `server.ts`：`/vendor/marked.umd.js`、`/vendor/purify.min.js` 兩個路由（只放行這兩個檔）
+  - `remote/vendor/`：marked 18.1.2（MIT）、DOMPurify 3.4.17（Apache-2.0 或 MPL-2.0），附 `LICENSE-*`；不從 CDN 載
+- **為什麼**：jacky 2026-10-30 同意（willy主管辦公室轉達）：原本 `esc()` 原文放進 `<pre>`，表格變成一堆 `|`；團隊視窗第二階段直接嵌這一頁。回覆是 AI 寫的、頁面能從手機遠端開，所以不准跳過過濾
+- **實測**：2026-10-30 無頭 Edge 跑頁面裡的同一個 `md()`：測試A 含表格的回覆畫成 1 張表 3 列（格內 `<br>` 保留）；`<script>`、`<img onerror>`、`javascript:` 連結、`onclick` 都被拿掉，4 個旗標都沒被設
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.34.0 — 2026-10-30
 
 - **改了什麼**：team skill 接上「協作目錄放在專案平常不讀的區」（只改 skill 文字）

@@ -194,6 +194,8 @@ const MANIFEST = JSON.stringify({ name: 'Pixel Office', short_name: 'Office', st
 ] })
 // 主畫面圖示：Android 不吃 SVG（會退成網址字首），用 build_icon.py 產的 PNG
 const PNGS = new Map(['icon-192.png', 'icon-512.png', 'icon-maskable.png'].map(n => [`/${n}`, readFileSync(join(import.meta.dir, n))]))
+// 回覆的 Markdown：marked 轉、DOMPurify 過濾（授權見 vendor/LICENSE-*）；只放行這兩個檔
+export const VENDOR = new Map(['marked.umd.js', 'purify.min.js'].map(n => [`/vendor/${n}`, readFileSync(join(import.meta.dir, 'vendor', n), 'utf8')]))
 const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#29366f"/><rect x="3" y="8" width="10" height="4" fill="#f4f7fa"/><circle cx="8" cy="5.5" r="2.2" fill="#ffcd75"/></svg>'
 
 if (import.meta.main) {
@@ -223,6 +225,8 @@ if (import.meta.main) {
       if (url.pathname === '/manifest.webmanifest') return new Response(MANIFEST, { headers: { 'content-type': 'application/manifest+json' } })
       const png = PNGS.get(url.pathname)
       if (png) return new Response(png, { headers: { 'content-type': 'image/png', 'cache-control': 'max-age=86400' } })
+      const js = VENDOR.get(url.pathname)
+      if (js) return new Response(js, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=86400' } })
       if (url.pathname === '/icon.svg') return new Response(ICON, { headers: { 'content-type': 'image/svg+xml' } })
       return new Response('not found', { status: 404 })
     },

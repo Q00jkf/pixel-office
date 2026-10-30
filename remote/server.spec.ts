@@ -2,7 +2,9 @@
 import { expect, test } from 'bun:test'
 
 import { layout } from '../hooks/scene'
-import { allowed, deskRowsNeeded, phoneRows, sameOrigin, sceneSvg } from './server'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { VENDOR, allowed, deskRowsNeeded, phoneRows, sameOrigin, sceneSvg } from './server'
 
 test('requests through Cloudflare need the Access email of the owner; local requests pass', () => {
   const h = (o: Record<string, string>) => new Headers(o)
@@ -35,4 +37,12 @@ test('commands are taken only as same-origin JSON', () => {
   expect(sameOrigin(r({ 'content-type': 'application/json' }))).toBe(true)
   expect(sameOrigin(r({ 'content-type': 'application/json', origin: 'https://evil.example' }))).toBe(false)
   expect(sameOrigin(r({ 'content-type': 'text/plain', origin: 'https://office.example.com' }))).toBe(false)
+})
+
+test('the reply card renders Markdown only through DOMPurify, from vendored files that carry their licenses', () => {
+  expect([...VENDOR.keys()]).toEqual(['/vendor/marked.umd.js', '/vendor/purify.min.js'])
+  for (const n of ['LICENSE-marked', 'LICENSE-dompurify']) expect(existsSync(join(import.meta.dir, 'vendor', n))).toBe(true)
+  const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
+  expect(page).toContain('DOMPurify.sanitize(marked.parse(')
+  expect(page.match(/marked\.parse\(/g)?.length).toBe(1) // 沒有繞過過濾的第二條路
 })

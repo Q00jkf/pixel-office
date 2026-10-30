@@ -8,6 +8,8 @@
 <link rel="icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <title>Pixel Office</title>
+<script src="/vendor/marked.umd.js"></script>
+<script src="/vendor/purify.min.js"></script>
 <style>
   :root { --bg: #e4eef6; --ink: #1a1c2c; --dim: #566c86; --bar: #29366f; }
   * { box-sizing: border-box; }
@@ -30,7 +32,20 @@
   #sent { color: var(--dim); font-size: 13px; margin-top: 4px; }
   #reply { margin-top: 10px; border-top: 1px solid #ccd; padding-top: 8px; }
   #reply .head { color: var(--dim); font-size: 13px; }
-  #reply pre { margin: 4px 0 0; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif; background: #fff; border-radius: 6px; padding: 8px; }
+  #reply .md { margin: 4px 0 0; max-height: 40vh; overflow-y: auto; word-break: break-word; font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif; background: #fff; border-radius: 6px; padding: 8px; }
+  #reply .md > :first-child { margin-top: 0; }
+  #reply .md > :last-child { margin-bottom: 0; }
+  #reply .md p, #reply .md ul, #reply .md ol, #reply .md pre, #reply .md table, #reply .md blockquote { margin: .4em 0; }
+  #reply .md h1, #reply .md h2, #reply .md h3, #reply .md h4 { font-size: 15px; margin: .6em 0 .3em; }
+  #reply .md ul, #reply .md ol { padding-left: 1.4em; }
+  #reply .md blockquote { padding-left: 8px; border-left: 3px solid #ccd; color: var(--dim); }
+  #reply .md code { font: 13px Consolas, "Cascadia Mono", monospace; background: #eef2f6; padding: 0 3px; border-radius: 3px; }
+  #reply .md pre { background: var(--ink); color: #f4f4f4; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre; word-break: normal; }
+  #reply .md pre code { background: none; color: inherit; padding: 0; }
+  #reply .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; word-break: normal; }
+  #reply .md th, #reply .md td { border: 1px solid #ccd; padding: 2px 6px; text-align: left; vertical-align: top; min-width: 3em; }
+  #reply .md th { background: #eef2f6; }
+  #reply pre.raw { white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -72,6 +87,8 @@
       busy = false
     }
   }
+  // 回覆是 AI 寫的、頁面能從手機遠端開：轉出來的 HTML 一律過 DOMPurify；兩個檔沒載到就退回純文字
+  const md = t => window.marked && window.DOMPurify ? DOMPurify.sanitize(marked.parse(String(t), { gfm: true, breaks: true })) : `<pre class="raw">${esc(t)}</pre>`
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago` }
   const CMD = { pending: 'sent, waiting for pickup', delivered: 'delivered', expired: 'not picked up in 10 min, discarded' }
@@ -81,10 +98,10 @@
     if (!refresh && picked !== p.id) document.getElementById('text').value = ''
     picked = p.id
     const rep = document.getElementById('reply')
-    const pre = rep.querySelector('pre')
-    const keep = pre && pre.dataset.at === String(p.reply?.at) // 同一則回覆：不重畫，捲到哪就停在哪
+    const body = rep.querySelector('.md')
+    const keep = body && body.dataset.at === String(p.reply?.at) // 同一則回覆：不重畫，捲到哪就停在哪
     if (!keep) rep.innerHTML = p.reply
-      ? `<div class="head">Latest reply (${ago(p.reply.at)})${p.reply.ask ? ` · to you: 📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><pre data-at="${p.reply.at}">${esc(p.reply.text)}</pre>`
+      ? `<div class="head">Latest reply (${ago(p.reply.at)})${p.reply.ask ? ` · to you: 📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><div class="md" data-at="${p.reply.at}">${md(p.reply.text)}</div>`
       : '<div class="head">No reply yet (needs 0.23.0+ and one finished turn)</div>'
     else rep.querySelector('.head').textContent = `Latest reply (${ago(p.reply.at)})` + (p.reply.ask ? ` · to you: 📱 ${p.reply.ask.slice(0, 40)}` : '')
     document.getElementById('sent').textContent = p.cmd ? `Last command: "${p.cmd.text.slice(0, 40)}" — ${CMD[p.cmd.state]} (${ago(p.cmd.at)})` : ''
