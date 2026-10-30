@@ -16,7 +16,7 @@
   - `skills/team/lead.md` §1 第 3 步改叫 `open_role.py`；`roles.md` §3：預先登記的那列是自己、不算撞角色，已登記就跳過第 4 步
   - 團隊視窗（不在本 repo）的 pty 分頁改 import `open_role.child_env`，不再自己寫一份清單
 - **為什麼**：jacky 2026-10-31 同意（willy主管辦公室派工）：健康檢查 14 天裡手組 `Start-Process powershell` 開角色 53 次，只有 wiki-studio 有一支臨時腳本（`ops/開角色.ps1`）；開場檔每次都要寫「開工先登記辦公室」一段
-- **實測**：2026-10-31 `claude plugin test .` 180 過（新 3 個：預設檔欄位過濾、全新 session 套用、resume 不蓋）；`--dry-run` 跑含單雙引號與中文的角色名（引號照原樣進 `--name`）、不存在的路徑（報錯、exit 1）。開真視窗的實測裝到本機後補在下一個 commit
+- **實測**：2026-10-31 `claude plugin test .` 180 過（新 3 個：預設檔欄位過濾、全新 session 套用、resume 不蓋）；`--dry-run` 跑含單雙引號與中文的角色名（引號照原樣進 `--name`）、不存在的路徑（報錯、exit 1）。本機裝 0.36.0 後開真視窗（父程序故意設 `CLAUDE_CODE_CHILD_SESSION=1`）：`~/.claude/sessions/<pid>.json` 照常寫出、ListAgents 列出「開角色測試 [aa09cb]」；辦公室狀態檔一啟動就是 名牌 rtest／職稱 開角色測試／team office設計／role staff，agent、ref 由 selfRegister 填上。用團隊視窗的 Close session 關掉：claude、`-EncodedCommand` 的 PowerShell 視窗、sessions 殘檔都清掉
 - **commit**：（本版）
 - **issue**：無
 
