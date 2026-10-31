@@ -2676,3 +2676,14 @@ test('every 5 seconds the office follows /rename: own agent and the team of a re
   expect(s.agent).toBe('改名後組員')
   expect(s.team).toBe('改名後主管')
 })
+
+// ---------- 0.39.0：同一份對話開兩個視窗 ----------
+
+test('a session marked dup is called out on the roster and parsed from its status file', () => {
+  const crew: Coworker[] = [{ ...P('a', 'A'), agent: '客製實作', dup: true }, { ...P('b', 'B'), agent: 'other' }]
+  const text = roster(crew, 0)
+  expect(text).toContain('🔴 客製實作: the same conversation is open in two windows')
+  expect(text).not.toContain('🔴 other')
+  expect(parseStatus({ id: 'a', name: 'A', mode: 'idle', updatedAt: 0, dup: true }, 0)!.dup).toBe(true)
+  expect(parseStatus({ id: 'a', name: 'A', mode: 'idle', updatedAt: 0 }, 0)!.dup).toBeUndefined()
+})

@@ -7,6 +7,17 @@
 
 ---
 
+## 0.39.0 — 2026-10-31
+
+- **改了什麼**：同一份對話開在兩個視窗（`--resume` 接到還開著的對話）抓得到了
+  - 外掛：原本偵測到撞號只跳一次 toast；現在狀態檔寫 `dup`，名單最上面標 🔴「同一份對話開在兩個視窗」，該視窗下一則指令附提醒（`DUP_NOTE`：停下來請使用者關掉一個）
+  - `scripts/open_role.py` 加 `live_sessions(session_id)`：讀 `~/.claude/sessions/*.json` 並確認 pid 還活著（強制結束會留下檔）
+  - `scripts/takeover.py`：這份對話同時有兩個活著的程序 → 印 STOP
+  - 團隊視窗（外掛外的原型）開分頁前用 `live_sessions` 檢查，已開著就不再 `--resume`，分頁顯示在哪裡開著
+- **為什麼**：jacky 2026-10-31：團隊視窗 resume 同一份對話變成兩個分頁、撞角色檢查抓不到。實測兩個 ref 是同一個 session id 的兩個程序；狀態檔以 session id 命名，兩邊輪流覆蓋成一列，`takeover.py` 撞角色又以 session id 排除自己
+- **實測**：假的 `~/.claude/sessions`（兩個活 pid＋一個已死 pid、同 session id）→ takeover 印 STOP，只列兩個活的；`claude plugin test .` 185 pass
+- **commit**：（本版）
+
 ## 0.38.0 — 2026-10-31
 
 - **改了什麼**：`scripts/takeover.py <角色>`（新）—— 接手前置一次印完，不寫檔

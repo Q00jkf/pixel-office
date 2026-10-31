@@ -55,6 +55,8 @@ export type Coworker = {
   gotAt?: number
   /** 非互動的一次性對話（claude -p、SDK）：不畫成員工，在走廊收成一個「⚙ <前綴> ×N」徽章 */
   oneshot?: boolean
+  /** 同一個 session 編號另有一個視窗在跑（--resume 接到同一段對話）：兩邊輪流蓋同一個狀態檔，名單只看得到一列 */
+  dup?: boolean
   /** 啟動時的 --name（classic SessionStart 的 session_title）：一次性對話靠它的前綴分組 */
   label?: string
   /** 不是 Claude Code：agy＝Antigravity CLI（agy/agy_office.py 寫的狀態檔），SendMessage 送不到，改用 agy_office.py send */

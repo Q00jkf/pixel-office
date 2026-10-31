@@ -172,6 +172,7 @@ export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?
 function warnCollision($: EngineInterface) {
   if (collisionWarned) return
   collisionWarned = true
+  me = { ...me, dup: true } // 名單標紅、下一則指令提醒模型（jacky 2026-10-31：團隊視窗 resume 同一份對話，撞角色檢查抓不到）
   $.ui.toast(`⚠ Another window shares this session id (${me.id.slice(0, 8)}), so their office data overwrite each other: close one and reopen a different conversation with claude --resume`)
 }
 
@@ -627,7 +628,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, label: me.label, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -667,10 +668,13 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 export const DEMOTE_MS = 20 * 60000 // 主管底下沒有在線員工滿這麼久 → 下一則使用者指令附降層提醒（jacky 2026-10-29）
+export const DUP_NOTE =
+  'Pixel office: another window is running this same conversation (same session id, usually a second claude --resume). Stop and tell the user to close one window; both copies write the same checkpoint and office record, and messages reach either one.'
 export const DEMOTE_NOTE =
   "Pixel office: you are registered as manager but nobody online has had team=you for 20 minutes. If multiple sessions are no longer needed, ask the user whether to step down (office_profile role=staff, then clear collab.md's 在線 rows per skill pixel-office:team). If windows are only closed for now, keep as is. Don't change it yourself."
 let reportsSeenAt: number | undefined // 最後一次看到有人掛在我底下（或我還不是主管）的時間
 let demoteNoted = false // 這段沒人的期間已經提醒過
+let dupNoted = false // 撞號只提醒模型一次
 
 /** 有沒有在線的人掛在 self 底下（team 對到 ListAgents 名稱或名牌） */
 export const hasReports = (self: Coworker, others: Coworker[]) => others.some(c => c.team !== undefined && (c.team === self.agent || c.team === self.name))
@@ -742,6 +746,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     `Pixel office roster (${list.length} online, ${new Date(now).toISOString().slice(11, 19)} UTC)`,
     ...(blockedNames.length > 0 ? [`🔴 Blocked: ${blockedNames.join(', ')} (the user must say "allow" in each window; relaying from another session does not work)`] : []),
     ...clashNotes(sorted),
+    ...sorted.filter(c => c.dup).map(c => `🔴 ${c.agent ?? c.name}: the same conversation is open in two windows (claude --resume of one session); they overwrite each other and look like one person here. Ask the user to close one.`),
     '| Name | Title | Role | ListAgents name (for SendMessage) | ref | Now |',
     '|---|---|---|---|---|---|',
   ]
@@ -1740,6 +1745,10 @@ export const register: Register = on => {
         const head = promptHead(e.text)
         if (head) me = { ...me, prompt: { text: head, at: now } }
         await autoTitle($, head, now)
+        if (me.dup && !dupNoted) {
+          dupNoted = true
+          e = { ...e, context: [...(e.context ?? []), DUP_NOTE] }
+        }
         if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
           demoteNoted = true
           e = { ...e, context: [...(e.context ?? []), DEMOTE_NOTE] }

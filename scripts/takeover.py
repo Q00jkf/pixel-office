@@ -5,7 +5,7 @@
 印出（不寫任何檔）：
 - 角色卡的定義（拿掉註解與 frontmatter）
 - 你是誰：~/.claude/sessions 裡這個 session 的名稱；卡上有 office_name 而名稱不同 → 提醒請使用者 /rename
-- 撞角色：辦公室裡別的在線 session 職稱＝這個角色 → 印 STOP，停下來問使用者
+- 撞角色：辦公室裡別的在線 session 職稱＝這個角色，或這份對話同時開在兩個視窗 → 印 STOP，停下來問使用者
 - 登記辦公室那一行（office_profile 的參數；卡的 office_name／office_title 優先）
 - 最後一筆檢查點
 - collab.md 只取「主管」「在線」「檔案佔用」三節，引言拿掉、長欄位截短；其他節用到才查
@@ -19,6 +19,9 @@ import re
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from open_role import live_sessions  # noqa: E402
 
 KEEP = ('主管', '在線', '檔案佔用')
 CELL = 80          # collab 表格每格最多字數
@@ -148,6 +151,9 @@ def main(argv=None):
           + (f'；卡要求名稱 {want} → 請使用者 /rename {want}（只有使用者能改）' if want and want != name else ''))
     if others:
         print(f'STOP：{", ".join(sorted(set(others)))} 也登記這個角色且在線 → 先問使用者，不要接')
+    twins = live_sessions(me.get('sessionId')) if me.get('sessionId') else []
+    if len(twins) > 1:
+        print(f'STOP：這份對話同時開在 {len(twins)} 個視窗（pid {", ".join(str(p) for p, _ in twins)}）→ 請使用者關掉一個再接')
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
             'role=主管' if meta.get('layer', '1') == '1' and a.role == '主管' else None]
     print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 ListAgents 名稱，沒有就不帶>, auto=<auto 模式就 true>)')
