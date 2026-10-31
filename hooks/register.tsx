@@ -745,6 +745,10 @@ async function mailName($: EngineInterface, to: string): Promise<string | undefi
   return undefined
 }
 
+let mailSaved: string | undefined
+export const mailSavedNote = (to: string) =>
+  `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.`
+
 /** 每 5 秒：收件人在線（不是自己）就由這個視窗轉交 */
 async function deliverMail($: EngineInterface) {
   if (me.oneshot || me.id === 'me') return
@@ -1771,6 +1775,14 @@ export const register: Register = on => {
   })
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    mailSaved = undefined
+    const ran = await next(e)
+    const to = mailSaved
+    mailSaved = undefined
+    return to && ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(to)] } : ran
+  })
+
   // 送不到（對方不在線、程序重開位址變了）→ 存辦公室信箱，對方以同名或同職稱上線時轉交
   on('session.send', async ($, e, next) => {
     const sent = await next(e)
@@ -1785,7 +1797,7 @@ export const register: Register = on => {
           const now = await $.clock.now()
           const mail: Mail = { from: me.agent ?? me.name, to, text: e.text, at: now, state: 'pending' }
           await $.fs.write(`${await mailDir($)}/${now}-${crypto.randomUUID().slice(0, 8)}.json`, JSON.stringify(mail))
-          return { isDelivered: false, reason: `${sent.reason} Pixel office saved it to its mailbox for ${to}: delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` }
+          mailSaved = to // 名稱查無時引擎在 hook 之後才拒收、用自己的字，改 reason 模型看不到：由 SendMessage 的 tool.call 附在 context
         }
       }
     } catch {}

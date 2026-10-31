@@ -2780,7 +2780,7 @@ test('session end appends an auto checkpoint for a held role after work, and not
 
 // ---------- 0.42.0：離線信箱 ----------
 
-import { MAIL_CLAIM_MS, MAIL_TTL_MS, mailMatches, mailStep, parseMail, shouldMail } from './register'
+import { MAIL_CLAIM_MS, MAIL_TTL_MS, mailMatches, mailSavedNote, mailStep, parseMail, shouldMail } from './register'
 
 test('mailbox: store only when the recipient is gone, not when the name is ambiguous or refused', () => {
   expect(shouldMail('No agent or session named "office設計" is running')).toBe(true)
@@ -2817,8 +2817,12 @@ test('a SendMessage to someone offline is saved to the mailbox and the model is 
   on('session.send', () => ({ isDelivered: false, reason: 'No session named "r" is running.' }) as any)
   const out: any = await ($ as any).session.send({ to: 'r', text: 'spec 改好了', origin: { kind: 'model' } })
   expect(out.isDelivered).toBe(false)
-  expect(out.reason).toContain('saved it to its mailbox for r')
   const saved = Object.entries(files).find(([k]) => k.includes('/pixel-office/mail/'))
   expect(saved).toBeDefined()
   expect(JSON.parse(saved![1])).toMatchObject({ to: 'r', text: 'spec 改好了', state: 'pending', at: 5000 })
+})
+
+test('the mailbox note tells the model not to resend or write a peer-reply file', () => {
+  expect(mailSavedNote('r')).toContain('mailbox for r')
+  expect(mailSavedNote('r')).toContain('No need to resend or write a peer-reply file')
 })
