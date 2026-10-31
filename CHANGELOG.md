@@ -7,6 +7,17 @@
 
 ---
 
+## 0.37.0 — 2026-10-31
+
+- **改了什麼**：`/rename` 之後辦公室跟上（`hooks/register.tsx`，每 5 秒跟 `followSession` 一起跑 `followRename`）
+  - 讀 Claude Code 自己的 `~/.claude/sessions/*.json`（`parseCliSession`：現名、`formerNames` 舊名）
+  - 自己的 agent 跟現名不同 → 改成現名（以前只有啟動、`/office`、`office_profile` 才更新）
+  - 自己的 team 指的名字已沒有 session 在用、卻是某個 session 的舊名 → 改成它的現名（主管只是離線、名字沒換的不動；自己的舊名不算）
+- **為什麼**：jacky 2026-10-31：「我改名後 Relations 裡面的 session 沒有改名，反而被納入新的 session」。實際資料：GUANGUAN（原 claim-supervisor-role-handover）改名後，AS9100pro 的 team 還是舊名 → 團隊視窗關係圖長出舊名的空殼節點、AS9100pro 掛在空殼下
+- **實測**：2026-10-31 改版前用團隊視窗的「改名測試」團隊（主管＋組員兩個分頁）重現：`/rename` 15 秒後 CLI 名已換、辦公室 agent 還是舊名；再打 `/office` 後主管 agent 換了、組員 team 還指舊名 → 關係圖出現「改名主管測試 (offline)」空殼。`claude plugin test .` 183 過（新 3 個：讀 CLI 檔、改名規則 4 種情況、5 秒後 agent 與 team 都跟上）。改版後實測見下一個 commit
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.36.0 — 2026-10-31
 
 - **改了什麼**：外掛提供「開角色視窗」入口，開的時候順便登記辦公室

@@ -516,6 +516,49 @@ async function applyPreset($: EngineInterface) {
   if (input) await applyProfile($, input)
 }
 
+/** Claude Code 自己的 ~/.claude/sessions/<pid>.json：在線 session 的現名與 /rename 前的舊名 */
+export type CliSession = { sessionId: string; name?: string; formerNames: string[] }
+export function parseCliSession(raw: unknown): CliSession | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.sessionId !== 'string') return undefined
+  const former = Array.isArray(r.formerNames) ? r.formerNames.map(f => (f && typeof f === 'object' ? (f as { name?: unknown }).name : undefined)).filter((n): n is string => typeof n === 'string' && n !== '') : []
+  return { sessionId: r.sessionId, name: typeof r.name === 'string' && r.name !== '' ? r.name : undefined, formerNames: former }
+}
+
+/** /rename 之後要改的：自己的 agent 換成現名；team 指的名字已沒人用、卻是某個 session 的舊名 → 換成它的現名 */
+export function renameFixes(me: { id: string; agent?: string; team?: string }, cli: CliSession[]): { agent?: string; team?: string } {
+  const out: { agent?: string; team?: string } = {}
+  const mine = cli.find(c => c.sessionId === me.id)
+  if (mine?.name && mine.name !== me.agent) out.agent = mine.name
+  if (me.team && !cli.some(c => c.name === me.team)) {
+    const moved = cli.find(c => c.name && c.sessionId !== me.id && c.formerNames.includes(me.team as string))
+    if (moved?.name) out.team = moved.name
+  }
+  return out
+}
+
+async function cliSessions($: EngineInterface): Promise<CliSession[]> {
+  const d = `${officeRoot(await sharedDir($)).replace(/\/pixel-office$/, '')}/sessions`
+  const out: CliSession[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    try {
+      const raw = await $.fs.read(`${d}/${entry.name}`)
+      const c = parseCliSession(JSON.parse(typeof raw === 'string' ? raw : '{}'))
+      if (c) out.push(c)
+    } catch {}
+  }
+  return out
+}
+
+/** 每 5 秒：跟上自己的 /rename，主管改名後把 team 接回去（jacky 2026-10-31：改名後關係圖長出舊名的空殼、人掛在空殼下） */
+async function followRename($: EngineInterface) {
+  if (me.id === 'me' || me.oneshot) return
+  const fix = renameFixes(me, await cliSessions($))
+  if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
+}
+
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
@@ -1451,7 +1494,7 @@ export const register: Register = on => {
     $.clock.every(500, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
-    $.clock.every(5000, () => void followSession($).then(() => publish($, false)).catch(() => undefined))
+    $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
     $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記

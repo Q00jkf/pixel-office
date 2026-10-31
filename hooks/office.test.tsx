@@ -2619,3 +2619,60 @@ test('a resumed session keeps what it saved: the preset does not overwrite it', 
   expect(s.title).toBe('改過的')
   expect(s.team).toBeUndefined()
 })
+
+// ---------- 0.37.0：/rename 之後辦公室跟上（自己的 agent、team 指到主管舊名） ----------
+
+import { parseCliSession, renameFixes } from './register'
+
+test('Claude session file → current name and former names; junk is dropped', () => {
+  expect(parseCliSession({ sessionId: 's1', name: 'GUANGUAN', formerNames: [{ name: 'claim-supervisor', until: 1, sessionId: 's1' }, { until: 2 }, 'x'] })).toEqual({ sessionId: 's1', name: 'GUANGUAN', formerNames: ['claim-supervisor'] })
+  expect(parseCliSession({ sessionId: 's2' })).toEqual({ sessionId: 's2', name: undefined, formerNames: [] })
+  expect(parseCliSession({ name: 'no id' })).toBeUndefined()
+})
+
+test('rename fixes: own agent follows /rename; a team pointing at a renamed manager follows to the new name', () => {
+  const cli = [
+    { sessionId: 'me', name: '改名後組員', formerNames: ['改名組員'] },
+    { sessionId: 'boss', name: '改名後主管', formerNames: ['改名主管'] },
+  ]
+  expect(renameFixes({ id: 'me', agent: '改名組員', team: '改名主管' }, cli)).toEqual({ agent: '改名後組員', team: '改名後主管' })
+  expect(renameFixes({ id: 'me', agent: '改名後組員', team: '改名後主管' }, cli)).toEqual({}) // 已一致：不動
+  expect(renameFixes({ id: 'me', agent: '改名後組員', team: '離線主管' }, cli)).toEqual({}) // 主管只是離線、不是改名：不動
+  expect(renameFixes({ id: 'me', agent: 'x', team: '改名後組員' }, [{ sessionId: 'me', name: 'x', formerNames: ['改名後組員'] }])).toEqual({}) // 自己的舊名不算
+})
+
+test('every 5 seconds the office follows /rename: own agent and the team of a renamed manager', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const key = (p: string) => p.split(/[\\/]/).slice(-3).join('/') // 兩個 sessions 資料夾，多留一層分開
+  const files: Record<string, string> = {
+    'pixel-office/sessions/eeee5555.json': JSON.stringify({ id: 'eeee5555', name: 'mem', role: 'staff', agent: '改名組員', team: '改名主管', updatedAt: 0, left: true }),
+    '.claude/sessions/101.json': JSON.stringify({ sessionId: 'eeee5555', name: '改名後組員', formerNames: [{ name: '改名組員' }] }),
+    '.claude/sessions/102.json': JSON.stringify({ sessionId: 'ffff6666', name: '改名後主管', formerNames: [{ name: '改名主管' }] }),
+  }
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', (_$: any, e: any) => {
+    const dir = e.path.split(/[\\/]/).slice(-2).join('/') + '/'
+    return { value: Object.keys(files).filter(k => k.startsWith(dir)).map(k => ({ kind: 'file', name: k.split('/').pop() })) }
+  })
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }))
+  on('fs.read', (_$: any, e: any) => {
+    if (!(key(e.path) in files)) throw new Error('ENOENT')
+    return { value: files[key(e.path)] }
+  })
+  on('fs.write', (_$: any, e: any) => {
+    files[key(e.path)] = e.text
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'eeee5555' }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['pixel-office/sessions/eeee5555.json']).agent).toBe('改名組員')
+  await clock.advance(5000)
+  const s = JSON.parse(files['pixel-office/sessions/eeee5555.json'])
+  expect(s.agent).toBe('改名後組員')
+  expect(s.team).toBe('改名後主管')
+})
