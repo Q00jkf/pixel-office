@@ -683,6 +683,101 @@ async function writeAutoCheckpoint($: EngineInterface) {
   await $.fs.write(file, `${body}${body.endsWith('\n') ? '' : '\n'}\n${entry}`)
 }
 
+// ---------- 離線信箱（jacky 2026-10-31：對方重開就收不到，SendMessage 不落地，ENOINBOX） ----------
+// ~/.claude/pixel-office/mail/<時間>-<亂數>.json，一封一檔。$.fs 沒有搬移／刪除，狀態寫在檔裡：pending → claimed（誰、何時）→ done
+export type Mail = { from: string; to: string; text: string; at: number; state: 'pending' | 'claimed' | 'done'; by?: string; claimedAt?: number; note?: string }
+export const MAIL_TTL_MS = 24 * 3600000 // 超過一天沒人收就作廢
+export const MAIL_CLAIM_MS = 30000 // 別人認領後這麼久沒送完，可以接手
+
+/** 送不到的原因裡，這些不存信箱：同名多人（要帶 ref）、對方拒收、hook 擋下 */
+export const shouldMail = (reason: string) => !/several|multiple|ambiguous|\[ref\]|refus|declin|denied|hook|not allowed/i.test(reason)
+
+/** 收件名對得到這個人：ListAgents 名稱或職稱（角色名：換人接手也收得到） */
+export const mailMatches = (to: string, c: { agent?: string; title?: string }) => to === c.agent || to === c.title
+
+/** 這一輪對這封信做什麼：claim 先寫認領、下一輪確認還是自己的才 send（多個視窗同時看到時只送一次） */
+export function mailStep(m: Mail, mine: string, now: number): 'claim' | 'send' | 'skip' | 'expire' {
+  if (m.state === 'done') return 'skip'
+  if (now - m.at > MAIL_TTL_MS) return 'expire'
+  if (m.state === 'claimed' && m.by === mine) return 'send'
+  if (m.state === 'claimed' && typeof m.claimedAt === 'number' && now - m.claimedAt < MAIL_CLAIM_MS) return 'skip'
+  return 'claim'
+}
+
+export function parseMail(raw: unknown): Mail | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.from !== 'string' || typeof r.to !== 'string' || typeof r.text !== 'string' || typeof r.at !== 'number') return undefined
+  const state = r.state === 'claimed' || r.state === 'done' ? r.state : 'pending'
+  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined }
+}
+
+export const mailText = (m: Mail, at: string) => `[Pixel office mailbox] ${m.from} sent this at ${at} while you were offline; reply with SendMessage to ${m.from}.\n\n${m.text}`
+
+const mailDir = async ($: EngineInterface) => `${officeRoot(await sharedDir($))}/mail`
+
+async function readMail($: EngineInterface): Promise<{ file: string; m: Mail }[]> {
+  const d = await mailDir($)
+  const out: { file: string; m: Mail }[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    try {
+      const raw = await $.fs.read(`${d}/${entry.name}`)
+      const m = parseMail(JSON.parse(typeof raw === 'string' ? raw : '{}'))
+      if (m && m.state !== 'done') out.push({ file: `${d}/${entry.name}`, m })
+    } catch {}
+  }
+  return out
+}
+
+/** SendMessage 的收件者 → 信箱收件名：uds 位址查辦公室狀態檔換成名稱（程序重開位址就變），名稱去掉 [ref] */
+async function mailName($: EngineInterface, to: string): Promise<string | undefined> {
+  const t = to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
+  if (!t.startsWith('uds:')) return t || undefined
+  const d = await sharedDir($)
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    try {
+      const s = JSON.parse(String(await $.fs.read(`${d}/${entry.name}`)))
+      if (s.addr === t) return typeof s.agent === 'string' ? s.agent : typeof s.title === 'string' ? s.title : undefined
+    } catch {}
+  }
+  return undefined
+}
+
+/** 每 5 秒：收件人在線（不是自己）就由這個視窗轉交 */
+async function deliverMail($: EngineInterface) {
+  if (me.oneshot || me.id === 'me') return
+  const now = await $.clock.now()
+  for (const { file, m } of await readMail($)) {
+    const target = others.find(c => !c.oneshot && c.kind !== 'agy' && mailMatches(m.to, c))
+    const step = mailStep(m, instance, now)
+    if (step === 'expire') await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: 'expired' }))
+    if (!target || step === 'skip' || step === 'expire') continue
+    if (step === 'claim') {
+      await $.fs.write(file, JSON.stringify({ ...m, state: 'claimed', by: instance, claimedAt: now }))
+      continue
+    }
+    const sent = await $.session.send({ to: { sessionId: target.id }, text: mailText(m, localStamp(m.at)) }).catch(() => ({ isDelivered: false as const, reason: 'error' }))
+    await $.fs.write(file, JSON.stringify(sent.isDelivered ? { ...m, state: 'done', note: `delivered to ${target.agent ?? target.id} by ${me.agent ?? me.id}` } : { ...m, state: 'pending' }))
+  }
+}
+
+/** 收件人是自己（例如只剩自己在線）：下一則指令時附在 context */
+async function takeOwnMail($: EngineInterface): Promise<string[]> {
+  if (me.oneshot || me.id === 'me') return []
+  const now = await $.clock.now()
+  const texts: string[] = []
+  for (const { file, m } of await readMail($)) {
+    if (!mailMatches(m.to, me)) continue
+    const step = mailStep(m, instance, now)
+    if (step === 'skip' || step === 'expire') continue
+    await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: `read by ${me.agent ?? me.id}` }))
+    texts.push(mailText(m, localStamp(m.at)))
+  }
+  return texts
+}
+
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
@@ -1623,7 +1718,7 @@ export const register: Register = on => {
     $.clock.every(500, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
-    $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).catch(() => undefined))
+    $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).then(() => deliverMail($)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
     $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
@@ -1676,6 +1771,7 @@ export const register: Register = on => {
   })
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
+  // 送不到（對方不在線、程序重開位址變了）→ 存辦公室信箱，對方以同名或同職稱上線時轉交
   on('session.send', async ($, e, next) => {
     const sent = await next(e)
     try {
@@ -1683,6 +1779,14 @@ export const register: Register = on => {
         me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
         await showCrew($)
         await publish($, false)
+      } else if (e.origin.kind === 'model' && !e.agentId && !me.oneshot && shouldMail(sent.reason)) {
+        const to = await mailName($, e.to)
+        if (to) {
+          const now = await $.clock.now()
+          const mail: Mail = { from: me.agent ?? me.name, to, text: e.text, at: now, state: 'pending' }
+          await $.fs.write(`${await mailDir($)}/${now}-${crypto.randomUUID().slice(0, 8)}.json`, JSON.stringify(mail))
+          return { isDelivered: false, reason: `${sent.reason} Pixel office saved it to its mailbox for ${to}: delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` }
+        }
       }
     } catch {}
     return sent
@@ -1880,6 +1984,8 @@ export const register: Register = on => {
         }
       }
       await setMode($, 'thinking')
+      const mail = await takeOwnMail($).catch(() => [] as string[])
+      if (mail.length > 0) e = { ...e, context: [...(e.context ?? []), ...mail] }
       if (await syncCheckpoint($) && checkpointDue(cpWorked, cpBase, await $.clock.now(), cpNoted)) {
         cpNoted = true
         e = { ...e, context: [...(e.context ?? []), cpNote(cpCache!.file!)] }

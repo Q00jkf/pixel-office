@@ -2777,3 +2777,48 @@ test('session end appends an auto checkpoint for a held role after work, and not
   expect(cp).toContain('claude --resume sid-1')
   expect(cp.startsWith('# R 檢查點\n\n## 2026-10-30 10:00 x')).toBe(true) // 只往後加
 })
+
+// ---------- 0.42.0：離線信箱 ----------
+
+import { MAIL_CLAIM_MS, MAIL_TTL_MS, mailMatches, mailStep, parseMail, shouldMail } from './register'
+
+test('mailbox: store only when the recipient is gone, not when the name is ambiguous or refused', () => {
+  expect(shouldMail('No agent or session named "office設計" is running')).toBe(true)
+  expect(shouldMail('ENOINBOX: the session has no inbox')).toBe(true)
+  expect(shouldMail('Several sessions are named x; add the [ref]')).toBe(false)
+  expect(shouldMail('The session refused the message')).toBe(false)
+})
+
+test('mailbox: a name or a role title receives; claim first, send on the next tick, expire after a day', () => {
+  expect(mailMatches('客製實作', { agent: 'x', title: '客製實作' })).toBe(true)
+  expect(mailMatches('office設計', { agent: 'office設計' })).toBe(true)
+  expect(mailMatches('a', { agent: 'b', title: 'c' })).toBe(false)
+  const m = parseMail({ from: 'boss', to: 'r', text: 'hi', at: 0 })!
+  expect(m.state).toBe('pending')
+  expect(mailStep(m, 'A', 1000)).toBe('claim')
+  const mine = { ...m, state: 'claimed' as const, by: 'A', claimedAt: 1000 }
+  expect(mailStep(mine, 'A', 6000)).toBe('send')
+  expect(mailStep(mine, 'B', 6000)).toBe('skip') // 別人剛認領
+  expect(mailStep(mine, 'B', 1000 + MAIL_CLAIM_MS)).toBe('claim') // 認領太久沒送完：接手
+  expect(mailStep({ ...m, state: 'done' }, 'A', 1000)).toBe('skip')
+  expect(mailStep(m, 'A', MAIL_TTL_MS + 1)).toBe('expire')
+  expect(parseMail({ from: 'a', to: 'b' })).toBeUndefined()
+})
+
+test('a SendMessage to someone offline is saved to the mailbox and the model is told so', async ($, on) => {
+  const files: Record<string, string> = {}
+  on('clock.now', () => ({ value: 5000 }) as any)
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.replace(/\\/g, '/')] = e.text
+    return { value: undefined }
+  })
+  on('session.send', () => ({ isDelivered: false, reason: 'No session named "r" is running.' }) as any)
+  const out: any = await ($ as any).session.send({ to: 'r', text: 'spec 改好了', origin: { kind: 'model' } })
+  expect(out.isDelivered).toBe(false)
+  expect(out.reason).toContain('saved it to its mailbox for r')
+  const saved = Object.entries(files).find(([k]) => k.includes('/pixel-office/mail/'))
+  expect(saved).toBeDefined()
+  expect(JSON.parse(saved![1])).toMatchObject({ to: 'r', text: 'spec 改好了', state: 'pending', at: 5000 })
+})

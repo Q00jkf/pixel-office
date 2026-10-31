@@ -7,6 +7,18 @@
 
 ---
 
+## 0.42.0 — 2026-10-31
+
+- **改了什麼**：離線信箱
+  - 寄：模型的 `SendMessage` 送不到、原因不是「同名多人／拒收／hook 擋」→ 存 `~/.claude/pixel-office/mail/<時間>-<亂數>.json`（收件名：名稱去掉 [ref]；uds 位址查辦公室狀態檔換成那人的名稱或職稱），回給模型「已存信箱、不用重送或寫 peer-reply」，仍回 `isDelivered:false`
+  - 轉交：每 5 秒，任一個在線視窗看到收件人（`agent` 或 `title`＝收件名）在線 → 先寫認領、下一輪確認還是自己的才 `$.session.send({ to: { sessionId } })`，多視窗只送一次；收件人是自己（例如只剩自己在線）→ 下一則指令附在 context
+  - 一天沒人收就作廢；`$.fs` 沒有刪除，送完只把狀態寫成 done
+  - `skills/team/SKILL.md` 共通前提改寫
+- **為什麼**：jacky 2026-10-31：對方 session 重開就收不到訊息、沒有離線留言（主管回 office設計 失敗：ENOINBOX）。根因：SendMessage 投遞到收件程序的 socket，不落地。API 量測（0.38.0 基準）：送給不在線的人 3 次都退回寫 `peer-reply-*.md`
+- **待實測**：外掛 `$.session.send` 寄給另一個互動視窗、讓閒著的對方開始一輪——型別文件說會當成 peer 訊息，還沒在真視窗看過
+- **實測**：`claude plugin test .` 193 pass（新：存不存信箱、名稱或職稱都收、認領→送→作廢、送不到時存檔並告訴模型）
+- **commit**：（本版）
+
 ## 0.41.0 — 2026-10-31
 
 - **改了什麼**：檢查點由外掛提醒與兜底（只對持有角色的 session：title 對得到 `<office>/roles/<title>.md`；`claude -p` 不算）
