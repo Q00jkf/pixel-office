@@ -1779,7 +1779,7 @@ export const register: Register = on => {
         me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
         await showCrew($)
         await publish($, false)
-      } else if (e.origin.kind === 'model' && !e.agentId && !me.oneshot && shouldMail(sent.reason)) {
+      } else if (e.origin.kind === 'model' && !e.agentId && shouldMail(sent.reason)) { // claude -p 也能留言；轉交才排除 oneshot
         const to = await mailName($, e.to)
         if (to) {
           const now = await $.clock.now()
