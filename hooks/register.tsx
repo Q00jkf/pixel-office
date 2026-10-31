@@ -169,10 +169,12 @@ export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?
  * 撞號：自己的狀態檔最近被「另一個實例」寫過（兩個視窗共用同一個 session 編號，常見於 --resume 接到同一段對話）。
  * 不算撞號：檔案沒有 instance（舊版寫的）、已標記離開、太久沒更新、或就是自己寫的。
  */
+let foreignAt = 0 // 最近一次看到別的實例寫我的狀態檔
 function warnCollision($: EngineInterface) {
+  foreignAt = Date.now()
+  if (!me.dup) me = { ...me, dup: true }
   if (collisionWarned) return
-  collisionWarned = true
-  me = { ...me, dup: true } // 名單標紅、下一則指令提醒模型（jacky 2026-10-31：團隊視窗 resume 同一份對話，撞角色檢查抓不到）
+  collisionWarned = true // toast 只跳一次；dup 名單標紅、下一則指令提醒模型（jacky 2026-10-31：團隊視窗 resume 同一份對話，撞角色檢查抓不到）
   $.ui.toast(`⚠ Another window shares this session id (${me.id.slice(0, 8)}), so their office data overwrite each other: close one and reopen a different conversation with claude --resume`)
 }
 
@@ -677,8 +679,9 @@ async function syncCheckpoint($: EngineInterface): Promise<string | undefined> {
 async function writeAutoCheckpoint($: EngineInterface) {
   const file = await syncCheckpoint($)
   if (!file || !cpWorked) return
-  const old = await $.fs.read(file).catch(() => `# ${me.title} 檢查點\n`)
-  const body = typeof old === 'string' ? old : ''
+  // 整檔覆寫（$.fs 沒有 append）：讀失敗（被鎖、讀一半）時寫下去會洗掉歷史，所以只有檔案不存在才從標題起，其他讀不到就不寫
+  const body = (await $.fs.exists(file).catch(() => true)) ? await $.fs.read(file).then(t => (typeof t === 'string' ? t : undefined)).catch(() => undefined) : `# ${me.title} 檢查點\n`
+  if (body === undefined) return
   const entry = autoCheckpoint(localStamp(await $.clock.now()), me.agent ?? me.name, me.prompt?.text, me.id, await $.session.cwd())
   await $.fs.write(file, `${body}${body.endsWith('\n') ? '' : '\n'}\n${entry}`)
 }
@@ -718,9 +721,11 @@ const mailDir = async ($: EngineInterface) => `${officeRoot(await sharedDir($))}
 
 async function readMail($: EngineInterface): Promise<{ file: string; m: Mail }[]> {
   const d = await mailDir($)
+  const now = await $.clock.now()
   const out: { file: string; m: Mail }[] = []
   for (const entry of await $.fs.list(d).catch(() => [])) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    if (typeof entry.mtimeMs === 'number' && entry.mtimeMs > 0 && now - entry.mtimeMs > MAIL_TTL_MS + MAIL_CLAIM_MS) continue // 信箱只增不減（$.fs 不能刪）：過期的連讀都不讀
     try {
       const raw = await $.fs.read(`${d}/${entry.name}`)
       const m = parseMail(JSON.parse(typeof raw === 'string' ? raw : '{}'))
@@ -730,24 +735,33 @@ async function readMail($: EngineInterface): Promise<{ file: string; m: Mail }[]
   return out
 }
 
+async function statusFiles($: EngineInterface): Promise<Record<string, unknown>[]> {
+  const d = await sharedDir($)
+  const out: Record<string, unknown>[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    try {
+      out.push(JSON.parse(String(await $.fs.read(`${d}/${entry.name}`))))
+    } catch {}
+  }
+  return out
+}
+
+/** 這個名稱有沒有人用過（ListAgents 名稱或職稱）：沒有 → 多半打錯字，提示模型確認 */
+const knownName = async ($: EngineInterface, name: string) => (await statusFiles($)).some(s => s.agent === name || s.title === name)
+
 /** SendMessage 的收件者 → 信箱收件名：uds 位址查辦公室狀態檔換成名稱（程序重開位址就變），名稱去掉 [ref] */
 async function mailName($: EngineInterface, to: string): Promise<string | undefined> {
   const t = to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
   if (!t.startsWith('uds:')) return t || undefined
-  const d = await sharedDir($)
-  for (const entry of await $.fs.list(d).catch(() => [])) {
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
-    try {
-      const s = JSON.parse(String(await $.fs.read(`${d}/${entry.name}`)))
-      if (s.addr === t) return typeof s.agent === 'string' ? s.agent : typeof s.title === 'string' ? s.title : undefined
-    } catch {}
-  }
-  return undefined
+  const s = (await statusFiles($)).find(f => f.addr === t)
+  return typeof s?.agent === 'string' ? s.agent : typeof s?.title === 'string' ? s.title : undefined
 }
 
-let mailSaved: string | undefined
-export const mailSavedNote = (to: string) =>
-  `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.`
+const mailSaved = new Map<string, { name: string; known: boolean }>() // SendMessage 的 to（原字）→ 存進信箱的收件名；一輪可能平行送好幾封
+export const mailSavedNote = (to: string, known = true) =>
+  `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` +
+  (known ? '' : ` Note: no session in the office has ever used the name or title ${to}; if it may be misspelled, check office_roster and resend to the right name.`)
 
 /** 每 5 秒：收件人在線（不是自己）就由這個視窗轉交 */
 async function deliverMail($: EngineInterface) {
@@ -785,6 +799,8 @@ async function takeOwnMail($: EngineInterface): Promise<string[]> {
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
+  collisionWarned = false // 換了對話：撞號重新偵測
+  dupNoted = false
   defaultName = launchPlate(launchName) ?? plateName(await $.session.cwd(), id)
   me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff', ...(oneshotRun ? { oneshot: true, label: launchName } : {}) }
   // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
@@ -1048,10 +1064,14 @@ async function refresh($: EngineInterface) {
   const d = await sharedDir($)
   const now = await $.clock.now()
   const entries = await $.fs.list(d).catch(() => [])
-  if (!collisionWarned && me.id !== 'me' && instance) {
+  if ((!collisionWarned || me.dup) && me.id !== 'me' && instance) {
     const ownNow = await readOwnStatus($, me.id)
     // 別人在我上次寫入之後又寫了一次 → 有另一個視窗在用同一個編號
     if (ownNow && typeof ownNow.updatedAt === 'number' && ownNow.updatedAt > lastWriteAt && isCollision(ownNow, instance, now)) warnCollision($)
+    else if (me.dup && Date.now() - foreignAt > 20000) {
+      me = { ...me, dup: undefined } // 對方關了
+      dupNoted = false
+    }
   }
   const found: Coworker[] = []
   for (const entry of entries) {
@@ -1776,11 +1796,12 @@ export const register: Register = on => {
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
   on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
-    mailSaved = undefined
+    const key = String((e as { to?: unknown }).to ?? '')
+    mailSaved.delete(key)
     const ran = await next(e)
-    const to = mailSaved
-    mailSaved = undefined
-    return to && ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(to)] } : ran
+    const saved = mailSaved.get(key)
+    mailSaved.delete(key)
+    return saved && ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(saved.name, saved.known)] } : ran
   })
 
   // 送不到（對方不在線、程序重開位址變了）→ 存辦公室信箱，對方以同名或同職稱上線時轉交
@@ -1797,7 +1818,7 @@ export const register: Register = on => {
           const now = await $.clock.now()
           const mail: Mail = { from: me.agent ?? me.name, to, text: e.text, at: now, state: 'pending' }
           await $.fs.write(`${await mailDir($)}/${now}-${crypto.randomUUID().slice(0, 8)}.json`, JSON.stringify(mail))
-          mailSaved = to // 名稱查無時引擎在 hook 之後才拒收、用自己的字，改 reason 模型看不到：由 SendMessage 的 tool.call 附在 context
+          mailSaved.set(e.to, { name: to, known: await knownName($, to) }) // 名稱查無時引擎在 hook 之後才拒收、用自己的字，改 reason 模型看不到：由 SendMessage 的 tool.call 附在 context
         }
       }
     } catch {}

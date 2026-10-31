@@ -2741,7 +2741,7 @@ test('the auto checkpoint states only facts: last prompt and how to resume', () 
 
 test('session end appends an auto checkpoint for a held role after work, and not when nothing was done', async ($, on) => {
   const files: Record<string, string> = { 'C:/r/.claude/office/checkpoints/R.md': '# R 檢查點\n\n## 2026-10-30 10:00 x\n- 下一步：a\n' }
-  const exists = new Set(['C:/r/.claude/office', 'C:/r/.claude/office/roles/R.md'])
+  const exists = new Set(['C:/r/.claude/office', 'C:/r/.claude/office/roles/R.md', 'C:/r/.claude/office/checkpoints/R.md'])
   const norm = (p: string) => p.replace(/\\/g, '/')
   on('clock.now', () => ({ value: 1_000_000 }) as any)
   on('env.get', () => ({ value: 'C:/Users/tester' }))
@@ -2776,6 +2776,11 @@ test('session end appends an auto checkpoint for a held role after work, and not
   expect(cp).toContain('（自動：下線前沒存）')
   expect(cp).toContain('claude --resume sid-1')
   expect(cp.startsWith('# R 檢查點\n\n## 2026-10-30 10:00 x')).toBe(true) // 只往後加
+  // 檔案在卻讀不到（被鎖）：不寫，免得整檔覆寫洗掉歷史
+  files['C:/r/.claude/office/checkpoints/R.md'] = undefined as any
+  await $.tool.call({ tool: 'Read', file_path: 'b.md' } as any).catch(() => undefined)
+  await ($ as any).session.end({})
+  expect(files['C:/r/.claude/office/checkpoints/R.md']).toBeUndefined()
 })
 
 // ---------- 0.42.0：離線信箱 ----------
@@ -2825,4 +2830,6 @@ test('a SendMessage to someone offline is saved to the mailbox and the model is 
 test('the mailbox note tells the model not to resend or write a peer-reply file', () => {
   expect(mailSavedNote('r')).toContain('mailbox for r')
   expect(mailSavedNote('r')).toContain('No need to resend or write a peer-reply file')
+  expect(mailSavedNote('r')).not.toContain('misspelled')
+  expect(mailSavedNote('后端', false)).toContain('misspelled') // 沒人用過的名稱：提示可能打錯
 })
