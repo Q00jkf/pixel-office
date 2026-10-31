@@ -7,6 +7,16 @@
 
 ---
 
+## 0.43.0 — 2026-10-31
+
+- **改了什麼**：每輪固定成本瘦身
+  - 系統提示那段從 899 字元縮到 345 字元（ListAgents 自動登記、title、auto、team、找人用 roster、多 session 走 skill；細節在 skill 與工具說明）
+  - `office_profile`、`office_roster` 不再強制開場載入（拿掉 `tool.describe` 的 `isDeferred: false`），用到才經 ToolSearch 載入；系統提示寫出工具全名
+  - `skills/team/SKILL.md` 的 description 從 450 字元縮到 204 字元
+- **為什麼**：jacky 2026-10-31：看外掛哪裡能省 token。API 實測（Sonnet，只回 OK）：不載外掛 25,564 token；載 pixel-office 0.42.0 多 1,198，是所有外掛裡最多的
+- **實測**：只回 OK：多 1,198 → 367 token（−69%）；接手 S1 花費中位 $0.0701（0.41.0 時 $0.0755）、升層 S3 $0.0692（多一次 ToolSearch，0.40.0 時 $0.0667），兩個情境都照樣呼叫 office_profile、office_roster，升層照樣建好 collab.md；`claude plugin test .` 194 pass
+- **commit**：（本版）
+
 ## 0.42.2 — 2026-10-31
 
 - **改了什麼**：信箱改由收件人自己的外掛投遞——每 5 秒看有沒有給自己（名稱或職稱）的信，認領、下一輪確認後用 `$.prompt.submit` 送進自己的對話（閒著也會開始一輪，畫面標明是 pixel-office 送的）；拿掉別的視窗 `$.session.send` 轉交

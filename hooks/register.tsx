@@ -1756,13 +1756,13 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 系統提示加一段（英文較省 token；每輪約 900 字元）
+  // 系統提示加一段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     const section = {
       id: 'pixel-office:role',
       text:
-        'Pixel office (a pane drawing every session; nameplates tell sessions apart). (1) Calling ListAgents registers you; if it did not, call mcp__pixel-office__office_profile(agent=X, name=<last part of X>) once. (2) On a new task, update title (max 16 chars, e.g. purchase-order); update it when the roster marks it stale. Update role (manager/staff) when made or released as manager. (3) To find a manager or an owner, or confirm identity: mcp__pixel-office__office_roster; for someone without a name copy its to=uds:… exactly (Windows: two leading backslashes). (4) If your system prompt says auto mode is active, register auto=true; update on mode change. (5) Dispatched by a manager → team=<their ListAgents name>; done → team=off. Department lead = role=manager + team=<upper manager>. (6) Multi-session work (becoming manager, role cards, dispatch, meetings): skill pixel-office:team. Display only.',
+        'Pixel office (a pane drawing every session): ListAgents registers you. Keep your title (max 16 chars) = current task with mcp__pixel-office__office_profile; auto mode -> auto=true; dispatched by a manager -> team=<its ListAgents name>, done -> team=off. Find people: mcp__pixel-office__office_roster. Multi-session work: skill pixel-office:team.',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }
@@ -1778,12 +1778,7 @@ export const register: Register = on => {
     return ran
   })
 
-  // office_profile 不要延後載入：開場就讓模型看到完整說明（user-30 2026-10-03 指出 deferred 時說明不會觸發）
-  on('tool.describe', { tool: ROSTER }, async ($, e, next) => {
-    const described = await next(e)
-    return { ...described, isDeferred: false }
-  })
-
+  // office_profile／office_roster 原本強制開場載入（user-30 2026-10-03）；2026-10-31 jacky 裁示改回用到才載入，系統提示那段已寫出工具全名
   on('tool.call', { tool: 'mcp__pixel-office__office_meeting' }, async ($, e) => {
     const text = await setMeeting($, e as unknown as Record<string, unknown>).catch(() => 'Could not write meeting.json; the meeting room was not updated.')
     await refresh($).catch(() => undefined)
@@ -1793,11 +1788,6 @@ export const register: Register = on => {
   on('tool.call', { tool: ROSTER }, async $ => {
     await refresh($).catch(() => undefined)
     return { result: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots)) }
-  })
-
-  on('tool.describe', { tool: TOOL }, async ($, e, next) => {
-    const described = await next(e)
-    return { ...described, isDeferred: false }
   })
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機

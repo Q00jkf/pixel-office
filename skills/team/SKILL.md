@@ -1,6 +1,6 @@
 ---
 name: team
-description: "Multi-session collaboration: layers (solo / manager / department leads), stepping up or down as manager, role cards generated from a rule set the user names (AIMM, gstack, a project flow), squads (machine-wide reusable layer-2 crews: 研發+測試, PM+採購…), takeover, checkpoints, dispatch, reports, meetings. Also for peer reports, 📋 meeting notices, 請裁示, demotion reminders. Triggers: 當主管, 升層, 降層, 部門主管, 小隊, 設角色, 角色卡, 接手, 派工, 誰在動, 開會, 請裁示, 存檢查點, collab.md."
+description: "Multi-session collaboration: manager/staff layers, role cards from a rule set, squads, takeover, checkpoints, dispatch, reports, meetings. Triggers: 當主管, 升層, 降層, 小隊, 角色卡, 接手, 派工, 開會, 請裁示, 存檢查點, collab.md."
 ---
 
 # team：一人多 session 協作
