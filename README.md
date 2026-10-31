@@ -107,5 +107,6 @@ Say "let's have a meeting" to have several sessions work out a plan together; in
 The in-app text is English; the detailed docs are in Traditional Chinese.
 
 - All commands, personal buttons, click-to-approve, mobile, rendering details: [docs/使用說明.md](docs/使用說明.md)
+- Team window (one window, one tab per role, Windows): [team-window/README.md](team-window/README.md)
 - Antigravity CLI: [docs/agy-寄件協作.md](docs/agy-寄件協作.md)
 - Hacking on it: [CLAUDE.md](CLAUDE.md)

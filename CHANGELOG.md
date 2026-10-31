@@ -7,6 +7,13 @@
 
 ---
 
+## 0.44.0 — 2026-10-31
+
+- **改了什麼**：團隊視窗搬進 repo（`team-window/`）：`team_window.py`、`web/`（含 xterm 6.0.0 與授權檔）、`start.bat`、`team.example.json`、說明。改兩處：先找同 repo 的 `scripts/open_role.py`；不帶參數且沒有 `team.json` 時從範例建一份。缺 pywebview／pywinpty 時跳視窗說要裝什麼（pythonw 沒有主控台）。`team*.json` 不進 git（範例除外）
+- **為什麼**：jacky 2026-10-31：「為什麼他們不能用我們設計的 GUI」——之前只在本機測試資料夾 `pixel-office-測試/團隊視窗/`（不是 git repo），從 GitHub 裝的人拿不到
+- **實測**：repo 原位 `plugin_scripts()` 指到本 repo `scripts/`；複製到別處不帶參數會建出 `team.json`；`TW_EVAL` 空隊伍開窗：標題 Pixel Office、xterm 載入、`tabs()` 有回
+- **commit**：（本版）
+
 ## 0.43.0 — 2026-10-31
 
 - **改了什麼**：每輪固定成本瘦身

@@ -1,0 +1,589 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="vendor/xterm.css">
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<style>
+  :root {
+    /* same Sweetie 16 palette as the office page (pixel-office remote/page.html) */
+    --bg: #e4eef6; --panel: #e4eef6; --line: #94b0c2; --text: #1a1c2c; --muted: #566c86;
+    --accent: #29366f; --term: #e8f0f7; --office-w: 340px; --graph-h: 220px;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px system-ui, "Noto Sans TC", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  /* frameless window: our own title bar; pywebview-drag-region makes it drag the window */
+  #titlebar { flex: none; display: flex; align-items: center; height: 32px; background: var(--accent); color: #f4f4f4; border-bottom: 1px solid #333c57; }
+  #titlebar img { width: 18px; height: 18px; margin: 0 8px 0 10px; image-rendering: pixelated; }
+  #titlebar .name { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #titlebar button { width: 46px; height: 32px; border: 0; background: none; color: #94b0c2; font: 14px "Segoe UI Symbol", sans-serif; cursor: pointer; }
+  #titlebar button:hover { background: #333c57; color: #f4f4f4; }
+  #titlebar button.x:hover { background: #b13e53; }
+  .grip { position: fixed; z-index: 50; }
+  .grip.n, .grip.s { left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+  .grip.e, .grip.w { top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+  .grip.n { top: 0; } .grip.s { bottom: 0; } .grip.e { right: 0; } .grip.w { left: 0; }
+  .grip.nw, .grip.ne, .grip.sw, .grip.se { width: 8px; height: 8px; }
+  .grip.nw { top: 0; left: 0; cursor: nwse-resize; } .grip.se { bottom: 0; right: 0; cursor: nwse-resize; }
+  .grip.ne { top: 0; right: 0; cursor: nesw-resize; } .grip.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+  body.maximized .grip { display: none; }
+  body.resizing #office { pointer-events: none; }
+  #left { width: var(--office-w); flex: none; display: flex; flex-direction: column; background: var(--panel); }
+  #office { flex: 1; min-height: 120px; border: 0; background: var(--panel); }
+  body.collapsed #left { display: none; }
+  body.dragging, body.dragging * { cursor: col-resize !important; user-select: none; }
+  body.dragging-h, body.dragging-h * { cursor: row-resize !important; user-select: none; }
+  body.dragging #office, body.dragging-h #office { pointer-events: none; }
+  #split { width: 7px; flex: none; position: relative; cursor: col-resize; background: var(--panel); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  #split:hover, #hsplit:hover { background: #94b0c2; }
+  body.collapsed #split { cursor: default; }
+  #fold { position: absolute; top: 50%; left: -1px; width: 9px; height: 40px; margin-top: -20px; padding: 0; border: 1px solid var(--line); border-radius: 3px;
+          background: var(--term); color: var(--muted); font-size: 9px; line-height: 38px; cursor: pointer; }
+  #fold:hover { color: var(--accent); border-color: var(--accent); }
+  #hsplit { height: 6px; flex: none; cursor: row-resize; background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  #graph { height: var(--graph-h); flex: none; display: flex; flex-direction: column; overflow: hidden; padding: 8px; box-sizing: border-box; background: var(--bg); user-select: none; }
+  #graph h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #graph svg { flex: 1; min-height: 0; width: 100%; }
+  .node { cursor: context-menu; }
+  .node rect { fill: var(--term); stroke: var(--line); stroke-width: 1.2; }
+  .node.mine rect { stroke: #3b5dc9; stroke-width: 2; }
+  .node.mine { cursor: pointer; }
+  .node:hover rect { fill: #fff; }
+  .node.ghost rect { fill: var(--bg); stroke-dasharray: 4 3; }
+  .node .plate { font-weight: 600; font-size: 12px; fill: var(--text); }
+  .node .sub { font-size: 10px; fill: var(--muted); }
+  .edge { fill: none; stroke: #94b0c2; stroke-width: 1.5; }
+  #graph h4 { margin: 6px 0 4px; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .solo { display: flex; flex-wrap: wrap; gap: 4px; flex: none; max-height: 45%; overflow-y: auto; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 12px; background: var(--term); cursor: context-menu; }
+  .chip.mine { border-color: #3b5dc9; box-shadow: inset 0 0 0 1px #3b5dc9; cursor: pointer; }
+  .chip:hover { background: #fff; }
+  .chip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .chip small { color: var(--muted); }
+  #menu { position: fixed; z-index: 10; display: none; min-width: 190px; max-height: 70vh; overflow-y: auto; padding: 4px 0; background: var(--term);
+          border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 4px; box-shadow: 0 4px 16px #0003; }
+  #menu .sec { padding: 6px 12px 2px; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  #menu .none { padding: 6px 14px; color: var(--muted); }
+  #menu .sec + .proj { margin-top: 2px; }
+  #menu .proj { padding: 4px 12px 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line); font-weight: 600; color: var(--accent);
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #menu .proj small { font-weight: 400; color: var(--muted); }
+  #menu button { display: flex; justify-content: space-between; gap: 16px; width: 100%; padding: 6px 14px; border: 0; background: none; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+  #menu button small { color: var(--muted); }
+  #menu button:hover { background: var(--accent); color: #f4f4f4; }
+  #menu button:hover small { color: #94b0c2; }
+  #menu button.danger { color: #b13e53; }
+  #menu button.danger:hover { background: #b13e53; color: #f4f4f4; }
+  #menu button.confirm, #menu button.confirm:hover { background: #b13e53; color: #f4f4f4; font-weight: 600; }
+  #menu button.confirm small { color: #f4f4f4; }
+  #picker { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; background: #1a1c2c66; }
+  #picker .box { width: min(460px, calc(100vw - 32px)); max-height: 70vh; display: flex; flex-direction: column; background: var(--term);
+                 border-top: 3px solid var(--accent); border-radius: 4px; box-shadow: 0 8px 32px #0005; }
+  #picker h3 { margin: 0; padding: 12px 16px 8px; font-size: 14px; }
+  #picker input { margin: 0 16px 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  #picker .list { overflow-y: auto; padding: 0 0 4px; }
+  #picker .list button { display: block; width: 100%; padding: 6px 16px; border: 0; background: none; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+  #picker .list button small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #picker .list button.missing { color: var(--muted); }
+  #picker .list button:hover { background: var(--accent); color: #f4f4f4; }
+  #picker .list button:hover small { color: #94b0c2; }
+  #picker .foot { display: flex; justify-content: flex-end; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+  #picker .foot button { padding: 5px 14px; border: 1px solid var(--line); border-radius: 6px; background: none; font: inherit; color: var(--muted); cursor: pointer; }
+  #toast { position: fixed; right: 16px; bottom: 16px; z-index: 30; display: none; max-width: 420px; padding: 8px 14px; border-radius: 6px;
+           background: #b13e53; color: #f4f4f4; box-shadow: 0 4px 16px #0003; }
+  #toast.ok { background: var(--accent); }
+  #right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #bar { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; background: var(--accent); color: #f4f4f4; }
+  #bar button { background: transparent; border: 0; border-radius: 6px 6px 0 0;
+                color: #94b0c2; padding: 7px 16px 8px; cursor: pointer; font: inherit; }
+  #bar button:hover { color: #f4f4f4; background: #333c57; }
+  #bar button.on { background: var(--term); color: var(--text); font-weight: 600; box-shadow: inset 0 3px 0 #3b5dc9; }
+  #bar kbd { margin-left: 6px; font: 10px Consolas, monospace; color: #94b0c2; }
+  #bar button.on kbd { color: var(--muted); }
+  #panes { flex: 1; position: relative; background: var(--term); }
+  .pane { position: absolute; inset: 6px 4px 4px 10px; visibility: hidden; }
+  .pane.on { visibility: visible; }
+  .xterm .xterm-viewport { background: var(--term) !important; }
+</style>
+</head>
+<body>
+<div id="titlebar" class="pywebview-drag-region"><img src="/icon-192.png" alt=""><span class="name"></span><button title="Minimize">&#x2500;</button><button title="Maximize">&#x25A1;</button><button class="x" title="Close">&#x2715;</button></div>
+<div id="main">
+<div id="left">
+<iframe id="office" src="/"></iframe>
+<div id="hsplit"></div>
+<div id="graph"></div>
+</div>
+<div id="split"><button id="fold" title="Collapse / expand left panel">◀</button></div>
+<div id="right">
+<div id="bar"></div>
+<div id="panes"></div>
+</div>
+</div>
+<div id="menu"></div>
+<div id="picker"><div class="box"><h3></h3><input placeholder="Filter"><div class="list"></div><div class="foot"><button>Cancel</button></div></div></div>
+<div id="toast"></div>
+<script>
+window.onerror = (m) => toast('Page error: ' + m);
+window.onunhandledrejection = (e) => toast('Call error: ' + (e.reason && e.reason.message || e.reason));
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const THEME = {
+  background: '#e8f0f7', foreground: '#1a1c2c', cursor: '#29366f', cursorAccent: '#e8f0f7', selectionBackground: '#94b0c2',
+  black: '#1a1c2c', red: '#b13e53', green: '#257179', yellow: '#ef7d57', blue: '#3b5dc9', magenta: '#5d275d', cyan: '#257179', white: '#566c86',
+  brightBlack: '#333c57', brightRed: '#b13e53', brightGreen: '#38b764', brightYellow: '#ef7d57', brightBlue: '#29366f', brightMagenta: '#5d275d', brightCyan: '#41a6f6', brightWhite: '#94b0c2',
+};
+const terms = [], tabIds = [];
+let api;
+// terms[i] becomes null when a tab is removed; indices stay fixed because the backend addresses tabs by index
+function out(i, s) { terms[i] && terms[i].term.write(s); }
+function show(i) {
+  terms.forEach((t, j) => { if (t) { t.btn.classList.toggle('on', i === j); t.el.classList.toggle('on', i === j); } });
+  if (!terms[i]) return;
+  terms[i].fit.fit();
+  terms[i].term.focus();
+}
+function refit() { terms.forEach(t => t && t.fit.fit()); }
+const liveTabs = () => terms.map((t, i) => t ? i : -1).filter(i => i >= 0);
+function relabel() {
+  liveTabs().forEach((i, n) => { const k = terms[i].btn.querySelector('kbd'); if (k) k.textContent = n < 9 ? '^' + (n + 1) : ''; });
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// Drag: vertical bar sets left width, horizontal bar sets graph height, ◀ collapses; all kept in localStorage
+function drag(e, cls, onMove, onUp) {
+  e.preventDefault();
+  document.body.classList.add(cls);
+  const up = () => {
+    document.body.classList.remove(cls);
+    removeEventListener('mousemove', onMove); removeEventListener('mouseup', up);
+    onUp();
+  };
+  addEventListener('mousemove', onMove); addEventListener('mouseup', up);
+}
+(() => {
+  const root = document.documentElement.style, left = document.getElementById('left'), graph = document.getElementById('graph');
+  const fold = document.getElementById('fold');
+  const setFold = (c) => { document.body.classList.toggle('collapsed', c); fold.textContent = c ? '▶' : '◀'; store.set('team.fold', c ? '1' : ''); refit(); };
+  root.setProperty('--office-w', (+store.get('team.officeW') || 340) + 'px');
+  root.setProperty('--graph-h', (+store.get('team.graphH') || 220) + 'px');
+  if (store.get('team.fold')) setFold(true);
+  fold.onmousedown = (e) => e.stopPropagation();
+  fold.onclick = () => setFold(!document.body.classList.contains('collapsed'));
+  document.getElementById('split').onmousedown = (e) => {
+    if (document.body.classList.contains('collapsed')) return;
+    drag(e, 'dragging', (ev) => { root.setProperty('--office-w', Math.max(200, Math.min(ev.clientX, innerWidth - 400)) + 'px'); refit(); },
+      () => store.set('team.officeW', left.offsetWidth));
+  };
+  document.getElementById('hsplit').onmousedown = (e) => drag(e, 'dragging-h',
+    (ev) => root.setProperty('--graph-h', Math.max(60, Math.min(innerHeight - ev.clientY, innerHeight - 160)) + 'px'),
+    () => store.set('team.graphH', graph.offsetHeight));
+})();
+
+// Ctrl+1..9 switches tabs; caught in capture phase so claude never sees it
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { hideMenu(); closePicker(null); }
+  if (!e.ctrlKey || e.altKey || e.shiftKey || !/^Digit[1-9]$/.test(e.code)) return;
+  const tabs = liveTabs(), n = +e.code[5];
+  if (n > tabs.length) return;
+  show(tabs[n - 1]);
+  e.preventDefault(); e.stopPropagation();
+}, true);
+
+// Right-click menu on a person: layer-1 role cards of this project and layer-2 squads (api.roster_cards), opened as tabs here
+const menu = document.getElementById('menu');
+let cards = { project: [], squads: [] };
+function hideMenu() { menu.style.display = 'none'; }
+addEventListener('mousedown', (e) => { if (!menu.contains(e.target)) hideMenu(); });
+addEventListener('blur', hideMenu);
+// Tabs opened at a chosen location are named "<role> <label>"; a /rename keeps the original in t.role
+const tabOf = (name) => terms.findIndex(t => t && [t.name, t.role].some(n => n === name || n.startsWith(name + ' ')));
+// Tab labels follow /rename: api.names() is index-aligned with terms (null = removed)
+async function syncNames() {
+  let names;
+  try { names = await api.names(); } catch { return; }
+  names.forEach((n, i) => {
+    const t = terms[i];
+    if (!t || !n || n === t.name) return;
+    t.name = n;
+    t.btn.firstChild.nodeValue = n;
+  });
+}
+var toastTimer;
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.toggle('ok', !!ok);
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 10000);
+}
+// Start-location picker for cards without a fixed location (add_tab answered error: 'choose')
+const picker = document.getElementById('picker');
+let pickDone = null;
+function closePicker(choice) {
+  if (!pickDone) return;
+  picker.style.display = 'none';
+  const done = pickDone;
+  pickDone = null;
+  done(choice);
+}
+picker.querySelector('.foot button').onclick = () => closePicker(null);
+picker.onmousedown = (e) => { if (e.target === picker) closePicker(null); };
+function pick(title, choices) {
+  closePicker(null);
+  const list = picker.querySelector('.list'), filter = picker.querySelector('input');
+  picker.querySelector('h3').textContent = title;
+  const render = () => {
+    const q = filter.value.trim().toLowerCase();
+    list.replaceChildren(...choices.filter(c => !q || (c.label + ' ' + c.path).toLowerCase().includes(q)).map(c => {
+      const b = el('button', c.exists ? '' : 'missing');
+      b.append(el('span', '', c.label), el('small', '', c.exists ? c.path : c.path + '  (not found)'));
+      b.onclick = () => closePicker(c);
+      return b;
+    }));
+  };
+  filter.value = '';
+  filter.style.display = choices.length > 8 ? '' : 'none';
+  filter.oninput = render;
+  render();
+  picker.style.display = 'flex';
+  if (choices.length > 8) filter.focus();
+  return new Promise(res => { pickDone = res; });
+}
+// ctx.project = the clicked person's project (cards without a start location open there);
+// ctx.label carries one chosen location across a squad: its roles share the same labels (#N-topic)
+async function openRole(r, ctx = {}) {
+  let res = await api.add_tab(r.name, r.file, null, ctx.project || null);
+  if (res.error === 'choose') {
+    let c = ctx.label && res.choices.find(x => x.label === ctx.label);
+    if (!c) {
+      c = await pick(`Where should ${r.name} start?`, res.choices);
+      if (!c) return 'cancel';
+      ctx.label = c.label;
+    }
+    res = await api.add_tab(r.name + ' ' + c.label, r.file, c.path, ctx.project || null);
+  }
+  if (res.error) { toast(res.error); return 'error'; }
+  if (!res.existed) makeTab(res.i, res.name, res.id, r.name);
+  show(res.i);
+  return 'ok';
+}
+async function summon(s, project) {
+  const ctx = { project };
+  for (const r of s.roles) if (await openRole(r, ctx) === 'cancel') break;
+}
+function menuItem(label, note, fn) {
+  const b = el('button');
+  b.append(el('span', '', label), el('small', '', note));
+  b.onclick = () => { hideMenu(); fn(); };
+  return b;
+}
+async function removeTab(i) {
+  // {error} still means the tab is gone; only team.json could not be updated
+  const res = await api.remove_tab(i);
+  if (res && res.error) toast(res.error);
+  const t = terms[i];
+  terms[i] = null; tabIds[i] = null;
+  t.btn.remove(); t.el.remove();
+  try { t.term.dispose(); } catch (e) { console.warn('xterm dispose', e); }
+  relabel();
+  const left = liveTabs();
+  if (left.length) show(left[0]);
+}
+// Two clicks: the first turns the item into a red confirm for 3 s, the second runs fn (no confirm(): it freezes pywebview)
+function dangerItem(label, note, confirmText, fn) {
+  const b = el('button', 'danger');
+  b.append(el('span', '', label), el('small', '', note));
+  let timer;
+  b.onclick = () => {
+    if (!b.classList.contains('confirm')) {
+      b.classList.add('confirm');
+      b.firstChild.textContent = confirmText;
+      timer = setTimeout(() => { b.classList.remove('confirm'); b.firstChild.textContent = label; }, 3000);
+      return;
+    }
+    clearTimeout(timer);
+    hideMenu();
+    fn();
+  };
+  return b;
+}
+const removeItem = (i) => dangerItem('Remove from team', terms[i].name, 'Confirm remove?', () => removeTab(i));
+// Any online session: a tab here only stops its claude (Enter restarts); elsewhere the backend kills the process tree
+function closeItem(p) {
+  const name = p.agent || p.plate || '?';
+  return dangerItem('Close session', name, `Click again to close ${name}`, async () => {
+    const res = await api.close_session(p.id);
+    if (res && res.error) toast(res.error);
+    else toast(`Closed ${res.closed}`, true);
+  });
+}
+async function showMenu(e, p) {
+  e.preventDefault();
+  // Cards come from the clicked person's project (found by session id); falls back to team.json's project
+  try { cards = await api.roster_cards(p && p.id || null); } catch {}
+  const items = [], tab = p ? tabIds.indexOf(p.id) : -1, dir = cards.project_dir || null;
+  if (dir) items.push(projHead(dir, cards.from_session ? '' : '(default)'));
+  if (p && p.id && !p.ghost) {
+    items.push(el('div', 'sec', 'Session'), closeItem(p));
+    if (tab >= 0 && terms[tab]) items.push(removeItem(tab));
+  }
+  if (cards.project.length) {
+    items.push(el('div', 'sec', 'Open role'));
+    cards.project.forEach(r => items.push(menuItem(r.name, tabOf(r.name) >= 0 ? 'tab ✓' : '', () => openRole(r, { project: dir }))));
+  }
+  if (cards.squads.length) {
+    items.push(el('div', 'sec', 'Summon squad'));
+    // A squad bound to project cards comes in one variant per lead; the clicked person's own variant goes first with ★
+    const who = p ? [p.agent, p.plate] : [];
+    cards.squads.forEach(s => {
+      const opts = (s.options && s.options.length ? s.options : [{ roles: s.roles }])
+        .map(o => ({ ...o, mine: !!o.lead && who.includes(o.lead) }))
+        .sort((a, b) => b.mine - a.mine);
+      opts.forEach(o => {
+        const b = menuItem((o.mine ? '★ ' : '') + s.name + (o.lead ? ' · ' + o.lead : ''), o.roles.length + ' roles', () => summon(o, dir));
+        b.title = [s.when, o.roles.map(r => r.name).join(', ')].filter(Boolean).join('\n');
+        items.push(b);
+      });
+    });
+  }
+  if (!cards.project.length && !cards.squads.length) items.push(el('div', 'none', 'No role cards yet'));
+  placeMenu(e, items);
+}
+function projHead(dir, note) {
+  const head = el('div', 'proj', dir.split(/[\\/]/).filter(Boolean).pop());
+  if (note) head.append(el('small', '', ' ' + note));
+  head.title = dir;
+  return head;
+}
+// Right-click on empty graph space: one item per project that has a manager card (managers = who is online there, may be empty);
+// clicking opens that project's top card
+async function showManagerMenu(e) {
+  e.preventDefault();
+  let res = { projects: [] };
+  try { res = await api.manager_projects(); } catch (err) { res.error = String(err); }
+  const items = [el('div', 'sec', 'Managers')];
+  (res.projects || []).forEach(pr => {
+    const name = pr.project_dir.split(/[\\/]/).filter(Boolean).pop(), top = pr.roles.find(r => r.top);
+    const open = top && tabOf(top.name) >= 0;
+    const b = menuItem(name, (open ? 'tab ✓ · ' : '') + pr.managers.join(', '), () => {
+      if (!top) return toast(`${name} has no top manager card`);
+      openRole(top, { project: pr.project_dir });
+    });
+    b.title = pr.project_dir + (top ? '\n' + top.name : '');
+    items.push(b);
+  });
+  if (!(res.projects || []).length) items.push(el('div', 'none', res.error || 'No manager cards found'));
+  placeMenu(e, items);
+}
+document.getElementById('graph').oncontextmenu = (e) => { if (!e.target.closest('.node, .chip')) showManagerMenu(e); };
+function placeMenu(e, items) {
+  menu.replaceChildren(...items);
+  menu.style.display = 'block';
+  menu.style.left = Math.max(0, Math.min(e.clientX, innerWidth - menu.offsetWidth - 4)) + 'px';
+  menu.style.top = Math.max(0, Math.min(e.clientY, innerHeight - menu.offsetHeight - 4)) + 'px';
+}
+
+// Relations: in /state.json each person's team = their manager's ListAgents name; draw as an org tree
+const MODE_COLOR = { idle: '#94b0c2', thinking: '#ef7d57', typing: '#38b764', waiting: '#b13e53' };
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent && parent.appendChild(e);
+  return e;
+}
+async function drawGraph() {
+  const pane = document.getElementById('graph');
+  if (document.body.classList.contains('collapsed') || menu.style.display === 'block') return;
+  let people;
+  try { people = (await (await fetch('/state.json', { cache: 'no-store' })).json()).people || []; }
+  catch { pane.textContent = 'Office state unavailable (/state.json)'; return; }
+  const byAgent = {}, nodes = people.map(p => ({ p, kids: [] }));
+  nodes.forEach(n => { if (n.p.agent) byAgent[n.p.agent] = n; });
+  const roots = [];
+  nodes.forEach(n => {
+    const boss = n.p.team;
+    if (!boss) return roots.push(n);
+    if (!byAgent[boss]) roots.push(byAgent[boss] = { p: { plate: boss, ghost: true }, kids: [] });
+    byAgent[boss].kids.push(n);
+  });
+  // People with no manager and no reports go in a plain list; only real teams get a tree
+  const trees = roots.filter(r => r.kids.length), solos = roots.filter(r => !r.kids.length);
+  const parts = [el('h3', '', 'Relations')];
+  if (trees.length) parts.push(drawTrees(trees));
+  if (solos.length) {
+    if (trees.length) parts.push(el('h4', '', 'No team'));
+    const box = el('div', 'solo');
+    box.append(...solos.map(n => soloChip(n.p)));
+    parts.push(box);
+  }
+  pane.replaceChildren(...parts);
+}
+function soloChip(p) {
+  const tab = tabIds.indexOf(p.id), c = el('span', 'chip' + (tab >= 0 ? ' mine' : ''));
+  const dot = el('i');
+  dot.style.background = MODE_COLOR[p.mode] || '#3b5dc9';
+  c.append(dot, el('span', '', (p.role === 'manager' ? '★' : '') + (p.agent || p.plate || '?')));
+  if (p.title) c.append(el('small', '', p.title));
+  c.title = [p.agent || p.plate, p.title, p.modeText].filter(Boolean).join('\n');
+  if (tab >= 0) c.onclick = () => show(tab);
+  c.oncontextmenu = (e) => showMenu(e, p);
+  return c;
+}
+function drawTrees(roots) {
+  // Leaves laid out left to right, parents centred over their children
+  const W = 112, H = 40, GX = 10, GY = 30;
+  let leaf = 0, depth = 0;
+  const place = (n, d, seen) => {
+    if (seen.has(n)) return; seen.add(n);
+    n.y = d * (H + GY); depth = Math.max(depth, d);
+    n.kids.forEach(k => place(k, d + 1, seen));
+    const placed = n.kids.filter(k => k.x !== undefined);
+    n.x = placed.length ? (placed[0].x + placed[placed.length - 1].x) / 2 : (leaf++) * (W + GX);
+  };
+  const seen = new Set();
+  roots.forEach(r => place(r, 0, seen));
+  const w = Math.max(1, leaf) * (W + GX) - GX + 4, h = (depth + 1) * (H + GY) - GY + 4;
+  const svg = svgEl('svg', { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'xMidYMid meet' });
+  const g = svgEl('g', { transform: 'translate(2,2)' }, svg);
+  seen.forEach(n => n.kids.forEach(k => {
+    const x1 = n.x + W / 2, y1 = n.y + H, x2 = k.x + W / 2, y2 = k.y, my = (y1 + y2) / 2;
+    svgEl('path', { class: 'edge', d: `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}` }, g);
+  }));
+  seen.forEach(n => {
+    const p = n.p, tab = tabIds.indexOf(p.id);
+    const node = svgEl('g', { class: 'node' + (tab >= 0 ? ' mine' : '') + (p.ghost ? ' ghost' : ''), transform: `translate(${n.x},${n.y})` }, g);
+    svgEl('rect', { width: W, height: H, rx: 7 }, node);
+    const name = svgEl('text', { class: 'plate', x: 20, y: 17 }, node);
+    const label = (p.role === 'manager' ? '★' : '') + (p.agent || p.plate || '?');
+    name.textContent = label.length > 9 ? label.slice(0, 8) + '…' : label;
+    const sub = svgEl('text', { class: 'sub', x: 20, y: 31 }, node);
+    const t = p.ghost ? '(offline)' : (p.title || p.modeText || '');
+    sub.textContent = t.length > 9 ? t.slice(0, 8) + '…' : t;
+    svgEl('title', {}, node).textContent = (p.agent || p.plate || '') + (p.title ? '\n' + p.title : '') + (p.modeText ? '\n' + p.modeText : '');
+    if (!p.ghost) svgEl('circle', { cx: 10, cy: 13, r: 4, fill: MODE_COLOR[p.mode] || '#3b5dc9' }, node);
+    if (tab >= 0) node.onclick = () => show(tab);
+    node.oncontextmenu = (e) => showMenu(e, p);
+  });
+  return svg;
+}
+
+// role = the card name the tab was opened with; name follows /rename (syncNames)
+function makeTab(i, name, id, role = name) {
+  const btn = el('button', '', name);
+  btn.appendChild(el('kbd'));
+  btn.onclick = () => show(i);
+  document.getElementById('bar').appendChild(btn);
+  const pane = el('div', 'pane');
+  document.getElementById('panes').appendChild(pane);
+  const term = new Terminal({ fontFamily: 'Cascadia Mono, Consolas, monospace', fontSize: 14, cursorBlink: true, theme: THEME });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(pane);
+  fit.fit();
+  // Ctrl+C with a selection copies (no selection still sends ^C); Ctrl+V is left to the browser paste event instead of becoming ^V
+  term.attachCustomKeyEventHandler(e => {
+    if (e.type !== 'keydown' || !e.ctrlKey || e.altKey) return true;
+    const k = e.key.toLowerCase();
+    if (k === 'v') return false;
+    if (k !== 'c' || !term.hasSelection()) return true;
+    const t = term.getSelection();
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => api.copy(t));
+    term.clearSelection();
+    e.preventDefault();
+    return false;
+  });
+  term.onData(d => api.write(i, d));
+  term.onResize(({ cols, rows }) => api.resize(i, cols, rows));
+  terms[i] = { term, fit, btn, el: pane, name, role };
+  tabIds[i] = id;
+  relabel();
+  api.start(i, term.cols, term.rows);
+}
+
+// Frameless windows lose the OS resize border: edge/corner grips drive api.set_bounds (screen pixels, hence devicePixelRatio)
+function addGrips() {
+  const MIN_W = 640, MIN_H = 400;
+  ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].forEach(dir => {
+    const g = el('div', 'grip ' + dir);
+    document.body.appendChild(g);
+    let start = null, frame = 0, next = null;
+    g.onpointerdown = async (e) => {
+      if (document.body.classList.contains('maximized')) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      document.body.classList.add('resizing');
+      const [x, y, w, h] = await api.bounds();
+      start = { x, y, w, h, sx: e.screenX, sy: e.screenY };
+    };
+    g.onpointermove = (e) => {
+      if (!start) return;
+      const r = devicePixelRatio, dx = (e.screenX - start.sx) * r, dy = (e.screenY - start.sy) * r;
+      let { x, y, w, h } = start;
+      if (dir.includes('e')) w = Math.max(MIN_W, w + dx);
+      if (dir.includes('s')) h = Math.max(MIN_H, h + dy);
+      if (dir.includes('w')) { w = Math.max(MIN_W, start.w - dx); x = start.x + start.w - w; }
+      if (dir.includes('n')) { h = Math.max(MIN_H, start.h - dy); y = start.y + start.h - h; }
+      next = [Math.round(x), Math.round(y), Math.round(w), Math.round(h)];
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; api.set_bounds(...next); });
+    };
+    g.onpointerup = g.onpointercancel = () => {
+      start = null;
+      document.body.classList.remove('resizing');
+      refit();
+    };
+  });
+}
+
+let inited = false;
+async function init() {
+  if (inited || !(window.pywebview && window.pywebview.api && window.pywebview.api.tabs)) return;
+  inited = true;
+  api = window.pywebview.api;
+  const { names, ids, roles } = await api.tabs();
+  const tbar = document.getElementById('titlebar'), [minB, maxB, closeB] = tbar.querySelectorAll('button');
+  tbar.querySelector('.name').textContent = document.title = 'Pixel Office';
+  // is_maximized reads the real window state, so Win+↑ and Aero Snap are caught too
+  const syncMax = async () => { try { document.body.classList.toggle('maximized', !!await api.is_maximized()); } catch {} };
+  const toggleMax = async () => { await api.toggle_maximize(); syncMax(); };
+  setInterval(syncMax, 1000);
+  minB.onclick = () => api.minimize();
+  maxB.onclick = toggleMax;
+  tbar.ondblclick = (e) => { if (e.target.tagName !== 'BUTTON') toggleMax(); };
+  closeB.onclick = () => api.close_window();
+  // pywebview listens for drag on body; keep the buttons from starting a window move
+  [minB, maxB, closeB].forEach(b => { b.onmousedown = (e) => e.stopPropagation(); });
+  addGrips();
+  names.forEach((name, i) => makeTab(i, name, ids[i], (roles && roles[i]) || name));
+  window.addEventListener('resize', refit);
+  setInterval(syncNames, 2000);
+  show(0);
+  watchOffice(tabIds);
+}
+drawGraph();
+setInterval(drawGraph, 2000);
+// Who was clicked in the office page (pixel-office remote/page.html, same-origin via local proxy): its picked = session id
+let lastPick;
+function watchOffice(ids) {
+  setInterval(() => {
+    let p;
+    try { p = document.getElementById('office').contentWindow.eval('picked'); } catch { return; }
+    if (p === lastPick) return;
+    lastPick = p;
+    const i = ids.indexOf(p);
+    if (i >= 0) show(i);
+  }, 200);
+}
+window.addEventListener('pywebviewready', init);
+setInterval(init, 200);
+</script>
+</body>
+</html>

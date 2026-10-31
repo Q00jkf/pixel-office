@@ -1,0 +1,19 @@
+{
+  "title": "Team window",
+  "cwd": ".",
+  "project": "C:\path\to\your\project",
+  "agents": [
+    {
+      "name": "lead",
+      "role": "主管",
+      "cwd": "C:\path\to\your\project",
+      "prompt": "You are the lead. Read .claude/office/roles/主管.md and take over."
+    },
+    {
+      "name": "dev",
+      "role": "研發",
+      "cwd": "C:\path\to\your\project",
+      "prompt": "You are dev. Read .claude/office/roles/研發.md and take over."
+    }
+  ]
+}

@@ -1,2 +1,4 @@
 __pycache__/
 tsconfig.json
+team-window/team*.json
+!team-window/team.example.json
