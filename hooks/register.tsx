@@ -768,26 +768,26 @@ export const mailSavedNote = (to: string, known = true) =>
   `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` +
   (known ? '' : ` Note: no session in the office has ever used the name or title ${to}; if it may be misspelled, check office_roster and resend to the right name.`)
 
-/** 每 5 秒：收件人在線（不是自己）就由這個視窗轉交 */
+/** 每 5 秒：給自己的信由自己的外掛送進自己的對話（$.prompt.submit，閒著也會開始一輪）。
+ *  不由別的視窗 $.session.send 轉交：auto 模式下計時器發起的送信會被分類器拒（「the request that produced this action did not ask for one」，0.42.0 真視窗實測） */
 async function deliverMail($: EngineInterface) {
   if (me.oneshot || me.id === 'me') return
   const now = await $.clock.now()
   for (const { file, m } of await readMail($)) {
-    const target = others.find(c => !c.oneshot && c.kind !== 'agy' && mailMatches(m.to, c))
     const step = mailStep(m, instance, now)
     if (step === 'expire') await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: 'expired' }))
-    if (!target || step === 'skip' || step === 'expire') continue
+    if (!mailMatches(m.to, me) || step === 'skip' || step === 'expire') continue
     if (step === 'claim') {
+      // 先認領、下一輪還是自己的才送：同一個名稱或職稱有兩個視窗時只送一次
       await $.fs.write(file, JSON.stringify({ ...m, state: 'claimed', by: instance, claimedAt: now }))
       continue
     }
-    const sent = await $.session.send({ to: { sessionId: target.id }, text: mailText(m, localStamp(m.at)) }).catch(err => ({ isDelivered: false as const, reason: `threw: ${String(err)}` }))
-    // 送不到把原因留在信裡（除錯用）；認領清掉，讓別的視窗也能試
-    await $.fs.write(file, JSON.stringify(sent.isDelivered ? { ...m, state: 'done', note: `delivered to ${target.agent ?? target.id} by ${me.agent ?? me.id}` } : { ...m, state: 'pending', by: undefined, claimedAt: undefined, note: `send to ${target.id} failed: ${sent.reason}` }))
+    await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: `submitted to ${me.agent ?? me.id}` }))
+    await $.prompt.submit({ text: mailText(m, localStamp(m.at)) }).catch(err => $.fs.write(file, JSON.stringify({ ...m, state: 'pending', by: undefined, claimedAt: undefined, note: `submit failed: ${String(err)}` })))
   }
 }
 
-/** 收件人是自己（例如只剩自己在線）：下一則指令時附在 context */
+/** 給自己的信，有指令進來時（使用者或 peer 先開口）直接附在 context，不等 5 秒那一輪 */
 async function takeOwnMail($: EngineInterface): Promise<string[]> {
   if (me.oneshot || me.id === 'me') return []
   const now = await $.clock.now()

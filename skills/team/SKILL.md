@@ -55,6 +55,6 @@ description: "Multi-session collaboration: layers (solo / manager / department l
 ## 共通前提
 
 - `SendMessage` 是 deferred tool，先 `ToolSearch("select:SendMessage")`；收件者＝`ListAgents` 上的名稱，或對方的職稱（角色名）。
-- 對方不在線：外掛把信存進辦公室信箱（回覆會寫 saved it to its mailbox），對方以同名或同職稱上線時轉交，24 小時內有效——不用重送。回覆沒說存了（同名多人、被拒）才寫 `peer-reply-<自己的名稱>.md` 到專案根目錄，請使用者轉交。
+- 對方不在線：外掛把信存進辦公室信箱（回覆會寫 saved it to its mailbox），對方以同名或同職稱上線時由對方的外掛送進它的對話，24 小時內有效——不用重送。回覆沒說存了（同名多人、被拒）才寫 `peer-reply-<自己的名稱>.md` 到專案根目錄，請使用者轉交。
 - 開新 session 由使用者決定（多花 token 是他的成本）；未經允許不開 subagent。
 - `office_roster` 一次給每個人的名牌、職稱、主管／員工、ListAgents 名稱、正在做什麼——**先看它，不要逐張讀角色卡**。名單是即時畫面，權責以 `collab.md` 為準。

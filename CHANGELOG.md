@@ -7,6 +7,12 @@
 
 ---
 
+## 0.42.2 — 2026-10-31
+
+- **改了什麼**：信箱改由收件人自己的外掛投遞——每 5 秒看有沒有給自己（名稱或職稱）的信，認領、下一輪確認後用 `$.prompt.submit` 送進自己的對話（閒著也會開始一輪，畫面標明是 pixel-office 送的）；拿掉別的視窗 `$.session.send` 轉交
+- **為什麼**：0.42.1 在信裡記下的失敗原因：「The server-side auto mode classifier gave no verdict for SendMessage: the request that produced this action did not ask for one」——auto 模式下，計時器發起的跨視窗送信沒有對應的使用者要求，分類器不放行。改成收件人自己投遞時，commit 被 auto 模式分類器判為繞過；jacky 2026-10-31 裁示採用這個做法
+- **commit**：（本版）
+
 ## 0.42.1 — 2026-10-31
 
 - **改了什麼**：信箱轉交送不到時，把原因寫進信（`note`），並清掉認領讓別的視窗也能試；`parseMail` 保留 `note`
