@@ -7,6 +7,59 @@
 
 ---
 
+## 0.42.0 — 2026-10-31
+
+- **改了什麼**：離線信箱
+  - 寄：模型的 `SendMessage` 送不到、原因不是「同名多人／拒收／hook 擋」→ 存 `~/.claude/pixel-office/mail/<時間>-<亂數>.json`（收件名：名稱去掉 [ref]；uds 位址查辦公室狀態檔換成那人的名稱或職稱），SendMessage 的結果後附一段 context 給模型「已存信箱、不用重送或寫 peer-reply」（名稱查無時引擎在 hook 之後才拒收、用自己的字，改 `reason` 模型看不到，API 實測過）；`claude -p` 寄的也存，轉交才排除 oneshot
+  - 轉交：每 5 秒，任一個在線視窗看到收件人（`agent` 或 `title`＝收件名）在線 → 先寫認領、下一輪確認還是自己的才 `$.session.send({ to: { sessionId } })`，多視窗只送一次；收件人是自己（例如只剩自己在線）→ 下一則指令附在 context
+  - 一天沒人收就作廢；`$.fs` 沒有刪除，送完只把狀態寫成 done
+  - `skills/team/SKILL.md` 共通前提改寫
+- **為什麼**：jacky 2026-10-31：對方 session 重開就收不到訊息、沒有離線留言（主管回 office設計 失敗：ENOINBOX）。根因：SendMessage 投遞到收件程序的 socket，不落地。API 量測（0.38.0 基準）：送給不在線的人 3 次都退回寫 `peer-reply-*.md`
+- **API code review 後修正**（Sonnet，0.52 美元；0.39.0～0.42.0 都還沒發行，一起修在這版）：
+  - 自動檢查點：檔案在卻讀不到（被鎖）就不寫，原本會退回只有標題、整檔覆寫洗掉歷史
+  - 撞號 `dup`：對方 20 秒沒再寫就解除；`/resume`、`/clear` 換對話後重新偵測（原本設了就清不掉、換對話也不再設）
+  - 信箱提示依 SendMessage 的 `to`（去掉 [ref]）對應，一輪平行送多封不會貼錯；收件名不是在線的人、也不是任何 session 的現名或舊名（多半打錯）→ 提示模型確認。🔴 對應要在 `session.send` hook 裡**同步**先記：SendMessage 的結果不等這個 hook 跑完，第一版先掃 458 個狀態檔再記，API 重跑 3 次提示都沒貼上、模型又寫 peer-reply；改成同步後 3 次都貼上（送給不在線花費中位 $0.0408，基準 $0.0454）
+  - 信箱讀檔略過超過效期的檔（只增不減，原本每 5 秒全讀）
+  - 團隊視窗：被擋時印出 `~/.claude/sessions/<pid>.json`，殘檔或 pid 重用可刪檔解除；log 不再印舊 pid
+  - 沒修：`takeOwnMail` 先標 done 才送進指令（指令被取消信就沒了）、認領沒有 compare-and-swap（窄窗口可能重送一次）——前者機率低、後者重送比漏送好
+- **待實測**：外掛 `$.session.send` 寄給另一個互動視窗、讓閒著的對方開始一輪——型別文件說會當成 peer 訊息，還沒在真視窗看過
+- **實測**：`claude plugin test .` 194 pass（新：存不存信箱、名稱或職稱都收、認領→送→作廢、送不到時存檔）；API（Sonnet 各 3 次）送給不在線：花費中位 $0.0454 → $0.0399、輸入 token 117k → 87k，3 次都不再寫 peer-reply
+- **commit**：（本版）
+
+## 0.41.0 — 2026-10-31
+
+- **改了什麼**：檢查點由外掛提醒與兜底（只對持有角色的 session：title 對得到 `<office>/roles/<title>.md`；`claude -p` 不算）
+  - 用過工具、距開工或上次存檔滿 60 分鐘 → 下一則指令（使用者或 peer 訊息）附一次提醒（`cpNote`）；存了（檔案 mtime 變新）就重新起算
+  - `/compact`（含自動）→ 摘要指示加一句：保留做完／卡在／下一步（`CP_COMPACT_NOTE`）
+  - 正常結束（`session.end`）而這段做過事沒存 → 外掛往後加一筆 `## <時間> <名稱>（自動：下線前沒存）`：最後指令、`claude --resume <id>（在 <cwd>）`、下一步「先 resume 讀末段或問主管」；不猜做到哪
+  - `scripts/takeover.py`：最後一筆是自動那筆 → 多印一行「先 resume 讀末段」
+  - `skills/team/roles.md` §4 加一段說明
+- **為什麼**：jacky 2026-10-31：角色常不寫檢查點，全員下線後接不上（studio `checkpoints/` 只有主管、需求維護）。根因：只靠 skill 叫模型寫，收工常是直接關視窗；API 量測另發現模型寫 `.claude/` 會被權限擋，外掛 `$.fs` 寫不經權限
+- **限制**：強制結束（關視窗、kill、團隊視窗 terminate）`session.end` 不一定跑，補不到，靠 60 分鐘提醒
+- **實測**：`claude plugin test .` 190 pass（新：提醒條件、自動那筆格式、做過事才補且只往後加）；takeover 對自動那筆印提示
+- **commit**：（本版）
+
+## 0.40.0 — 2026-10-31
+
+- **改了什麼**：升層時外掛補 `collab.md`
+  - `office_profile(role=manager)` 從員工升主管：算出 `<office>`（`officeFor()`，跟 `takeover.py office_dir()`、SKILL.md 同規則：`~/.claude/office/projects.json` 優先，值可相對或絕對，否則 `<主 repo>/.claude/office`）；目錄已在、`collab.md` 不在 → 寫 lead.md §2 六段骨架，主管列填自己（範圍「（待填）」）。目錄不在或 `collab.md` 已有 → 不寫，回覆照舊提示
+  - `skills/team/lead.md` §1 第 2 步：外掛已建骨架就只填範圍
+  - `scripts/takeover.py`：找不到卡時提示「卡放在別的 repo → projects.json 或 --office」
+- **為什麼**：jacky 2026-10-31：studio 有 `.claude/office/` 卻沒有 `collab.md`，接手的人都當「沒有主管」不報到；卡放在別的 repo 時 takeover 要找得到。API 量測（0.38.0 基準）：模型自己寫 `.claude/office/collab.md` 被擋成敏感路徑，3 次全失敗、加 acceptEdits 也一樣；外掛用 `$.fs` 寫不經權限
+- **實測**：`claude plugin test .` 187 pass（新：office 目錄規則、骨架六段、升層只在目錄在且沒有 collab.md 時寫）
+- **commit**：（本版）
+
+## 0.39.0 — 2026-10-31
+
+- **改了什麼**：同一份對話開在兩個視窗（`--resume` 接到還開著的對話）抓得到了
+  - 外掛：原本偵測到撞號只跳一次 toast；現在狀態檔寫 `dup`，名單最上面標 🔴「同一份對話開在兩個視窗」，該視窗下一則指令附提醒（`DUP_NOTE`：停下來請使用者關掉一個）
+  - `scripts/open_role.py` 加 `live_sessions(session_id)`：讀 `~/.claude/sessions/*.json` 並確認 pid 還活著（強制結束會留下檔）
+  - `scripts/takeover.py`：這份對話同時有兩個活著的程序 → 印 STOP
+  - 團隊視窗（外掛外的原型）開分頁前用 `live_sessions` 檢查，已開著就不再 `--resume`，分頁顯示在哪裡開著
+- **為什麼**：jacky 2026-10-31：團隊視窗 resume 同一份對話變成兩個分頁、撞角色檢查抓不到。實測兩個 ref 是同一個 session id 的兩個程序；狀態檔以 session id 命名，兩邊輪流覆蓋成一列，`takeover.py` 撞角色又以 session id 排除自己
+- **實測**：假的 `~/.claude/sessions`（兩個活 pid＋一個已死 pid、同 session id）→ takeover 印 STOP，只列兩個活的；`claude plugin test .` 185 pass
+- **commit**：（本版）
+
 ## 0.38.0 — 2026-10-31
 
 - **改了什麼**：`scripts/takeover.py <角色>`（新）—— 接手前置一次印完，不寫檔

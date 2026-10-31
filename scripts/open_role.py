@@ -7,10 +7,11 @@
 - 先產生 session id 帶 --session-id，並寫 ~/.claude/pixel-office/presets/<id>.json（title／team／名牌／role=staff）：
   外掛在那個 session 第一次啟動時套用，開場檔不必再寫「開工先登記辦公室」；agent 與 ref 外掛本來就會自己讀 ListAgents 填
 - 路徑不存在 → 報錯、不開；--dry-run 只印要跑的指令與預設登記，不開視窗、不寫檔
-- 團隊視窗（pty 分頁）import DROP_ENV 與 child_env()，兩邊不各寫一份
+- 團隊視窗（pty 分頁）import DROP_ENV、child_env()、live_sessions()，兩邊不各寫一份
 """
 import argparse
 import base64
+import glob
 import json
 import os
 import subprocess
@@ -25,6 +26,41 @@ DROP_ENV = ('CLAUDE_CODE_CHILD_SESSION', 'ANTHROPIC_API_KEY')
 
 def child_env(env=None):
     return {k: v for k, v in (os.environ if env is None else env).items() if k not in DROP_ENV}
+
+
+def pid_alive(pid):
+    if sys.platform != 'win32':
+        try:
+            os.kill(pid, 0)
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+    import ctypes
+    import ctypes.wintypes
+    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION；Windows 的 os.kill 會結束程序，不能拿來探
+    if not h:
+        return False
+    code = ctypes.wintypes.DWORD()
+    ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+    ctypes.windll.kernel32.CloseHandle(h)
+    return code.value == 259  # STILL_ACTIVE
+
+
+def live_sessions(session_id):
+    """正在跑這個 session 的程序：[(pid, 名稱)]。~/.claude/sessions/<pid>.json 強制結束時會留下，所以另外確認 pid 還活著。
+    兩筆以上＝同一份對話開在兩個視窗（--resume 接到開著的對話，2026-10-31 團隊視窗實測）"""
+    out = []
+    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+        try:
+            with open(p, encoding='utf-8') as f:
+                j = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if j.get('sessionId') == session_id and isinstance(j.get('pid'), int) and pid_alive(j['pid']):
+            out.append((j['pid'], j.get('name') or ''))
+    return out
 
 
 def preset_file(session_id):

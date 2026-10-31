@@ -169,9 +169,12 @@ export function classifierBlocked(ran: { deny?: string; isError?: boolean; text?
  * 撞號：自己的狀態檔最近被「另一個實例」寫過（兩個視窗共用同一個 session 編號，常見於 --resume 接到同一段對話）。
  * 不算撞號：檔案沒有 instance（舊版寫的）、已標記離開、太久沒更新、或就是自己寫的。
  */
+let foreignAt = 0 // 最近一次看到別的實例寫我的狀態檔
 function warnCollision($: EngineInterface) {
+  foreignAt = Date.now()
+  if (!me.dup) me = { ...me, dup: true }
   if (collisionWarned) return
-  collisionWarned = true
+  collisionWarned = true // toast 只跳一次；dup 名單標紅、下一則指令提醒模型（jacky 2026-10-31：團隊視窗 resume 同一份對話，撞角色檢查抓不到）
   $.ui.toast(`⚠ Another window shares this session id (${me.id.slice(0, 8)}), so their office data overwrite each other: close one and reopen a different conversation with claude --resume`)
 }
 
@@ -553,15 +556,256 @@ async function cliSessions($: EngineInterface): Promise<CliSession[]> {
 }
 
 /** 每 5 秒：跟上自己的 /rename，主管改名後把 team 接回去（jacky 2026-10-31：改名後關係圖長出舊名的空殼、人掛在空殼下） */
+let lastCli: CliSession[] = [] // 最近一次讀到的 ~/.claude/sessions：信箱判斷收件名認不認得
 async function followRename($: EngineInterface) {
+  lastCli = await cliSessions($)
   if (me.id === 'me' || me.oneshot) return
-  const fix = renameFixes(me, await cliSessions($))
+  const fix = renameFixes(me, lastCli)
   if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
+}
+
+/** <office> 位置，跟 takeover.py office_dir() 與 skill SKILL.md 同規則：projects.json 有這個主 repo 用它（可相對或絕對），否則 <主 repo>/.claude/office */
+export function officeFor(main: string, projects: unknown): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  const key = norm(main).toLowerCase()
+  if (projects && typeof projects === 'object') {
+    for (const [k, v] of Object.entries(projects as Record<string, unknown>)) {
+      if (typeof v !== 'string' || norm(k).toLowerCase() !== key) continue
+      return /^([a-zA-Z]:)?[\\/]/.test(v) ? norm(v) : `${norm(main)}/${norm(v)}`
+    }
+  }
+  return `${norm(main)}/.claude/office`
+}
+
+/** collab.md 骨架（skills/team/lead.md §2 的六段），主管列先填自己 */
+export function collabSkeleton(manager: string, upper: string | undefined, at: string): string {
+  return [
+    '# 主管',
+    '| 主管（ListAgents 名稱） | 範圍（使用者原話） | 上層 | 上線 |',
+    '|---|---|---|---|',
+    `| ${manager} | （待填） | ${upper ?? '—'} | ${at} |`,
+    '# 在線',
+    '| session | 角色 | 任務 | 上次回報 |',
+    '|---|---|---|---|',
+    '# 檔案佔用',
+    '| 檔案（反引號路徑） | 佔用者 | 起始 YYYY-MM-DD |',
+    '|---|---|---|',
+    '# 待使用者裁示',
+    '| # | 事項（一句） | 細節在哪 | 登記日 |',
+    '|---|---|---|---|',
+    '# 等外部回覆',
+    '| # | 事項 | 等誰（不知道寫「未指明」） | 登記日 |',
+    '|---|---|---|---|',
+    '# 衝突紀錄',
+    '| 時間 | 雙方 | 以誰為準、對方怎麼收尾 |',
+    '|---|---|---|',
+    '',
+  ].join('\n')
+}
+
+async function officeDir($: EngineInterface): Promise<string> {
+  const main = (await $.session.repo().catch(() => null))?.root ?? (await $.session.cwd())
+  const raw = await $.fs.read(`${officeRoot(await sharedDir($)).replace(/\/pixel-office$/, '')}/office/projects.json`).catch(() => undefined)
+  let projects: unknown
+  try {
+    projects = typeof raw === 'string' ? JSON.parse(raw) : undefined
+  } catch {}
+  return officeFor(main, projects)
+}
+
+const localStamp = (ms: number) => {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 升層時補 collab.md：目錄已在、collab.md 不在才寫（jacky 2026-10-31：模型寫 .claude/ 會被權限擋，3 次全失敗）；回給模型看的一句 */
+async function ensureCollab($: EngineInterface, manager: string, upper: string | undefined): Promise<string> {
+  const office = await officeDir($)
+  if (!(await $.fs.exists(office).catch(() => false))) return `collab dir ${office} does not exist yet: create it per skill pixel-office:team, or map this repo in ~/.claude/office/projects.json`
+  const file = `${office}/collab.md`
+  if (await $.fs.exists(file).catch(() => false)) return `${file} exists: read its 主管 section per skill pixel-office:team`
+  await $.fs.write(file, collabSkeleton(manager, upper, localStamp(await $.clock.now())))
+  return `created ${file} (skeleton, you are in 主管; fill your scope there)`
+}
+
+// ---------- 檢查點（jacky 2026-10-31：全員下線後接不上；只靠 skill 叫模型寫，常忘、寫 .claude/ 又會被權限擋） ----------
+export const CP_REMIND_MS = 60 * 60000 // 持有角色、做了事、這麼久沒存 → 下一則指令提醒一次
+export const cpNote = (file: string) =>
+  `Pixel office: you hold a role and have not saved a checkpoint for an hour. At a good stopping point append one entry to ${file} (skill pixel-office:team roles.md §4: done / blocked / next step).`
+export const CP_COMPACT_NOTE = 'Keep in the summary, for the role this session holds: what is done (commits or files), what is blocked, and the next step.'
+
+/** 該不該提醒存檢查點：上次存（或開工）後做過事、滿一小時、這段還沒提醒過 */
+export const checkpointDue = (worked: boolean, base: number, now: number, noted: boolean) => worked && !noted && now - base >= CP_REMIND_MS
+
+/** 下線時外掛代寫的那筆：只寫看得到的事實（最後指令、怎麼接回對話），不猜做到哪 */
+export function autoCheckpoint(at: string, who: string, prompt: string | undefined, sessionId: string, cwd: string): string {
+  return [
+    `## ${at} ${who}（自動：下線前沒存）`,
+    `- 最後指令：${prompt ?? '（沒有記錄）'}`,
+    `- 對話：claude --resume ${sessionId}（在 ${cwd}）`,
+    '- 下一步：先 resume 讀對話末段，或問主管',
+    '',
+  ].join('\n')
+}
+
+let cpCache: { title: string; file?: string } | undefined
+let cpBase = 0 // 開工或上次存檢查點的時間
+let cpWorked = false // cpBase 之後有沒有用過工具
+let cpNoted = false
+
+/** 自己持有的角色的檢查點檔：title 對得到 <office>/roles/<title>.md 才算 */
+async function checkpointFile($: EngineInterface): Promise<string | undefined> {
+  if (me.oneshot || me.id === 'me' || !me.title) return undefined
+  if (cpCache?.title !== me.title) {
+    const office = await officeDir($).catch(() => undefined)
+    const held = office && (await $.fs.exists(`${office}/roles/${me.title}.md`).catch(() => false))
+    cpCache = { title: me.title, file: held ? `${office}/checkpoints/${me.title}.md` : undefined }
+  }
+  return cpCache.file
+}
+
+/** 檔案比 cpBase 新＝剛存過：重新起算 */
+async function syncCheckpoint($: EngineInterface): Promise<string | undefined> {
+  const file = await checkpointFile($)
+  if (!file) return undefined
+  const st = await $.fs.stat(file).catch(() => undefined)
+  if (st && st.mtimeMs > cpBase) {
+    cpBase = st.mtimeMs
+    cpWorked = false
+    cpNoted = false
+  }
+  return file
+}
+
+async function writeAutoCheckpoint($: EngineInterface) {
+  const file = await syncCheckpoint($)
+  if (!file || !cpWorked) return
+  // 整檔覆寫（$.fs 沒有 append）：讀失敗（被鎖、讀一半）時寫下去會洗掉歷史，所以只有檔案不存在才從標題起，其他讀不到就不寫
+  const body = (await $.fs.exists(file).catch(() => true)) ? await $.fs.read(file).then(t => (typeof t === 'string' ? t : undefined)).catch(() => undefined) : `# ${me.title} 檢查點\n`
+  if (body === undefined) return
+  const entry = autoCheckpoint(localStamp(await $.clock.now()), me.agent ?? me.name, me.prompt?.text, me.id, await $.session.cwd())
+  await $.fs.write(file, `${body}${body.endsWith('\n') ? '' : '\n'}\n${entry}`)
+}
+
+// ---------- 離線信箱（jacky 2026-10-31：對方重開就收不到，SendMessage 不落地，ENOINBOX） ----------
+// ~/.claude/pixel-office/mail/<時間>-<亂數>.json，一封一檔。$.fs 沒有搬移／刪除，狀態寫在檔裡：pending → claimed（誰、何時）→ done
+export type Mail = { from: string; to: string; text: string; at: number; state: 'pending' | 'claimed' | 'done'; by?: string; claimedAt?: number; note?: string }
+export const MAIL_TTL_MS = 24 * 3600000 // 超過一天沒人收就作廢
+export const MAIL_CLAIM_MS = 30000 // 別人認領後這麼久沒送完，可以接手
+
+/** 送不到的原因裡，這些不存信箱：同名多人（要帶 ref）、對方拒收、hook 擋下 */
+export const shouldMail = (reason: string) => !/several|multiple|ambiguous|\[ref\]|refus|declin|denied|hook|not allowed/i.test(reason)
+
+/** 收件名對得到這個人：ListAgents 名稱或職稱（角色名：換人接手也收得到） */
+export const mailMatches = (to: string, c: { agent?: string; title?: string }) => to === c.agent || to === c.title
+
+/** 這一輪對這封信做什麼：claim 先寫認領、下一輪確認還是自己的才 send（多個視窗同時看到時只送一次） */
+export function mailStep(m: Mail, mine: string, now: number): 'claim' | 'send' | 'skip' | 'expire' {
+  if (m.state === 'done') return 'skip'
+  if (now - m.at > MAIL_TTL_MS) return 'expire'
+  if (m.state === 'claimed' && m.by === mine) return 'send'
+  if (m.state === 'claimed' && typeof m.claimedAt === 'number' && now - m.claimedAt < MAIL_CLAIM_MS) return 'skip'
+  return 'claim'
+}
+
+export function parseMail(raw: unknown): Mail | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.from !== 'string' || typeof r.to !== 'string' || typeof r.text !== 'string' || typeof r.at !== 'number') return undefined
+  const state = r.state === 'claimed' || r.state === 'done' ? r.state : 'pending'
+  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined }
+}
+
+export const mailText = (m: Mail, at: string) => `[Pixel office mailbox] ${m.from} sent this at ${at} while you were offline; reply with SendMessage to ${m.from}.\n\n${m.text}`
+
+const mailDir = async ($: EngineInterface) => `${officeRoot(await sharedDir($))}/mail`
+
+async function readMail($: EngineInterface): Promise<{ file: string; m: Mail }[]> {
+  const d = await mailDir($)
+  const now = await $.clock.now()
+  const out: { file: string; m: Mail }[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    if (typeof entry.mtimeMs === 'number' && entry.mtimeMs > 0 && now - entry.mtimeMs > MAIL_TTL_MS + MAIL_CLAIM_MS) continue // 信箱只增不減（$.fs 不能刪）：過期的連讀都不讀
+    try {
+      const raw = await $.fs.read(`${d}/${entry.name}`)
+      const m = parseMail(JSON.parse(typeof raw === 'string' ? raw : '{}'))
+      if (m && m.state !== 'done') out.push({ file: `${d}/${entry.name}`, m })
+    } catch {}
+  }
+  return out
+}
+
+async function statusFiles($: EngineInterface): Promise<Record<string, unknown>[]> {
+  const d = await sharedDir($)
+  const out: Record<string, unknown>[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    try {
+      out.push(JSON.parse(String(await $.fs.read(`${d}/${entry.name}`))))
+    } catch {}
+  }
+  return out
+}
+
+/** 這個名稱認不認得：在線的人、Claude Code 記的現名與舊名（followRename 每 5 秒讀的那份）；都不是 → 多半打錯字，提示模型確認。
+ *  不掃辦公室全部狀態檔（2026-10-31 有 458 個，掃完 SendMessage 的結果早就回了，提示貼不上） */
+const knownName = (name: string) =>
+  name.startsWith('uds:') || [me, ...others].some(c => mailMatches(name, c)) || lastCli.some(c => c.name === name || c.formerNames.includes(name))
+
+/** SendMessage 的收件者 → 信箱收件名：uds 位址查辦公室狀態檔換成名稱（程序重開位址就變），名稱去掉 [ref] */
+async function mailName($: EngineInterface, to: string): Promise<string | undefined> {
+  const t = to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
+  if (!t.startsWith('uds:')) return t || undefined
+  const s = (await statusFiles($)).find(f => f.addr === t)
+  return typeof s?.agent === 'string' ? s.agent : typeof s?.title === 'string' ? s.title : undefined
+}
+
+const mailSaved = new Map<string, boolean>() // 這一輪存進信箱的收件者（mailKey）→ 認不認得這個名稱；一輪可能平行送好幾封
+const mailKey = (to: string) => to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
+export const mailSavedNote = (to: string, known = true) =>
+  `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` +
+  (known ? '' : ` Note: no session in the office has ever used the name or title ${to}; if it may be misspelled, check office_roster and resend to the right name.`)
+
+/** 每 5 秒：收件人在線（不是自己）就由這個視窗轉交 */
+async function deliverMail($: EngineInterface) {
+  if (me.oneshot || me.id === 'me') return
+  const now = await $.clock.now()
+  for (const { file, m } of await readMail($)) {
+    const target = others.find(c => !c.oneshot && c.kind !== 'agy' && mailMatches(m.to, c))
+    const step = mailStep(m, instance, now)
+    if (step === 'expire') await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: 'expired' }))
+    if (!target || step === 'skip' || step === 'expire') continue
+    if (step === 'claim') {
+      await $.fs.write(file, JSON.stringify({ ...m, state: 'claimed', by: instance, claimedAt: now }))
+      continue
+    }
+    const sent = await $.session.send({ to: { sessionId: target.id }, text: mailText(m, localStamp(m.at)) }).catch(() => ({ isDelivered: false as const, reason: 'error' }))
+    await $.fs.write(file, JSON.stringify(sent.isDelivered ? { ...m, state: 'done', note: `delivered to ${target.agent ?? target.id} by ${me.agent ?? me.id}` } : { ...m, state: 'pending' }))
+  }
+}
+
+/** 收件人是自己（例如只剩自己在線）：下一則指令時附在 context */
+async function takeOwnMail($: EngineInterface): Promise<string[]> {
+  if (me.oneshot || me.id === 'me') return []
+  const now = await $.clock.now()
+  const texts: string[] = []
+  for (const { file, m } of await readMail($)) {
+    if (!mailMatches(m.to, me)) continue
+    const step = mailStep(m, instance, now)
+    if (step === 'skip' || step === 'expire') continue
+    await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: `read by ${me.agent ?? me.id}` }))
+    texts.push(mailText(m, localStamp(m.at)))
+  }
+  return texts
 }
 
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
+  collisionWarned = false // 換了對話：撞號重新偵測
+  dupNoted = false
   defaultName = launchPlate(launchName) ?? plateName(await $.session.cwd(), id)
   me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff', ...(oneshotRun ? { oneshot: true, label: launchName } : {}) }
   // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
@@ -627,7 +871,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, label: me.label, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -667,10 +911,13 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 export const DEMOTE_MS = 20 * 60000 // 主管底下沒有在線員工滿這麼久 → 下一則使用者指令附降層提醒（jacky 2026-10-29）
+export const DUP_NOTE =
+  'Pixel office: another window is running this same conversation (same session id, usually a second claude --resume). Stop and tell the user to close one window; both copies write the same checkpoint and office record, and messages reach either one.'
 export const DEMOTE_NOTE =
   "Pixel office: you are registered as manager but nobody online has had team=you for 20 minutes. If multiple sessions are no longer needed, ask the user whether to step down (office_profile role=staff, then clear collab.md's 在線 rows per skill pixel-office:team). If windows are only closed for now, keep as is. Don't change it yourself."
 let reportsSeenAt: number | undefined // 最後一次看到有人掛在我底下（或我還不是主管）的時間
 let demoteNoted = false // 這段沒人的期間已經提醒過
+let dupNoted = false // 撞號只提醒模型一次
 
 /** 有沒有在線的人掛在 self 底下（team 對到 ListAgents 名稱或名牌） */
 export const hasReports = (self: Coworker, others: Coworker[]) => others.some(c => c.team !== undefined && (c.team === self.agent || c.team === self.name))
@@ -742,6 +989,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     `Pixel office roster (${list.length} online, ${new Date(now).toISOString().slice(11, 19)} UTC)`,
     ...(blockedNames.length > 0 ? [`🔴 Blocked: ${blockedNames.join(', ')} (the user must say "allow" in each window; relaying from another session does not work)`] : []),
     ...clashNotes(sorted),
+    ...sorted.filter(c => c.dup).map(c => `🔴 ${c.agent ?? c.name}: the same conversation is open in two windows (claude --resume of one session); they overwrite each other and look like one person here. Ask the user to close one.`),
     '| Name | Title | Role | ListAgents name (for SendMessage) | ref | Now |',
     '|---|---|---|---|---|---|',
   ]
@@ -821,10 +1069,14 @@ async function refresh($: EngineInterface) {
   const d = await sharedDir($)
   const now = await $.clock.now()
   const entries = await $.fs.list(d).catch(() => [])
-  if (!collisionWarned && me.id !== 'me' && instance) {
+  if ((!collisionWarned || me.dup) && me.id !== 'me' && instance) {
     const ownNow = await readOwnStatus($, me.id)
     // 別人在我上次寫入之後又寫了一次 → 有另一個視窗在用同一個編號
     if (ownNow && typeof ownNow.updatedAt === 'number' && ownNow.updatedAt > lastWriteAt && isCollision(ownNow, instance, now)) warnCollision($)
+    else if (me.dup && Date.now() - foreignAt > 20000) {
+      me = { ...me, dup: undefined } // 對方關了
+      dupNoted = false
+    }
   }
   const found: Coworker[] = []
   for (const entry of entries) {
@@ -978,8 +1230,8 @@ async function applyProfile(
   if (input.role !== undefined) {
     const parsed = parseRole(input.role)
     if (parsed === undefined) return `Unknown role "${input.role}": use manager or staff.`
-    // 升層＝員工改主管：協作資料夾由 skill 建（外掛不寫專案檔）
-    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: create or take over the collab dir per skill pixel-office:team: ~/.claude/office/projects.json, else <main repo>/.claude/office/)`)
+    // 升層＝員工改主管：協作目錄已在就由外掛補 collab.md 骨架（目錄本身仍由 skill 建）
+    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: ${await ensureCollab($, agent ?? name, team).catch(e => `could not write collab.md: ${String(e)}`)})`)
     else notes.push(`role=${ROLE_LABEL[parsed]}`)
     role = parsed
   }
@@ -1465,6 +1717,7 @@ export const register: Register = on => {
     oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
     await applyPreset($).catch(() => undefined)
+    cpBase = await $.clock.now()
     if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
     const savedPet = await $.store.get('pet').catch(() => undefined)
@@ -1494,7 +1747,7 @@ export const register: Register = on => {
     $.clock.every(500, () => {
       if (svgOpen) $.ui.invalidate('ui.render')
     })
-    $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).catch(() => undefined))
+    $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).then(() => deliverMail($)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
     $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
@@ -1547,6 +1800,16 @@ export const register: Register = on => {
   })
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    const ran = await next(e)
+    const key = mailKey(String((e as { to?: unknown }).to ?? ''))
+    const known = mailSaved.get(key)
+    if (known === undefined) return ran
+    mailSaved.delete(key)
+    return ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(key.startsWith('uds:') ? 'that recipient' : key, known)] } : ran
+  })
+
+  // 送不到（對方不在線、程序重開位址變了）→ 存辦公室信箱，對方以同名或同職稱上線時轉交
   on('session.send', async ($, e, next) => {
     const sent = await next(e)
     try {
@@ -1554,6 +1817,18 @@ export const register: Register = on => {
         me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
         await showCrew($)
         await publish($, false)
+      } else if (e.origin.kind === 'model' && !e.agentId && shouldMail(sent.reason)) { // claude -p 也能留言；轉交才排除 oneshot
+        // 名稱查無時引擎在 hook 之後用自己的字拒收，改 reason 模型看不到：記下來由 SendMessage 的 tool.call 附在 context。
+        // 同步先記，不能等 await：SendMessage 的結果不等這個 hook 跑完（API 實測 2026-10-31：先掃 458 個狀態檔再記，提示就貼不上）
+        const key = mailKey(e.to)
+        mailSaved.set(key, knownName(key))
+        const to = await mailName($, e.to)
+        if (!to) mailSaved.delete(key)
+        else {
+          const now = await $.clock.now()
+          const mail: Mail = { from: me.agent ?? me.name, to, text: e.text, at: now, state: 'pending' }
+          await $.fs.write(`${await mailDir($)}/${now}-${crypto.randomUUID().slice(0, 8)}.json`, JSON.stringify(mail))
+        }
       }
     } catch {}
     return sent
@@ -1632,6 +1907,7 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     // session.start 沒跑完就結束時還沒有 session 編號（仍是預設的 'me'）：不寫，免得留下 me.json 垃圾檔
     if (me.id !== 'me') await publish($, true).catch(() => undefined)
+    await writeAutoCheckpoint($).catch(() => undefined)
 
     return next(e)
   })
@@ -1740,14 +2016,31 @@ export const register: Register = on => {
         const head = promptHead(e.text)
         if (head) me = { ...me, prompt: { text: head, at: now } }
         await autoTitle($, head, now)
+        if (me.dup && !dupNoted) {
+          dupNoted = true
+          e = { ...e, context: [...(e.context ?? []), DUP_NOTE] }
+        }
         if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
           demoteNoted = true
           e = { ...e, context: [...(e.context ?? []), DEMOTE_NOTE] }
         }
       }
       await setMode($, 'thinking')
+      const mail = await takeOwnMail($).catch(() => [] as string[])
+      if (mail.length > 0) e = { ...e, context: [...(e.context ?? []), ...mail] }
+      if (await syncCheckpoint($) && checkpointDue(cpWorked, cpBase, await $.clock.now(), cpNoted)) {
+        cpNoted = true
+        e = { ...e, context: [...(e.context ?? []), cpNote(cpCache!.file!)] }
+      }
     } catch {}
 
+    return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    try {
+      if (!e.agentId && cpWorked && (await checkpointFile($))) e = { ...e, instructions: [e.instructions, CP_COMPACT_NOTE].filter(Boolean).join('\n') }
+    } catch {}
     return next(e)
   })
 
@@ -1758,6 +2051,7 @@ export const register: Register = on => {
     } catch {}
     const ran = await next(e)
     settle(e)
+    if (!e.agentId) cpWorked = true
     try {
       const r = ran as { deny?: string; isError?: boolean; text?: string }
       if (classifierBlocked(r)) {
