@@ -714,7 +714,7 @@ export function parseMail(raw: unknown): Mail | undefined {
   const r = raw as Record<string, unknown>
   if (typeof r.from !== 'string' || typeof r.to !== 'string' || typeof r.text !== 'string' || typeof r.at !== 'number') return undefined
   const state = r.state === 'claimed' || r.state === 'done' ? r.state : 'pending'
-  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined }
+  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined, note: typeof r.note === 'string' ? r.note : undefined }
 }
 
 export const mailText = (m: Mail, at: string) => `[Pixel office mailbox] ${m.from} sent this at ${at} while you were offline; reply with SendMessage to ${m.from}.\n\n${m.text}`
@@ -781,8 +781,9 @@ async function deliverMail($: EngineInterface) {
       await $.fs.write(file, JSON.stringify({ ...m, state: 'claimed', by: instance, claimedAt: now }))
       continue
     }
-    const sent = await $.session.send({ to: { sessionId: target.id }, text: mailText(m, localStamp(m.at)) }).catch(() => ({ isDelivered: false as const, reason: 'error' }))
-    await $.fs.write(file, JSON.stringify(sent.isDelivered ? { ...m, state: 'done', note: `delivered to ${target.agent ?? target.id} by ${me.agent ?? me.id}` } : { ...m, state: 'pending' }))
+    const sent = await $.session.send({ to: { sessionId: target.id }, text: mailText(m, localStamp(m.at)) }).catch(err => ({ isDelivered: false as const, reason: `threw: ${String(err)}` }))
+    // 送不到把原因留在信裡（除錯用）；認領清掉，讓別的視窗也能試
+    await $.fs.write(file, JSON.stringify(sent.isDelivered ? { ...m, state: 'done', note: `delivered to ${target.agent ?? target.id} by ${me.agent ?? me.id}` } : { ...m, state: 'pending', by: undefined, claimedAt: undefined, note: `send to ${target.id} failed: ${sent.reason}` }))
   }
 }
 
