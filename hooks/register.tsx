@@ -556,9 +556,11 @@ async function cliSessions($: EngineInterface): Promise<CliSession[]> {
 }
 
 /** 每 5 秒：跟上自己的 /rename，主管改名後把 team 接回去（jacky 2026-10-31：改名後關係圖長出舊名的空殼、人掛在空殼下） */
+let lastCli: CliSession[] = [] // 最近一次讀到的 ~/.claude/sessions：信箱判斷收件名認不認得
 async function followRename($: EngineInterface) {
+  lastCli = await cliSessions($)
   if (me.id === 'me' || me.oneshot) return
-  const fix = renameFixes(me, await cliSessions($))
+  const fix = renameFixes(me, lastCli)
   if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
 }
 
@@ -747,8 +749,10 @@ async function statusFiles($: EngineInterface): Promise<Record<string, unknown>[
   return out
 }
 
-/** 這個名稱有沒有人用過（ListAgents 名稱或職稱）：沒有 → 多半打錯字，提示模型確認 */
-const knownName = async ($: EngineInterface, name: string) => (await statusFiles($)).some(s => s.agent === name || s.title === name)
+/** 這個名稱認不認得：在線的人、Claude Code 記的現名與舊名（followRename 每 5 秒讀的那份）；都不是 → 多半打錯字，提示模型確認。
+ *  不掃辦公室全部狀態檔（2026-10-31 有 458 個，掃完 SendMessage 的結果早就回了，提示貼不上） */
+const knownName = (name: string) =>
+  name.startsWith('uds:') || [me, ...others].some(c => mailMatches(name, c)) || lastCli.some(c => c.name === name || c.formerNames.includes(name))
 
 /** SendMessage 的收件者 → 信箱收件名：uds 位址查辦公室狀態檔換成名稱（程序重開位址就變），名稱去掉 [ref] */
 async function mailName($: EngineInterface, to: string): Promise<string | undefined> {
@@ -758,7 +762,8 @@ async function mailName($: EngineInterface, to: string): Promise<string | undefi
   return typeof s?.agent === 'string' ? s.agent : typeof s?.title === 'string' ? s.title : undefined
 }
 
-const mailSaved = new Map<string, { name: string; known: boolean }>() // SendMessage 的 to（原字）→ 存進信箱的收件名；一輪可能平行送好幾封
+const mailSaved = new Map<string, boolean>() // 這一輪存進信箱的收件者（mailKey）→ 認不認得這個名稱；一輪可能平行送好幾封
+const mailKey = (to: string) => to.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
 export const mailSavedNote = (to: string, known = true) =>
   `Pixel office saved this message to its mailbox for ${to}: it is delivered when a session named or titled ${to} is next online (within 24 h). No need to resend or write a peer-reply file.` +
   (known ? '' : ` Note: no session in the office has ever used the name or title ${to}; if it may be misspelled, check office_roster and resend to the right name.`)
@@ -1796,12 +1801,12 @@ export const register: Register = on => {
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
   on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
-    const key = String((e as { to?: unknown }).to ?? '')
-    mailSaved.delete(key)
     const ran = await next(e)
-    const saved = mailSaved.get(key)
+    const key = mailKey(String((e as { to?: unknown }).to ?? ''))
+    const known = mailSaved.get(key)
+    if (known === undefined) return ran
     mailSaved.delete(key)
-    return saved && ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(saved.name, saved.known)] } : ran
+    return ran.deny === undefined ? { ...ran, context: [...(ran.context ?? []), mailSavedNote(key.startsWith('uds:') ? 'that recipient' : key, known)] } : ran
   })
 
   // 送不到（對方不在線、程序重開位址變了）→ 存辦公室信箱，對方以同名或同職稱上線時轉交
@@ -1813,12 +1818,16 @@ export const register: Register = on => {
         await showCrew($)
         await publish($, false)
       } else if (e.origin.kind === 'model' && !e.agentId && shouldMail(sent.reason)) { // claude -p 也能留言；轉交才排除 oneshot
+        // 名稱查無時引擎在 hook 之後用自己的字拒收，改 reason 模型看不到：記下來由 SendMessage 的 tool.call 附在 context。
+        // 同步先記，不能等 await：SendMessage 的結果不等這個 hook 跑完（API 實測 2026-10-31：先掃 458 個狀態檔再記，提示就貼不上）
+        const key = mailKey(e.to)
+        mailSaved.set(key, knownName(key))
         const to = await mailName($, e.to)
-        if (to) {
+        if (!to) mailSaved.delete(key)
+        else {
           const now = await $.clock.now()
           const mail: Mail = { from: me.agent ?? me.name, to, text: e.text, at: now, state: 'pending' }
           await $.fs.write(`${await mailDir($)}/${now}-${crypto.randomUUID().slice(0, 8)}.json`, JSON.stringify(mail))
-          mailSaved.set(e.to, { name: to, known: await knownName($, to) }) // 名稱查無時引擎在 hook 之後才拒收、用自己的字，改 reason 模型看不到：由 SendMessage 的 tool.call 附在 context
         }
       }
     } catch {}
