@@ -12,6 +12,7 @@
 | Desktop 畫面長相（素材圖、名牌、泡泡） | `hooks/vector.ts`；素材表由 `assets/build_sheet.py` 產生 `assets/office-sheet.png`＋`hooks/sheet.ts`（不要手改 sheet.ts） |
 | `Coworker` 等型別 | `types/index.d.ts` ← **不在 `hooks/` 裡** |
 | 多 session 協作（分層、派工、開會、小隊） | `skills/team/`（`SKILL.md` 路由，其餘按需讀） |
+| 接手角色一次印完要讀的（卡、身分、撞角色、檢查點、collab 三節） | `scripts/takeover.py`（`--help`） |
 | 開角色視窗（一個角色一個 PowerShell 視窗）、團隊視窗共用的環境變數清單 | `scripts/open_role.py`（`--help`）；預先登記由 `register.tsx` 的 `applyPreset` 套用 |
 | 手機面板（本機 8767） | `remote/server.ts`（獨立 bun 程序，不經 plugin 安裝） |
 | Antigravity CLI（agy）那一半 | `agy/`（本身是 agy 外掛；`agy_office.py` 一支包 hook、MCP、安裝） |

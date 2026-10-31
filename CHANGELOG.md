@@ -7,6 +7,19 @@
 
 ---
 
+## 0.38.0 — 2026-10-31
+
+- **改了什麼**：`scripts/takeover.py <角色>`（新）—— 接手前置一次印完，不寫檔
+  - 角色卡（拿掉註解與 frontmatter）；你的名稱（`CLAUDE_CODE_SESSION_ID` 對 `~/.claude/sessions`），卡有 `office_name` 而不同 → 提醒請使用者 `/rename`
+  - 撞角色：辦公室狀態檔裡別的在線 session 職稱＝角色（或卡的 `office_title`）→ 印 STOP
+  - `office_profile` 那行（`office_name`／`office_title` 優先）；最後一筆檢查點
+  - `collab.md` 只取「主管」「在線」「檔案佔用」三節（標題第一個詞完全相同才算，「主管裁定」不算），引言與分隔列拿掉、每格截 80 字
+  - `skills/team/roles.md` §3 加捷徑一句
+- **為什麼**：jacky 2026-10-31：主管角色每次載入都花很多 tokens，問能不能簡化或用 py 代替。量 GUANGUAN 10-30 接手（transcript）：開場 62.7k → 接手完 73.7k（+11k、輸出 3k），其中 collab.md 前 48 行 5.4k 字元、找 `role_cards.py` 在哪多跑 2 次 Bash（卡指向已凍結的 llm-wiki）
+- **實測**：2026-10-31 在 AEGIVERSE 跑 `takeover.py 主管`：輸出 3,301 字元、一次呼叫（原本讀卡＋Grep＋讀 collab＋2 次找腳本＝5 次）；collab 只印三節，裁定與待辦沒印；卡不存在 → 報錯 exit 1。AEGIVERSE 主管卡接手步驟同日改成只跑這支（vault 那邊的 commit）
+- **commit**：（本版）
+- **issue**：無
+
 ## 0.37.0 — 2026-10-31
 
 - **改了什麼**：`/rename` 之後辦公室跟上（`hooks/register.tsx`，每 5 秒跟 `followSession` 一起跑 `followRename`）
