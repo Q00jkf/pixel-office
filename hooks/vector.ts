@@ -249,10 +249,12 @@ function building(p: Pen, L: ReturnType<typeof layout>, w: number, frame: number
   // 時鐘掛在員工區看得到的那面牆（會議室門與隔牆之間，像範例圖掛在門上方）；最後畫，家具蓋不到；太窄放不下就不掛
   const room = officeX - WALL - (L.meetDoor + MEET_DOOR_W)
   if (room >= 7) {
-    const kx = L.meetDoor + MEET_DOOR_W + (room - 6) / 2
-    p.rect(kx, WALL + TOP_H + 0.1, 6, 1.8, SW.ink, 0.2, SW.slate, 0.2)
-    p.hits.push({ what: 'clock', x: kx, y: WALL + TOP_H + 0.1, w: 6, h: 1.8 })
-    p.glowing(() => p.text(kx + 3, WALL + TOP_H + 1.5, clock, 1.6, p.night ? SW.orange : SW.red, { anchor: 'middle', bold: true, mono: true }))
+    // 比牆厚（2）多掛下來一截，員工區第一排桌子在牆下 4 以外，蓋不到；字用招牌的青色（夜裡黃），不用紅
+    const kw = Math.min(8, room - 1), kh = 2.8, ky = WALL + TOP_H + 0.1
+    const kx = L.meetDoor + MEET_DOOR_W + (room - kw) / 2
+    p.rect(kx, ky, kw, kh, SW.ink, 0.3, SW.silver, 0.35)
+    p.hits.push({ what: 'clock', x: kx, y: ky, w: kw, h: kh })
+    p.glowing(() => p.text(kx + kw / 2, ky + kh * 0.78, clock, kw >= 8 ? 2.4 : 1.9, p.night ? SW.yellow : SW.cyan, { anchor: 'middle', bold: true, mono: true }))
   }
 }
 
