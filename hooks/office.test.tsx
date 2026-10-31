@@ -2687,3 +2687,35 @@ test('a session marked dup is called out on the roster and parsed from its statu
   expect(parseStatus({ id: 'a', name: 'A', mode: 'idle', updatedAt: 0, dup: true }, 0)!.dup).toBe(true)
   expect(parseStatus({ id: 'a', name: 'A', mode: 'idle', updatedAt: 0 }, 0)!.dup).toBeUndefined()
 })
+
+// ---------- 0.40.0：升層時外掛補 collab.md ----------
+
+import { collabSkeleton, officeFor } from './register'
+
+test('office dir: projects.json maps a repo to a relative or absolute dir, otherwise <repo>/.claude/office', () => {
+  expect(officeFor('C:/p/pixel-office', undefined)).toBe('C:/p/pixel-office/.claude/office')
+  expect(officeFor('C:\\p\\pixel-office', { 'c:/P/pixel-office/': 'C:\\p\\studio\\.claude\\office' })).toBe('C:/p/studio/.claude/office')
+  expect(officeFor('C:/p/vault', { 'C:\\p\\vault': '_extras/office' })).toBe('C:/p/vault/_extras/office')
+  expect(officeFor('C:/p/a', { 'C:/p/b': 'x' })).toBe('C:/p/a/.claude/office')
+})
+
+test('collab skeleton has the six lead.md sections and the manager row', () => {
+  const s = collabSkeleton('willy主管', undefined, '2026-10-31 12:00')
+  for (const h of ['# 主管', '# 在線', '# 檔案佔用', '# 待使用者裁示', '# 等外部回覆', '# 衝突紀錄']) expect(s).toContain(`\n${h}\n`.slice(s.startsWith(h) ? 1 : 0))
+  expect(s).toContain('| willy主管 | （待填） | — | 2026-10-31 12:00 |')
+  expect(collabSkeleton('d', 'top', 'x')).toContain('| d | （待填） | top | x |')
+})
+
+test('stepping up writes collab.md only when the office dir exists and collab.md does not', async ($, on) => {
+  const writes: Record<string, string> = {}
+  const exists = new Set(['C:/r/.claude/office'])
+  on('clock.now', () => ({ value: 0 }) as any)
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('session.repo', () => ({ value: { root: 'C:/r', remote: null, internal: false } }) as any)
+  on('fs.exists', (_$, e: any) => ({ value: exists.has(e.path.replace(/\\/g, '/')) }) as any)
+  on('fs.read', () => { throw new Error('missing') })
+  on('fs.write', (_$, e: any) => { writes[e.path.replace(/\\/g, '/')] = e.text; return { value: undefined } as any })
+  const out = await $.tool.call({ tool: 'mcp__pixel-office__office_profile', role: 'manager', agent: 'boss' } as any)
+  expect(JSON.stringify(out)).toContain('created C:/r/.claude/office/collab.md')
+  expect(writes['C:/r/.claude/office/collab.md']).toContain('| boss | （待填） |')
+})

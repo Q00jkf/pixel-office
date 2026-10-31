@@ -560,6 +560,71 @@ async function followRename($: EngineInterface) {
   if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
 }
 
+/** <office> 位置，跟 takeover.py office_dir() 與 skill SKILL.md 同規則：projects.json 有這個主 repo 用它（可相對或絕對），否則 <主 repo>/.claude/office */
+export function officeFor(main: string, projects: unknown): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  const key = norm(main).toLowerCase()
+  if (projects && typeof projects === 'object') {
+    for (const [k, v] of Object.entries(projects as Record<string, unknown>)) {
+      if (typeof v !== 'string' || norm(k).toLowerCase() !== key) continue
+      return /^([a-zA-Z]:)?[\\/]/.test(v) ? norm(v) : `${norm(main)}/${norm(v)}`
+    }
+  }
+  return `${norm(main)}/.claude/office`
+}
+
+/** collab.md 骨架（skills/team/lead.md §2 的六段），主管列先填自己 */
+export function collabSkeleton(manager: string, upper: string | undefined, at: string): string {
+  return [
+    '# 主管',
+    '| 主管（ListAgents 名稱） | 範圍（使用者原話） | 上層 | 上線 |',
+    '|---|---|---|---|',
+    `| ${manager} | （待填） | ${upper ?? '—'} | ${at} |`,
+    '# 在線',
+    '| session | 角色 | 任務 | 上次回報 |',
+    '|---|---|---|---|',
+    '# 檔案佔用',
+    '| 檔案（反引號路徑） | 佔用者 | 起始 YYYY-MM-DD |',
+    '|---|---|---|',
+    '# 待使用者裁示',
+    '| # | 事項（一句） | 細節在哪 | 登記日 |',
+    '|---|---|---|---|',
+    '# 等外部回覆',
+    '| # | 事項 | 等誰（不知道寫「未指明」） | 登記日 |',
+    '|---|---|---|---|',
+    '# 衝突紀錄',
+    '| 時間 | 雙方 | 以誰為準、對方怎麼收尾 |',
+    '|---|---|---|',
+    '',
+  ].join('\n')
+}
+
+async function officeDir($: EngineInterface): Promise<string> {
+  const main = (await $.session.repo().catch(() => null))?.root ?? (await $.session.cwd())
+  const raw = await $.fs.read(`${officeRoot(await sharedDir($)).replace(/\/pixel-office$/, '')}/office/projects.json`).catch(() => undefined)
+  let projects: unknown
+  try {
+    projects = typeof raw === 'string' ? JSON.parse(raw) : undefined
+  } catch {}
+  return officeFor(main, projects)
+}
+
+const localStamp = (ms: number) => {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 升層時補 collab.md：目錄已在、collab.md 不在才寫（jacky 2026-10-31：模型寫 .claude/ 會被權限擋，3 次全失敗）；回給模型看的一句 */
+async function ensureCollab($: EngineInterface, manager: string, upper: string | undefined): Promise<string> {
+  const office = await officeDir($)
+  if (!(await $.fs.exists(office).catch(() => false))) return `collab dir ${office} does not exist yet: create it per skill pixel-office:team, or map this repo in ~/.claude/office/projects.json`
+  const file = `${office}/collab.md`
+  if (await $.fs.exists(file).catch(() => false)) return `${file} exists: read its 主管 section per skill pixel-office:team`
+  await $.fs.write(file, collabSkeleton(manager, upper, localStamp(await $.clock.now())))
+  return `created ${file} (skeleton, you are in 主管; fill your scope there)`
+}
+
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
@@ -983,8 +1048,8 @@ async function applyProfile(
   if (input.role !== undefined) {
     const parsed = parseRole(input.role)
     if (parsed === undefined) return `Unknown role "${input.role}": use manager or staff.`
-    // 升層＝員工改主管：協作資料夾由 skill 建（外掛不寫專案檔）
-    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: create or take over the collab dir per skill pixel-office:team: ~/.claude/office/projects.json, else <main repo>/.claude/office/)`)
+    // 升層＝員工改主管：協作目錄已在就由外掛補 collab.md 骨架（目錄本身仍由 skill 建）
+    if (parsed === 'manager' && me.role !== 'manager') notes.push(`role=${ROLE_LABEL[parsed]} (stepping up: ${await ensureCollab($, agent ?? name, team).catch(e => `could not write collab.md: ${String(e)}`)})`)
     else notes.push(`role=${ROLE_LABEL[parsed]}`)
     role = parsed
   }

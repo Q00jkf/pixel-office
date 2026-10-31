@@ -7,6 +7,16 @@
 
 ---
 
+## 0.40.0 — 2026-10-31
+
+- **改了什麼**：升層時外掛補 `collab.md`
+  - `office_profile(role=manager)` 從員工升主管：算出 `<office>`（`officeFor()`，跟 `takeover.py office_dir()`、SKILL.md 同規則：`~/.claude/office/projects.json` 優先，值可相對或絕對，否則 `<主 repo>/.claude/office`）；目錄已在、`collab.md` 不在 → 寫 lead.md §2 六段骨架，主管列填自己（範圍「（待填）」）。目錄不在或 `collab.md` 已有 → 不寫，回覆照舊提示
+  - `skills/team/lead.md` §1 第 2 步：外掛已建骨架就只填範圍
+  - `scripts/takeover.py`：找不到卡時提示「卡放在別的 repo → projects.json 或 --office」
+- **為什麼**：jacky 2026-10-31：studio 有 `.claude/office/` 卻沒有 `collab.md`，接手的人都當「沒有主管」不報到；卡放在別的 repo 時 takeover 要找得到。API 量測（0.38.0 基準）：模型自己寫 `.claude/office/collab.md` 被擋成敏感路徑，3 次全失敗、加 acceptEdits 也一樣；外掛用 `$.fs` 寫不經權限
+- **實測**：`claude plugin test .` 187 pass（新：office 目錄規則、骨架六段、升層只在目錄在且沒有 collab.md 時寫）
+- **commit**：（本版）
+
 ## 0.39.0 — 2026-10-31
 
 - **改了什麼**：同一份對話開在兩個視窗（`--resume` 接到還開著的對話）抓得到了

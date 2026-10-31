@@ -11,7 +11,7 @@
 使用者說好之後：
 
 1. `office_profile(role=主管)`。
-2. 找 `<office>`（`SKILL.md`）。還沒有就建：`.gitignore`（`collab.md`、`checkpoints/` 兩行）＋ `collab.md`（§2 骨架）；目錄在、`collab.md` 不在（例如只搬過角色卡）→ 補建 `collab.md`，`roles/`、`checkpoints/` 照用；`collab.md` 已經有 → 讀它，看「主管」段：
+2. 找 `<office>`（`SKILL.md`）。目錄在、`collab.md` 不在 → 第 1 步外掛已寫好骨架、主管列是你（回覆會說 created），只要把範圍填進去；目錄還沒有就建：`.gitignore`（`collab.md`、`checkpoints/` 兩行）＋ `collab.md`（§2 骨架）；`collab.md` 已經有 → 讀它，看「主管」段：
    - 範圍跟你重疊的主管還在線（對 `office_roster`）→ **先問使用者**（換人或切範圍）。
    - 已離線的主管列直接刪。
    

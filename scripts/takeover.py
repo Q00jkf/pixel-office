@@ -136,6 +136,8 @@ def main(argv=None):
     card = os.path.join(office, 'roles', f'{a.role}.md')
     if not os.path.isfile(card):
         print(f'No role card: {card}', file=sys.stderr)
+        if not a.office:
+            print('卡放在別的 repo → 在 ~/.claude/office/projects.json 加 {"<這個 repo>": "<那個 repo 的 .claude/office 絕對路徑>"}，或這次帶 --office', file=sys.stderr)
         return 1
     meta, body = front(open(card, encoding='utf-8').read())
     body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()
