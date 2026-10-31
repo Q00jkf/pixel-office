@@ -2719,3 +2719,61 @@ test('stepping up writes collab.md only when the office dir exists and collab.md
   expect(JSON.stringify(out)).toContain('created C:/r/.claude/office/collab.md')
   expect(writes['C:/r/.claude/office/collab.md']).toContain('| boss | （待填） |')
 })
+
+// ---------- 0.41.0：檢查點提醒與下線自動補一筆 ----------
+
+import { CP_REMIND_MS, autoCheckpoint, checkpointDue } from './register'
+
+test('checkpoint reminder: only after work, an hour since the last save, once', () => {
+  expect(checkpointDue(true, 0, CP_REMIND_MS, false)).toBe(true)
+  expect(checkpointDue(false, 0, CP_REMIND_MS, false)).toBe(false) // 沒做事
+  expect(checkpointDue(true, 0, CP_REMIND_MS - 1, false)).toBe(false) // 還不到一小時
+  expect(checkpointDue(true, 0, CP_REMIND_MS, true)).toBe(false) // 這段已提醒
+})
+
+test('the auto checkpoint states only facts: last prompt and how to resume', () => {
+  const s = autoCheckpoint('2026-10-31 12:00', '客製實作', '把長按例外補進', 'sid-1', 'C:/r')
+  expect(s.split('\n')[0]).toBe('## 2026-10-31 12:00 客製實作（自動：下線前沒存）')
+  expect(s).toContain('- 最後指令：把長按例外補進')
+  expect(s).toContain('claude --resume sid-1（在 C:/r）')
+  expect(autoCheckpoint('t', 'x', undefined, 's', 'c')).toContain('（沒有記錄）')
+})
+
+test('session end appends an auto checkpoint for a held role after work, and not when nothing was done', async ($, on) => {
+  const files: Record<string, string> = { 'C:/r/.claude/office/checkpoints/R.md': '# R 檢查點\n\n## 2026-10-30 10:00 x\n- 下一步：a\n' }
+  const exists = new Set(['C:/r/.claude/office', 'C:/r/.claude/office/roles/R.md'])
+  const norm = (p: string) => p.replace(/\\/g, '/')
+  on('clock.now', () => ({ value: 1_000_000 }) as any)
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('session.id', () => ({ value: 'sid-1' }) as any)
+  on('session.cwd', () => ({ value: 'C:/r' }) as any)
+  on('session.repo', () => ({ value: { root: 'C:/r', remote: null, internal: false } }) as any)
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', (_$, e: any) => ({ value: exists.has(norm(e.path)) }) as any)
+  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 0 } }) as any)
+  on('fs.read', (_$, e: any) => {
+    const f = files[norm(e.path)]
+    if (f === undefined) throw new Error('missing')
+    return { value: f }
+  })
+  on('fs.write', (_$, e: any) => {
+    files[norm(e.path)] = e.text
+    return { value: undefined }
+  })
+  on('ui.open', () => ({ value: { isPlaced: true } }) as any)
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.end', () => ({ sessionId: 'sid-1' }) as any)
+  on('tool.call', { tool: 'Read' }, () => ({ result: 'x' }) as any)
+  await ($ as any).session.start({ cwd: 'C:/r', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', title: 'R' } as any)
+  await ($ as any).session.end({})
+  expect(files['C:/r/.claude/office/checkpoints/R.md']).not.toContain('（自動') // 只登記、沒做事：不補
+  await $.tool.call({ tool: 'Read', file_path: 'a.md' } as any).catch(() => undefined)
+  await ($ as any).session.end({})
+  const cp = files['C:/r/.claude/office/checkpoints/R.md']
+  expect(cp).toContain('（自動：下線前沒存）')
+  expect(cp).toContain('claude --resume sid-1')
+  expect(cp.startsWith('# R 檢查點\n\n## 2026-10-30 10:00 x')).toBe(true) // 只往後加
+})

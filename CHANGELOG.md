@@ -7,6 +7,19 @@
 
 ---
 
+## 0.41.0 — 2026-10-31
+
+- **改了什麼**：檢查點由外掛提醒與兜底（只對持有角色的 session：title 對得到 `<office>/roles/<title>.md`；`claude -p` 不算）
+  - 用過工具、距開工或上次存檔滿 60 分鐘 → 下一則指令（使用者或 peer 訊息）附一次提醒（`cpNote`）；存了（檔案 mtime 變新）就重新起算
+  - `/compact`（含自動）→ 摘要指示加一句：保留做完／卡在／下一步（`CP_COMPACT_NOTE`）
+  - 正常結束（`session.end`）而這段做過事沒存 → 外掛往後加一筆 `## <時間> <名稱>（自動：下線前沒存）`：最後指令、`claude --resume <id>（在 <cwd>）`、下一步「先 resume 讀末段或問主管」；不猜做到哪
+  - `scripts/takeover.py`：最後一筆是自動那筆 → 多印一行「先 resume 讀末段」
+  - `skills/team/roles.md` §4 加一段說明
+- **為什麼**：jacky 2026-10-31：角色常不寫檢查點，全員下線後接不上（studio `checkpoints/` 只有主管、需求維護）。根因：只靠 skill 叫模型寫，收工常是直接關視窗；API 量測另發現模型寫 `.claude/` 會被權限擋，外掛 `$.fs` 寫不經權限
+- **限制**：強制結束（關視窗、kill、團隊視窗 terminate）`session.end` 不一定跑，補不到，靠 60 分鐘提醒
+- **實測**：`claude plugin test .` 190 pass（新：提醒條件、自動那筆格式、做過事才補且只往後加）；takeover 對自動那筆印提示
+- **commit**：（本版）
+
 ## 0.40.0 — 2026-10-31
 
 - **改了什麼**：升層時外掛補 `collab.md`

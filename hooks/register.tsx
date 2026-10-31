@@ -625,6 +625,64 @@ async function ensureCollab($: EngineInterface, manager: string, upper: string |
   return `created ${file} (skeleton, you are in 主管; fill your scope there)`
 }
 
+// ---------- 檢查點（jacky 2026-10-31：全員下線後接不上；只靠 skill 叫模型寫，常忘、寫 .claude/ 又會被權限擋） ----------
+export const CP_REMIND_MS = 60 * 60000 // 持有角色、做了事、這麼久沒存 → 下一則指令提醒一次
+export const cpNote = (file: string) =>
+  `Pixel office: you hold a role and have not saved a checkpoint for an hour. At a good stopping point append one entry to ${file} (skill pixel-office:team roles.md §4: done / blocked / next step).`
+export const CP_COMPACT_NOTE = 'Keep in the summary, for the role this session holds: what is done (commits or files), what is blocked, and the next step.'
+
+/** 該不該提醒存檢查點：上次存（或開工）後做過事、滿一小時、這段還沒提醒過 */
+export const checkpointDue = (worked: boolean, base: number, now: number, noted: boolean) => worked && !noted && now - base >= CP_REMIND_MS
+
+/** 下線時外掛代寫的那筆：只寫看得到的事實（最後指令、怎麼接回對話），不猜做到哪 */
+export function autoCheckpoint(at: string, who: string, prompt: string | undefined, sessionId: string, cwd: string): string {
+  return [
+    `## ${at} ${who}（自動：下線前沒存）`,
+    `- 最後指令：${prompt ?? '（沒有記錄）'}`,
+    `- 對話：claude --resume ${sessionId}（在 ${cwd}）`,
+    '- 下一步：先 resume 讀對話末段，或問主管',
+    '',
+  ].join('\n')
+}
+
+let cpCache: { title: string; file?: string } | undefined
+let cpBase = 0 // 開工或上次存檢查點的時間
+let cpWorked = false // cpBase 之後有沒有用過工具
+let cpNoted = false
+
+/** 自己持有的角色的檢查點檔：title 對得到 <office>/roles/<title>.md 才算 */
+async function checkpointFile($: EngineInterface): Promise<string | undefined> {
+  if (me.oneshot || me.id === 'me' || !me.title) return undefined
+  if (cpCache?.title !== me.title) {
+    const office = await officeDir($).catch(() => undefined)
+    const held = office && (await $.fs.exists(`${office}/roles/${me.title}.md`).catch(() => false))
+    cpCache = { title: me.title, file: held ? `${office}/checkpoints/${me.title}.md` : undefined }
+  }
+  return cpCache.file
+}
+
+/** 檔案比 cpBase 新＝剛存過：重新起算 */
+async function syncCheckpoint($: EngineInterface): Promise<string | undefined> {
+  const file = await checkpointFile($)
+  if (!file) return undefined
+  const st = await $.fs.stat(file).catch(() => undefined)
+  if (st && st.mtimeMs > cpBase) {
+    cpBase = st.mtimeMs
+    cpWorked = false
+    cpNoted = false
+  }
+  return file
+}
+
+async function writeAutoCheckpoint($: EngineInterface) {
+  const file = await syncCheckpoint($)
+  if (!file || !cpWorked) return
+  const old = await $.fs.read(file).catch(() => `# ${me.title} 檢查點\n`)
+  const body = typeof old === 'string' ? old : ''
+  const entry = autoCheckpoint(localStamp(await $.clock.now()), me.agent ?? me.name, me.prompt?.text, me.id, await $.session.cwd())
+  await $.fs.write(file, `${body}${body.endsWith('\n') ? '' : '\n'}\n${entry}`)
+}
+
 /** 依 session 編號載入身分（名牌、角色、職稱…）：session.start 一次，/resume、/clear 換了編號再一次 */
 async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
@@ -1535,6 +1593,7 @@ export const register: Register = on => {
     oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
     await applyPreset($).catch(() => undefined)
+    cpBase = await $.clock.now()
     if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
     const savedPet = await $.store.get('pet').catch(() => undefined)
@@ -1702,6 +1761,7 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     // session.start 沒跑完就結束時還沒有 session 編號（仍是預設的 'me'）：不寫，免得留下 me.json 垃圾檔
     if (me.id !== 'me') await publish($, true).catch(() => undefined)
+    await writeAutoCheckpoint($).catch(() => undefined)
 
     return next(e)
   })
@@ -1820,8 +1880,19 @@ export const register: Register = on => {
         }
       }
       await setMode($, 'thinking')
+      if (await syncCheckpoint($) && checkpointDue(cpWorked, cpBase, await $.clock.now(), cpNoted)) {
+        cpNoted = true
+        e = { ...e, context: [...(e.context ?? []), cpNote(cpCache!.file!)] }
+      }
     } catch {}
 
+    return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    try {
+      if (!e.agentId && cpWorked && (await checkpointFile($))) e = { ...e, instructions: [e.instructions, CP_COMPACT_NOTE].filter(Boolean).join('\n') }
+    } catch {}
     return next(e)
   })
 
@@ -1832,6 +1903,7 @@ export const register: Register = on => {
     } catch {}
     const ran = await next(e)
     settle(e)
+    if (!e.agentId) cpWorked = true
     try {
       const r = ran as { deny?: string; isError?: boolean; text?: string }
       if (classifierBlocked(r)) {

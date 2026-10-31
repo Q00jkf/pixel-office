@@ -162,6 +162,8 @@ def main(argv=None):
     cp = last_checkpoint(os.path.join(office, 'checkpoints', f'{a.role}.md'))
     print('\n# 上次檢查點')
     print(cut(cp, 1500) if cp else '（沒有）')
+    if cp and '（自動：下線前沒存）' in cp.splitlines()[0]:
+        print('→ 上一位沒存檢查點，這筆是外掛代寫的：先照「對話」那行 resume 讀末段，或問主管，再開工')
     digest = collab_digest(os.path.join(office, 'collab.md'))
     print(f'\n# collab.md 摘要（{os.path.join(office, "collab.md")}；只列{"／".join(KEEP)}，其他節用到才查）')
     print(digest if digest else '（沒有 collab.md）')
