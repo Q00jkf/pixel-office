@@ -9,6 +9,7 @@
 - 登記辦公室那一行（office_profile 的參數；卡的 office_name／office_title 優先）
 - 最後一筆檢查點
 - collab.md 只取「主管」「在線」「檔案佔用」三節，引言拿掉、長欄位截短；其他節用到才查
+- 接手主管時多印「待處理」：在線表、佔用表裡 [ref] 已不在線的列，佔用起始超過 STALE_D 天的列
 改 collab.md 的主管列、在線列仍由模型用檔案工具做（各專案格式不同，腳本不碰）
 """
 import argparse
@@ -26,6 +27,9 @@ from open_role import live_sessions  # noqa: E402
 KEEP = ('主管', '在線', '檔案佔用')
 CELL = 80          # collab 表格每格最多字數
 ONLINE_S = 120     # 辦公室狀態檔多久沒更新算離線（秒）
+STALE_D = 7        # 檔案佔用起始超過幾天提醒
+REF = re.compile(r'\[([0-9a-f]{6})\]')
+DATE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
 
 
 def office_dir(cwd):
@@ -67,8 +71,8 @@ def my_session():
     return {'sessionId': sid}
 
 
-def holders(role, me):
-    """辦公室裡在線、職稱＝角色、不是自己的人"""
+def live():
+    """辦公室裡在線的人（狀態檔 ONLINE_S 內更新過、沒標離開）"""
     out = []
     now = time.time() * 1000
     for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'pixel-office', 'sessions', '*.json')):
@@ -77,10 +81,15 @@ def holders(role, me):
                 s = json.load(f)
         except (OSError, ValueError):
             continue
-        fresh = isinstance(s.get('updatedAt'), (int, float)) and now - s['updatedAt'] < ONLINE_S * 1000
-        if s.get('title') == role and s.get('id') != me and fresh and not s.get('left'):
-            out.append(s.get('agent') or s.get('name') or s.get('id', '')[:8])
+        if isinstance(s.get('updatedAt'), (int, float)) and now - s['updatedAt'] < ONLINE_S * 1000 and not s.get('left'):
+            out.append(s)
     return out
+
+
+def holders(role, me):
+    """辦公室裡在線、職稱＝角色、不是自己的人"""
+    return [s.get('agent') or s.get('name') or s.get('id', '')[:8]
+            for s in live() if s.get('title') == role and s.get('id') != me]
 
 
 def last_checkpoint(path):
@@ -120,6 +129,39 @@ def collab_digest(path):
         else:
             out.append(cut(line.replace('**', ''), 200))
     return '\n'.join(out)
+
+
+def collab_todo(path, refs, today):
+    """在線表、佔用表裡該清的列：[ref] 都不在線、佔用起始超過 STALE_D 天。沒寫 [ref] 的列不判"""
+    try:
+        _, body = front(open(path, encoding='utf-8').read())
+    except OSError:
+        return []
+    out, sec = [], None
+    for line in body.splitlines():
+        h = re.match(r'#\s+(.+?)\s*$', line)
+        if h:
+            sec = re.split(r'[\s（(]', h.group(1))[0]
+            continue
+        if sec not in ('在線', '檔案佔用') or not line.lstrip().startswith('|'):
+            continue
+        cells = [c.replace('**', '').strip() for c in line.strip().strip('|').split('|')]
+        who = cells[0] if sec == '在線' else (cells[1] if len(cells) > 1 else '')
+        gone = REF.findall(who) and not set(REF.findall(who)) & refs
+        if sec == '在線':
+            if gone:
+                out.append(f'在線表「{cut(who, 40)}」已不在線 → 刪列')
+            continue
+        d = DATE.search(cells[-1])
+        days = (today - time.mktime((int(d[1]), int(d[2]), int(d[3]), 0, 0, 0, 0, 0, -1))) // 86400 if d else 0
+        why = '佔用者不在線' if gone else ''
+        if days > STALE_D:
+            why += ('、' if why else '') + f'起始 {d[0]} 已 {int(days)} 天'
+        if why:
+            out.append(f'佔用「{cut(cells[0], 40)}」← {cut(who, 40)}：{why}')
+    if out:
+        out.append('→ 前任主管名下的佔用改成自己；別人的先問使用者（名稱消失不等於棄坑）')
+    return out
 
 
 def main(argv=None):
@@ -167,6 +209,11 @@ def main(argv=None):
     digest = collab_digest(os.path.join(office, 'collab.md'))
     print(f'\n# collab.md 摘要（{os.path.join(office, "collab.md")}；只列{"／".join(KEEP)}，其他節用到才查）')
     print(digest if digest else '（沒有 collab.md）')
+    if a.role == '主管' or meta.get('role') == '主管':
+        todo = collab_todo(os.path.join(office, 'collab.md'), {s['ref'] for s in live() if s.get('ref')}, time.time())
+        if todo:
+            print('\n# 待處理（只有主管改 collab）')
+            print('\n'.join(todo))
     return 0
 
 
