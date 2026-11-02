@@ -13,6 +13,7 @@
 | `Coworker` 等型別 | `types/index.d.ts` ← **不在 `hooks/` 裡** |
 | 多 session 協作（分層、派工、開會、小隊） | `skills/team/`（`SKILL.md` 路由，其餘按需讀） |
 | 接手角色一次印完要讀的（卡、身分、撞角色、檢查點、collab 三節） | `scripts/takeover.py`（`--help`） |
+| 找整台電腦建過的角色卡 | `scripts/roles.py`（`--help`） |
 | 開角色視窗（一個角色一個 PowerShell 視窗）、團隊視窗共用的環境變數清單 | `scripts/open_role.py`（`--help`）；預先登記由 `register.tsx` 的 `applyPreset` 套用 |
 | 團隊視窗（一個團隊一個視窗、每個角色一個分頁，pywebview＋pywinpty，只有 Windows） | `team-window/team_window.py`（後端）、`team-window/web/index.html`（畫面）；設定 `team.json` 不進 git，範例 `team.example.json` |
 | 手機面板（本機 8767） | `remote/server.ts`（獨立 bun 程序，不經 plugin 安裝） |

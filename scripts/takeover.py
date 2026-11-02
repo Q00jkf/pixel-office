@@ -32,8 +32,8 @@ REF = re.compile(r'\[([0-9a-f]{6})\]')
 DATE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
 
 
-def office_dir(cwd):
-    """跟 team skill 的 <office> 同規則：projects.json 有設定用它，否則 <主 repo>/.claude/office"""
+def project_office(cwd):
+    """(<主 repo>, <office>)，跟 team skill 同規則：projects.json 有設定用它，否則 <主 repo>/.claude/office"""
     try:
         r = subprocess.run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=cwd,
                            capture_output=True, text=True, timeout=5)
@@ -44,10 +44,14 @@ def office_dir(cwd):
         with open(os.path.join(os.path.expanduser('~'), '.claude', 'office', 'projects.json'), encoding='utf-8') as f:
             for k, v in json.load(f).items():
                 if os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(main)):
-                    return os.path.normpath(os.path.join(main, v))
+                    return main, os.path.normpath(os.path.join(main, v))
     except (OSError, ValueError, AttributeError):
         pass
-    return os.path.join(main, '.claude', 'office')
+    return main, os.path.join(main, '.claude', 'office')
+
+
+def office_dir(cwd):
+    return project_office(cwd)[1]
 
 
 def front(text):
@@ -176,10 +180,20 @@ def main(argv=None):
 
     office = a.office or office_dir(a.cwd)
     card = os.path.join(office, 'roles', f'{a.role}.md')
+    if not os.path.isfile(card) and not a.office:
+        from roles import find  # roles.py 反過來 import 本檔，放這裡免得循環
+        hits = find(a.role)
+        if len(hits) == 1:
+            card = hits[0]['card']
+            office = os.path.dirname(os.path.dirname(card))
+            print(f'（本專案沒有這張卡，用別處的：{card}；啟動位置 {hits[0]["start"] or "依派工單"}）')
+        elif hits:
+            print(f'STOP：別處有 {len(hits)} 張同名卡 → 問使用者用哪張，再帶 --office 重跑', file=sys.stderr)
+            for r in hits:
+                print(f'  {r["card"]}', file=sys.stderr)
+            return 2
     if not os.path.isfile(card):
-        print(f'No role card: {card}', file=sys.stderr)
-        if not a.office:
-            print('卡放在別的 repo → 在 ~/.claude/office/projects.json 加 {"<這個 repo>": "<那個 repo 的 .claude/office 絕對路徑>"}，或這次帶 --office', file=sys.stderr)
+        print(f'No role card: {card}（整台電腦也沒有；全部角色：python roles.py）', file=sys.stderr)
         return 1
     meta, body = front(open(card, encoding='utf-8').read())
     body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()

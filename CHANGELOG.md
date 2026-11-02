@@ -7,6 +7,13 @@
 
 ---
 
+## 0.46.0 — 2026-11-02
+
+- **改了什麼**：新增 `scripts/roles.py`，列整台電腦建過的角色卡（`~/.claude.json` 的 projects 換算 `<office>`＋`projects.json`＋小隊；跳過系統暫存夾），`<關鍵字>` 篩、`--path <角色>` 只印路徑。`takeover.py` 本專案沒卡時自動用它（同名多張印 STOP），`office_dir` 拆出 `project_office` 共用。`skills/team/roles.md` §3 第 1 步「卡在別的專案」改指這支（原為手動 glob 上層資料夾，該句先前未 commit）
+- **為什麼**：使用者 2026-11-02 要主管開 AS9100pro，卡已搬到 QA-QC，本專案找不到；「我們很有可能會需要搜索電腦中全部建立的腳色」
+- **實測**：`roles.py` 列出 21 張（LLM-Wiki-AEGIVERSE 6、wiki-studio 11、QA-QC 1、開發小隊 3），約 3 秒；`takeover.py` 測別專案（AS9100pro）、小隊（實作）、整台都沒有（exit 1）、本專案優先（主管）四種。bun 測試不涵蓋 scripts/，未跑
+- **commit**：（本版）
+
 ## 0.45.0 — 2026-11-02
 
 - **改了什麼**：`scripts/takeover.py` 接手主管時多印「# 待處理」：collab 在線表、佔用表裡 `[ref]` 都不在線的列，佔用起始超過 7 天的列；非主管角色不印。抽出 `live()` 給 `holders()` 共用
