@@ -65,7 +65,7 @@ def live_sessions(session_id):
 
 def sessions_named(name, cwd, since_ms=0):
     """在線、--name 與資料夾都相同的程序：[(pid, sessionId, startedAt)]。/clear 會讓同一個程序換 session 編號，
-    只比編號就抓不到「同一個角色又開了一份」（2026-11-04 34精簡回測實測：team json 記 5b0e6c1e，程序已是 3d5446f6）"""
+    只比編號就抓不到「同一個角色又開了一份」（2026-11-04 實測：team json 記 5b0e6c1e，程序已是 3d5446f6）"""
     want = os.path.normcase(os.path.abspath(cwd))
     out = []
     for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):

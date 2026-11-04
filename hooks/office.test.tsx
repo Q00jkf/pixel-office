@@ -2840,7 +2840,7 @@ import { ctxText, heldRole } from './register'
 test('heldRole：agent 優先，title 被改成任務名也找得到卡', async () => {
   const cards = new Set(['willy設計', '主管'])
   const has = async (n: string) => cards.has(n)
-  expect(await heldRole(['willy設計', '#31 找原檔'], has)).toBe('willy設計')
+  expect(await heldRole(['willy設計', '找原檔'], has)).toBe('willy設計')
   expect(await heldRole(['程式碼整理能力評估', '主管'], has)).toBe('主管') // agent 不是卡名、title 是
   expect(await heldRole(['x', 'y'], has)).toBeUndefined()
   expect(await heldRole([undefined, undefined], has)).toBeUndefined()
