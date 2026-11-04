@@ -63,6 +63,23 @@ def live_sessions(session_id):
     return out
 
 
+def sessions_named(name, cwd, since_ms=0):
+    """在線、--name 與資料夾都相同的程序：[(pid, sessionId, startedAt)]。/clear 會讓同一個程序換 session 編號，
+    只比編號就抓不到「同一個角色又開了一份」（2026-11-04 34精簡回測實測：team json 記 5b0e6c1e，程序已是 3d5446f6）"""
+    want = os.path.normcase(os.path.abspath(cwd))
+    out = []
+    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+        try:
+            with open(p, encoding='utf-8') as f:
+                j = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if (j.get('name') == name and isinstance(j.get('pid'), int) and j.get('sessionId') and os.path.normcase(os.path.abspath(j.get('cwd') or '')) == want
+                and (j.get('startedAt') or 0) >= since_ms and pid_alive(j['pid'])):
+            out.append((j['pid'], j['sessionId'], j.get('startedAt') or 0))
+    return out
+
+
 def preset_file(session_id):
     return os.path.join(os.path.expanduser('~'), '.claude', 'pixel-office', 'presets', f'{session_id}.json')
 

@@ -487,12 +487,12 @@ export function mergeProfile(saved: Profile | undefined, own: Profile | undefine
   return out as Profile
 }
 
-async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean }) | undefined> {
+async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean; compacts?: number }) | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), titleAuto: s.titleAuto === true ? true : undefined, titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined, auto: s.auto === true ? true : undefined, team: str(s.team), instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), titleAuto: s.titleAuto === true ? true : undefined, titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined, auto: s.auto === true ? true : undefined, team: str(s.team), compacts: typeof s.compacts === 'number' && s.compacts > 0 ? s.compacts : undefined, instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
   } catch {
     return undefined
   }
@@ -649,18 +649,25 @@ export function autoCheckpoint(at: string, who: string, prompt: string | undefin
   ].join('\n')
 }
 
-let cpCache: { title: string; file?: string } | undefined
+let cpCache: { key: string; file?: string } | undefined
 let cpBase = 0 // 開工或上次存檢查點的時間
 let cpWorked = false // cpBase 之後有沒有用過工具
 let cpNoted = false
 
-/** 自己持有的角色的檢查點檔：title 對得到 <office>/roles/<title>.md 才算 */
+/** 這個 session 持有哪張角色卡：agent（ListAgents 名稱）或 title 任一個對得到 roles/<名>.md；agent 優先（title 常被改成任務名） */
+export async function heldRole(names: (string | undefined)[], exists: (name: string) => Promise<boolean>): Promise<string | undefined> {
+  for (const n of names) if (n && (await exists(n).catch(() => false))) return n
+  return undefined
+}
+
+/** 自己持有的角色的檢查點檔；找到過就記住，之後 title 怎麼改都不丟（只有 agent／title 換了又找不到時才沿用舊的） */
 async function checkpointFile($: EngineInterface): Promise<string | undefined> {
-  if (me.oneshot || me.id === 'me' || !me.title) return undefined
-  if (cpCache?.title !== me.title) {
+  if (me.oneshot || me.id === 'me' || (!me.title && !me.agent)) return undefined
+  const key = `${me.agent ?? ''}|${me.title ?? ''}`
+  if (cpCache?.key !== key) {
     const office = await officeDir($).catch(() => undefined)
-    const held = office && (await $.fs.exists(`${office}/roles/${me.title}.md`).catch(() => false))
-    cpCache = { title: me.title, file: held ? `${office}/checkpoints/${me.title}.md` : undefined }
+    const role = office ? await heldRole([me.agent, me.title], n => $.fs.exists(`${office}/roles/${n}.md`)) : undefined
+    cpCache = { key, file: role ? `${office}/checkpoints/${role}.md` : cpCache?.file }
   }
   return cpCache.file
 }
@@ -816,6 +823,7 @@ async function adopt($: EngineInterface, id: string) {
   if (clash) warnCollision($)
   const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
   const saved = mergeProfile(stored, own)
+  if (own?.compacts) me = { ...me, compacts: own.compacts } // 壓縮次數接著算（resume 不歸零）
   fresh = !saved
   if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
   if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
@@ -872,7 +880,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -970,6 +978,10 @@ function doingText(c: Coworker, now: number): string {
   return c.lastError && now - c.lastError.at < ERROR_SHOWN_MS ? `${base} · last error ${Math.round((now - c.lastError.at) / 60000)} min ago: ${c.lastError.text}` : base
 }
 
+/** 名單的 ctx 欄：「62%」或「62% ·壓縮 2」；都沒有 — */
+export const ctxText = (c: Pick<Coworker, 'ctxPct' | 'compacts'>): string =>
+  c.ctxPct === undefined && !c.compacts ? '—' : `${c.ctxPct === undefined ? '?' : `${c.ctxPct}%`}${c.compacts ? ` ·compacted ${c.compacts}` : ''}`
+
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
 export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = []): string {
   const extra = oneshot.length > 0 ? `\nOne-shot conversations (claude -p, not listed): ${oneshotText(oneshot)}` : ''
@@ -980,7 +992,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const doing = doingText(c, now) + (stale ? ` · latest prompt "${c.prompt!.text}"` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (auto)` : stale ? `${c.title} (set ${Math.round((now - c.titleAt!) / 60000)} min ago)` : c.title
     const agent = c.kind === 'agy' ? `Antigravity: \`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <your name>\` (delivered on its next action)` : c.agent ?? (c.addr ? `(no name) SendMessage with \`to=${c.addr}\`` : '(not registered, messages cannot reach it)')
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const asking = sorted.filter(c => c.approval && now < c.approval.deadline)
@@ -991,8 +1003,8 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     ...(blockedNames.length > 0 ? [`🔴 Blocked: ${blockedNames.join(', ')} (the user must say "allow" in each window; relaying from another session does not work)`] : []),
     ...clashNotes(sorted),
     ...sorted.filter(c => c.dup).map(c => `🔴 ${c.agent ?? c.name}: the same conversation is open in two windows (claude --resume of one session); they overwrite each other and look like one person here. Ask the user to close one.`),
-    '| Name | Title | Role | ListAgents name (for SendMessage) | ref | Now |',
-    '|---|---|---|---|---|---|',
+    '| Name | Title | Role | ListAgents name (for SendMessage) | ref | ctx | Now |',
+    '|---|---|---|---|---|---|---|',
   ]
   return [...head, ...rows].join('\n') + extra
 }
@@ -1124,6 +1136,12 @@ async function refresh($: EngineInterface) {
   if (me.office && approveOn) await readApprovals($, d, now)
   await takeCommand($, d, now)
   await showCrew($)
+}
+
+/** 目前 context 佔比（整數 0-100）；還沒有回應或讀不到回 undefined */
+async function contextPct($: EngineInterface): Promise<number | undefined> {
+  const p = (await $.session.usage().catch(() => undefined))?.context.percent
+  return typeof p === 'number' ? Math.round(p) : undefined
 }
 
 async function setMode($: EngineInterface, next: OfficeMode, name?: string) {
@@ -2030,6 +2048,7 @@ export const register: Register = on => {
 
   on('session.compact', async ($, e, next) => {
     try {
+      if (!e.agentId) me = { ...me, compacts: (me.compacts ?? 0) + 1, ctxPct: undefined } // 壓縮完要等下一次回應才有新的佔比
       if (!e.agentId && cpWorked && (await checkpointFile($))) e = { ...e, instructions: [e.instructions, CP_COMPACT_NOTE].filter(Boolean).join('\n') }
     } catch {}
     return next(e)
@@ -2067,6 +2086,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId && e.answer) void saveReply($, e.answer).catch(() => undefined)
     try {
+      if (!e.agentId) me = { ...me, ctxPct: await contextPct($) }
       await setMode($, 'done')
       revertLater($, 5000, 'idle')
     } catch {}

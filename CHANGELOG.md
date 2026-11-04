@@ -7,6 +7,17 @@
 
 ---
 
+## 0.47.0 — 2026-11-04
+
+- **改了什麼**
+  - ① 檢查點的角色對照：`agent`（ListAgents 名稱）或 `title` 任一個對得到 `roles/<名>.md` 就算（agent 優先），找到的角色名快取，之後 title 怎麼改都不丟（`heldRole`、`checkpointFile`）。原本只看 `title`
+  - ③ 團隊視窗擋重複分頁：除了比 session 編號，也比「同 `--name`＋同資料夾的在線程序」（`open_role.py` 新增 `sessions_named`）；分頁開著時每 5 秒看程序現在的 session 編號，變了（對話裡下 `/clear`）就寫回 team json 的 `id`，下次 `--resume` 接最新那段
+  - ④ 名單加 `ctx` 欄：目前 context 佔比（`$.session.usage()`，每輪結束取）與壓縮次數（`session.compact` 計數，寫在狀態檔、resume 接著算）；`Coworker` 加 `ctxPct`、`compacts`，`parseStatus` 讀得到。不顯示累計 token
+- **為什麼**：主管派工、jacky 2026-11-04「做這三件」。① 2026-11-04 讀 6 個角色 session 狀態檔：2 個 title 被改成任務名（「收工」「#31 找原檔」），`checkpointFile` 回 undefined，提醒與下線代寫全跳過，agent 欄位卻對得到卡。③ 34精簡回測 的 team json 記 `5b0e6c1e`，程序 `/clear` 後已是 `3d5446f6`，`live_sessions(id)` 比不到。④ 累計 token 多半是快取讀取（#32 一次整理約 55 萬），佔比才決定要不要壓縮
+- **不做**：每輪代寫檢查點、桌面進度條（jacky：等 ① 跑一陣子再看）
+- **實測**：`claude plugin test .` 196 pass（新增 2 個：`heldRole`、`ctxText` 與名單）；`bun test remote` 5 pass；`sessions_named` 對在線的 office設計 session：同名同資料夾找得到（正反斜線、大小寫不同也行）、別的資料夾與 `since` 在未來都回空。團隊視窗分頁行為（擋第二份、寫回新編號）與真視窗的 ctx 欄沒有自動化測試，待本機安裝後實測
+- **commit**：（本版）
+
 ## 0.46.0 — 2026-11-02
 
 - **改了什麼**：新增 `scripts/roles.py`，列整台電腦建過的角色卡（`~/.claude.json` 的 projects 換算 `<office>`＋`projects.json`＋小隊；跳過系統暫存夾），`<關鍵字>` 篩、`--path <角色>` 只印路徑。`takeover.py` 本專案沒卡時自動用它（同名多張印 STOP），`office_dir` 拆出 `project_office` 共用。`skills/team/roles.md` §3 第 1 步「卡在別的專案」改指這支（原為手動 glob 上層資料夾，該句先前未 commit）

@@ -2833,3 +2833,27 @@ test('the mailbox note tells the model not to resend or write a peer-reply file'
   expect(mailSavedNote('r')).not.toContain('misspelled')
   expect(mailSavedNote('后端', false)).toContain('misspelled') // 沒人用過的名稱：提示可能打錯
 })
+
+// ---- 0.47.0：檢查點角色對照、名單 ctx 欄 ----
+import { ctxText, heldRole } from './register'
+
+test('heldRole：agent 優先，title 被改成任務名也找得到卡', async () => {
+  const cards = new Set(['willy設計', '主管'])
+  const has = async (n: string) => cards.has(n)
+  expect(await heldRole(['willy設計', '#31 找原檔'], has)).toBe('willy設計')
+  expect(await heldRole(['程式碼整理能力評估', '主管'], has)).toBe('主管') // agent 不是卡名、title 是
+  expect(await heldRole(['x', 'y'], has)).toBeUndefined()
+  expect(await heldRole([undefined, undefined], has)).toBeUndefined()
+  expect(await heldRole(['a'], async () => { throw new Error('io') })).toBeUndefined() // 讀失敗當沒有
+})
+
+test('ctxText 與名單 ctx 欄', () => {
+  expect(ctxText({})).toBe('—')
+  expect(ctxText({ ctxPct: 62 })).toBe('62%')
+  expect(ctxText({ ctxPct: 8, compacts: 2 })).toBe('8% ·compacted 2')
+  expect(ctxText({ compacts: 1 })).toBe('? ·compacted 1') // 剛壓縮完、還沒有新回應
+  const out = roster([{ ...P('a', 'A'), ctxPct: 71, compacts: 1 }, P('b', 'B')], 0)
+  expect(out).toContain('| ctx |')
+  expect(out).toContain('71% ·compacted 1')
+  expect(out.split('\n').find(l => l.startsWith('| B '))).toContain('| — |')
+})

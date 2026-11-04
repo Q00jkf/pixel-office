@@ -56,6 +56,11 @@ try:
 except ImportError:
     def live_sessions(session_id):
         return []
+try:
+    from open_role import sessions_named  # 外掛 0.47.0 起
+except ImportError:
+    def sessions_named(name, cwd, since_ms=0):
+        return []
 # 主畫面輸入框底下的提示；信任資料夾、MCP 核准等詢問畫面沒有這兩句
 READY = ('shift+tabtocycle', 'forshortcuts')
 ANSI = re.compile(r'\x1b\[[0-9;?<>=]*[a-zA-Z~]|\x1b\][^\x07]*\x07|\x1b[=>()][B0]?|\s')
@@ -235,6 +240,8 @@ def alive(pid):
 
 
 class Tab:
+    save = None  # Api 設：把 team json 存回去
+
     def __init__(self, agent, cwd):
         self.agent, self.cwd = agent, agent.get('cwd') or cwd
         self.proc = None
@@ -254,6 +261,9 @@ class Tab:
     def start(self, cols, rows):
         # 同一份對話已在別處開著還 --resume → 兩個程序共用一個 session，辦公室只看得到一個、撞角色抓不到（2026-10-31 客製實作）
         twins = live_sessions(self.agent['id']) if has_transcript(self.agent['id']) else []
+        # 編號比不到時再比「同名同資料夾」：該程序 /clear 後編號已換，team json 還記舊的
+        mine = {p for p, _ in twins}
+        twins += [(p, self.agent['name']) for p, sid, _ in sessions_named(self.agent['name'], self.cwd) if p not in mine] if has_transcript(self.agent['id']) else []
         if twins:
             where = '、'.join(f"{n or '?'}（pid {p}，~/.claude/sessions/{p}.json）" for p, n in twins)
             with self.lock:
@@ -263,6 +273,23 @@ class Tab:
         env = child_env()
         self.proc = PtyProcess.spawn(self.argv(), cwd=self.cwd, env=env, dimensions=(rows, cols))
         threading.Thread(target=self._pump, daemon=True).start()
+        threading.Thread(target=self._follow_id, args=(int(time.time() * 1000) - 2000,), daemon=True).start()
+
+    def _follow_id(self, since_ms):
+        """對話裡下 /clear 會換 session 編號：把新編號寫回 team json，下次 --resume 接最新那段（不然再開一個分頁就接到舊的）"""
+        while self.proc is not None and self.proc.isalive() and not self.removed:
+            time.sleep(5)
+            try:
+                now = sessions_named(self.agent['name'], self.cwd, since_ms)
+            except Exception:
+                continue
+            if len(now) == 1 and now[0][1] != self.agent['id'] and has_transcript(now[0][1]):
+                self.agent['id'] = now[0][1]
+                if Tab.save:
+                    try:
+                        Tab.save()
+                    except OSError:
+                        pass
 
     def _pump(self):
         while True:
@@ -314,6 +341,7 @@ class Api:
         self._cwd = cwd
         self._project = os.path.abspath(os.path.join(os.path.dirname(CFG), team.get('project') or cwd))
         self._tabs = [Tab(a, cwd) for a in team['agents']]
+        Tab.save = lambda: save_team(self._team)
         self._window = None
         self._add_lock = threading.Lock()
         self._closed = False
