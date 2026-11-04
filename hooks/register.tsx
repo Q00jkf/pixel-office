@@ -487,12 +487,12 @@ export function mergeProfile(saved: Profile | undefined, own: Profile | undefine
   return out as Profile
 }
 
-async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean; compacts?: number }) | undefined> {
+async function readOwnStatus($: EngineInterface, id: string): Promise<(Profile & { instance?: string; updatedAt?: number; left?: boolean; compacts?: number; newTokens?: number }) | undefined> {
   try {
     const raw = await $.fs.read(`${await sharedDir($)}/${id}.json`)
     const s = JSON.parse(typeof raw === 'string' ? raw : '{}')
     const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined)
-    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), titleAuto: s.titleAuto === true ? true : undefined, titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined, auto: s.auto === true ? true : undefined, team: str(s.team), compacts: typeof s.compacts === 'number' && s.compacts > 0 ? s.compacts : undefined, instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
+    return { role: s.role === 'manager' || s.role === 'staff' ? s.role : undefined, name: str(s.name), agent: str(s.agent), ref: str(s.ref), title: str(s.title), titleAuto: s.titleAuto === true ? true : undefined, titleAt: typeof s.titleAt === 'number' ? s.titleAt : undefined, auto: s.auto === true ? true : undefined, team: str(s.team), compacts: typeof s.compacts === 'number' && s.compacts > 0 ? s.compacts : undefined, newTokens: typeof s.newTokens === 'number' && s.newTokens > 0 ? s.newTokens : undefined, instance: str(s.instance), updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : undefined, left: s.left === true }
   } catch {
     return undefined
   }
@@ -824,6 +824,7 @@ async function adopt($: EngineInterface, id: string) {
   const own = clash ? undefined : ownRaw // 撞號時不繼承另一個視窗的設定（例：拿到別人的「協作主管」職稱）
   const saved = mergeProfile(stored, own)
   if (own?.compacts) me = { ...me, compacts: own.compacts } // 壓縮次數接著算（resume 不歸零）
+  if (own?.newTokens) me = { ...me, newTokens: own.newTokens } // 換檔（/clear）前先沿用，下一次加總會換成新檔的
   fresh = !saved
   if (saved?.role === 'manager' || saved?.role === 'staff') me = { ...me, role: saved.role }
   if (typeof saved?.name === 'string' && validName(saved.name)) me = { ...me, name: saved.name }
@@ -880,7 +881,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, newTokens: me.newTokens, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -983,16 +984,16 @@ export const ctxText = (c: Pick<Coworker, 'ctxPct' | 'compacts'>): string =>
   c.ctxPct === undefined && !c.compacts ? '—' : `${c.ctxPct === undefined ? '?' : `${c.ctxPct}%`}${c.compacts ? ` ·compacted ${c.compacts}` : ''}`
 
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
-export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = []): string {
+export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = [], sortBy?: 'tokens'): string {
   const extra = oneshot.length > 0 ? `\nOne-shot conversations (claude -p, not listed): ${oneshotText(oneshot)}` : ''
   if (list.length === 0) return `Nobody in the office right now.${extra}`
-  const sorted = [...list].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
+  const sorted = [...list].sort(sortBy === 'tokens' ? (a, b) => (b.newTokens ?? -1) - (a.newTokens ?? -1) || a.name.localeCompare(b.name) : (a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
   const rows = sorted.map(c => {
     const stale = titleStale(c)
     const doing = doingText(c, now) + (stale ? ` · latest prompt "${c.prompt!.text}"` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (auto)` : stale ? `${c.title} (set ${Math.round((now - c.titleAt!) / 60000)} min ago)` : c.title
     const agent = c.kind === 'agy' ? `Antigravity: \`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <your name>\` (delivered on its next action)` : c.agent ?? (c.addr ? `(no name) SendMessage with \`to=${c.addr}\`` : '(not registered, messages cannot reach it)')
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${fmtTokens(c.newTokens)} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const asking = sorted.filter(c => c.approval && now < c.approval.deadline)
@@ -1003,8 +1004,8 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     ...(blockedNames.length > 0 ? [`🔴 Blocked: ${blockedNames.join(', ')} (the user must say "allow" in each window; relaying from another session does not work)`] : []),
     ...clashNotes(sorted),
     ...sorted.filter(c => c.dup).map(c => `🔴 ${c.agent ?? c.name}: the same conversation is open in two windows (claude --resume of one session); they overwrite each other and look like one person here. Ask the user to close one.`),
-    '| Name | Title | Role | ListAgents name (for SendMessage) | ref | ctx | Now |',
-    '|---|---|---|---|---|---|---|',
+    '| Name | Title | Role | ListAgents name (for SendMessage) | ref | ctx | new tok | Now |',
+    '|---|---|---|---|---|---|---|---|',
   ]
   return [...head, ...rows].join('\n') + extra
 }
@@ -1136,6 +1137,51 @@ async function refresh($: EngineInterface) {
   if (me.office && approveOn) await readApprovals($, d, now)
   await takeCommand($, d, now)
   await showCrew($)
+}
+
+// ---------- 累計 token（jacky 2026-11-04：要看誰最花 tokens 好優化；訂閱制，只看數量不看錢） ----------
+/** 對話檔（jsonl）裡每則回應的 usage 加總「新 token」＝未快取輸入＋寫入快取＋輸出；快取讀取不算（佔 96% 以上、很便宜，算進去只會變成誰回合多誰第一）。同一則回應可能記好幾行，依訊息 id 去重、後面的蓋前面的 */
+export function sumNewTokens(jsonl: string): number {
+  const byId = new Map<string, number>()
+  for (const line of jsonl.split('\n')) {
+    if (!line.includes('"usage"')) continue
+    try {
+      const j = JSON.parse(line)
+      const u = j?.message?.usage
+      if (j?.type !== 'assistant' || !u || j.isSidechain === true) continue
+      byId.set(String(j.message.id ?? j.uuid), (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0))
+    } catch {}
+  }
+  let n = 0
+  for (const v of byId.values()) n += v
+  return n
+}
+
+/** 專案資料夾名＝資料夾路徑的每個非英數字元換成 -（中文一字一個） */
+export const projectDirName = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '-')
+
+/** 名單用的短寫：882k、1.2M；沒有值 — */
+export const fmtTokens = (n: number | undefined): string => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n))
+
+const TOK_EVERY_MS = 60000 // 對話檔動輒數十 MB，$.fs.read 又不能讀一段：最多每分鐘整份算一次，檔案沒變就不算
+let tokAt = 0
+let tokStamp = ''
+
+async function updateTokens($: EngineInterface) {
+  if (me.oneshot || me.id === 'me') return
+  const now = await $.clock.now()
+  if (me.newTokens !== undefined && now - tokAt < TOK_EVERY_MS) return // 還沒有值（剛開、檔還沒出現）時不節流
+  tokAt = now
+  const home = (await sharedDir($)).replace(/\/pixel-office\/sessions$/, '')
+  const file = `${home}/projects/${projectDirName(await $.session.cwd())}/${me.id}.jsonl`
+  const st = await $.fs.stat(file).catch(() => undefined)
+  if (!st) return
+  const stamp = `${me.id}:${st.mtimeMs}`
+  if (stamp === tokStamp) return
+  const text = await $.fs.read(file).catch(() => undefined)
+  if (typeof text !== 'string') return
+  tokStamp = stamp
+  me = { ...me, newTokens: sumNewTokens(text) }
 }
 
 /** 目前 context 佔比（整數 0-100）；還沒有回應或讀不到回 undefined */
@@ -1736,6 +1782,7 @@ export const register: Register = on => {
     oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
     await applyPreset($).catch(() => undefined)
+    await updateTokens($).catch(() => undefined) // resume：先把之前的算進來
     cpBase = await $.clock.now()
     if (sessionTitle && (!me.title || me.titleAuto)) await autoTitle($, undefined, await $.clock.now()) // classic SessionStart 比這裡先跑時記下的標題
     approveOn = (await $.store.get('approve').catch(() => undefined)) === true
@@ -1971,7 +2018,7 @@ export const register: Register = on => {
     }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
-      return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots)) }
+      return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots), 'tokens') } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
     }
     if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
 
@@ -2086,7 +2133,10 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId && e.answer) void saveReply($, e.answer).catch(() => undefined)
     try {
-      if (!e.agentId) me = { ...me, ctxPct: await contextPct($) }
+      if (!e.agentId) {
+        me = { ...me, ctxPct: await contextPct($) }
+        await updateTokens($).catch(() => undefined)
+      }
       await setMode($, 'done')
       revertLater($, 5000, 'idle')
     } catch {}

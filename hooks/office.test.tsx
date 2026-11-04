@@ -2857,3 +2857,39 @@ test('ctxText 與名單 ctx 欄', () => {
   expect(out).toContain('71% ·compacted 1')
   expect(out.split('\n').find(l => l.startsWith('| B '))).toContain('| — |')
 })
+
+// ---- 0.49.0：累計新 token ----
+import { fmtTokens, projectDirName, sumNewTokens, roster as roster2 } from './register'
+
+test('sumNewTokens: input + cache write + output, no cache read; one response counted once; sidechain and junk lines skipped', () => {
+  const a = (id: string, u: Record<string, number>, extra: Record<string, unknown> = {}) => JSON.stringify({ type: 'assistant', message: { id, usage: u }, ...extra })
+  const text = [
+    a('m1', { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 9000, output_tokens: 5 }),
+    a('m1', { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 9000, output_tokens: 50 }), // 同一則回應後面的行蓋前面
+    a('m2', { input_tokens: 1, output_tokens: 10 }),
+    a('m3', { input_tokens: 999, output_tokens: 999 }, { isSidechain: true }),
+    JSON.stringify({ type: 'user', message: { usage: { input_tokens: 5 } } }),
+    '{"usage": broken',
+    '',
+  ].join('\n')
+  expect(sumNewTokens(text)).toBe(2 + 100 + 50 + 1 + 10)
+  expect(sumNewTokens('')).toBe(0)
+})
+
+test('projectDirName: every non-alphanumeric character becomes a dash (Chinese one per character)', () => {
+  expect(projectDirName('C:\\Users\\me\\proj-測試\\#7')).toBe('C--Users-me-proj-----7')
+})
+
+test('fmtTokens and the roster: new tok column, /office who style sort puts the biggest first', () => {
+  expect(fmtTokens(undefined)).toBe('—')
+  expect(fmtTokens(999)).toBe('999')
+  expect(fmtTokens(882184)).toBe('882k')
+  expect(fmtTokens(1_234_567)).toBe('1.2M')
+  const crew = [{ ...P('m', 'M', 'idle', false, 'manager'), newTokens: 559114 }, { ...P('a', 'A'), newTokens: 882184 }, P('c', 'C')]
+  const rows = (t: string) => t.split('\n').filter(l => l.startsWith('| ') && !l.startsWith('| Name') && !l.startsWith('|---')).map(l => l.split('|')[1].trim())
+  const plain = roster(crew, 0)
+  expect(plain).toContain('| new tok |')
+  expect(rows(plain)).toEqual(['M', 'A', 'C']) // 給模型看的：主管在前
+  expect(rows(roster2(crew, 0, [], 'tokens'))).toEqual(['A', 'M', 'C']) // 沒有值的排最後
+  expect(plain).toContain('882k')
+})
