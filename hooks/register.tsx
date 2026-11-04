@@ -689,7 +689,7 @@ async function writeAutoCheckpoint($: EngineInterface) {
   const file = await syncCheckpoint($)
   if (!file || !cpWorked) return
   // 整檔覆寫（$.fs 沒有 append）：讀失敗（被鎖、讀一半）時寫下去會洗掉歷史，所以只有檔案不存在才從標題起，其他讀不到就不寫
-  const body = (await $.fs.exists(file).catch(() => true)) ? await $.fs.read(file).then(t => (typeof t === 'string' ? t : undefined)).catch(() => undefined) : `# ${me.title} 檢查點\n`
+  const body = (await $.fs.exists(file).catch(() => true)) ? await $.fs.read(file).then(t => (typeof t === 'string' ? t : undefined)).catch(() => undefined) : `# ${file.split('/').pop()!.replace(/\.md$/, '')} 檢查點\n`
   if (body === undefined) return
   const entry = autoCheckpoint(localStamp(await $.clock.now()), me.agent ?? me.name, me.prompt?.text, me.id, await $.session.cwd())
   await $.fs.write(file, `${body}${body.endsWith('\n') ? '' : '\n'}\n${entry}`)
