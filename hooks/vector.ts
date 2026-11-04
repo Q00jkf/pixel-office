@@ -388,15 +388,20 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
 /** agy 名牌右邊的藍紫 G 徽章（jacky 2026-10-29：衣服之外再加一眼可辨的記號） */
 const AGY_BADGE = 1.7
 
-/** context 佔比細條（名牌正下方）：灰底、填到 ctxPct%；<80% 青、≥80% 黃、≥90% 紅。沒有值（還沒回應、舊版外掛）不畫 */
-export const CTX_W = 6
-export const ctxColor = (pct: number): number => (pct >= 90 ? SW.red : pct >= 80 ? SW.yellow : SW.cyan)
+/** context 佔比條（名牌正下方）：深色外框＋灰底、填到 ctxPct%，條裡寫「62%」，壓縮過加「 ·1」；<80% 綠、≥80% 黃、≥90% 紅。沒有值（還沒回應、舊版外掛）不畫 */
+export const CTX_W = 8.4
+export const CTX_H = 1.5
+export const ctxColor = (pct: number): number => (pct >= 90 ? 0xe02f3f : pct >= 80 ? 0xffb000 : 0x2fbf5b)
+export const ctxLabel = (who: Pick<Coworker, 'ctxPct' | 'compacts'>): string => `${who.ctxPct}%${who.compacts ? ` ·${who.compacts}` : ''}`
 function ctxBar(p: Pen, cx: number, baseline: number, who: Coworker) {
   const pct = who.ctxPct
   if (pct === undefined) return
-  const y = baseline + 0.5
-  p.labelRect(cx - CTX_W / 2, y, CTX_W, 0.5, SW.dark, 0.25)
-  p.labelRect(cx - CTX_W / 2, y, Math.max(0.5, (CTX_W * Math.min(100, pct)) / 100), 0.5, ctxColor(pct), 0.25)
+  const x = cx - CTX_W / 2
+  const y = baseline + 0.45
+  p.labelRect(x - 0.25, y - 0.25, CTX_W + 0.5, CTX_H + 0.5, SW.ink, 0.5) // 深色外框：跟後面桌上的藍色螢幕分開
+  p.labelRect(x, y, CTX_W, CTX_H, 0x4a5568, 0.35)
+  p.labelRect(x, y, Math.max(0.6, (CTX_W * Math.min(100, pct)) / 100), CTX_H, ctxColor(pct), 0.35)
+  p.label(cx, y + CTX_H - 0.28, ctxLabel(who), 1.15, SW.white, { anchor: 'middle', bold: true })
 }
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {

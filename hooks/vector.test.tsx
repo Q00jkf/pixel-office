@@ -336,31 +336,35 @@ test('agy: G badge after the nameplate (not part of the name), Claude sessions h
   expect(texts).toContain('office')
 })
 
-// ---- 0.48.0：名牌下的 context 細條 ----
-import { ctxColor, CTX_W } from './vector'
+// ---- 0.48.0／0.48.1：名牌下的 context 條 ----
+import { CTX_H, CTX_W, ctxColor, ctxLabel } from './vector'
 import { assignSeats as assignSeats2 } from './scene'
 
-const CP = (id: string, name: string, ctxPct?: number, role: Coworker['role'] = 'staff'): Coworker => ({ id, name, mode: 'idle', tool: '', isMe: false, role, ctxPct })
-const bars = (crew: Coworker[]) => {
+const CP = (id: string, name: string, ctxPct?: number, role: Coworker['role'] = 'staff', compacts?: number): Coworker => ({ id, name, mode: 'idle', tool: '', isMe: false, role, ctxPct, compacts })
+const parts = (crew: Coworker[]) => {
   const v = drawVector(crew, 0, 80, 40, [], assignSeats2(crew, 80, 40), {})
-  return v.labels.filter((l: any) => l.k === 'rect' && l.h === 0.5)
+  return { rects: v.labels.filter((l: any) => l.k === 'rect' && l.h === CTX_H) as any[], texts: v.labels.filter((l: any) => l.k === 'text' && /%/.test(l.text)) as any[] }
 }
 
-test('ctx bar: grey track + fill by percent; cyan under 80, yellow from 80, red from 90; nothing without a value', () => {
-  expect(ctxColor(0)).toBe(0x73eff7)
-  expect(ctxColor(79)).toBe(0x73eff7)
-  expect(ctxColor(80)).toBe(0xffcd75)
-  expect(ctxColor(89)).toBe(0xffcd75)
-  expect(ctxColor(90)).toBe(0xb13e53)
-  expect(ctxColor(100)).toBe(0xb13e53)
-  expect(bars([CP('a', 'a')])).toHaveLength(0)
-  const one = bars([CP('a', 'a', 50)]) as any[]
-  expect(one).toHaveLength(2)
-  expect(one[0].w).toBe(CTX_W)
-  expect(one[1].w).toBe(CTX_W / 2)
-  expect(one[1].fill).toBe(0x73eff7)
-  const three = bars([CP('m', 'm', 95, 'manager'), CP('a', 'a', 85), CP('b', 'b')]) as any[]
-  expect(three).toHaveLength(4) // 主管桌、員工各一條（兩層），沒有值的不畫
-  expect(three.map(r => r.fill)).toContain(0xb13e53)
-  expect(three.map(r => r.fill)).toContain(0xffcd75)
+test('ctx bar: green under 80, yellow from 80, red from 90; label says percent and compactions; nothing without a value', () => {
+  expect(ctxColor(79)).toBe(0x2fbf5b)
+  expect(ctxColor(80)).toBe(0xffb000)
+  expect(ctxColor(89)).toBe(0xffb000)
+  expect(ctxColor(90)).toBe(0xe02f3f)
+  expect(ctxColor(100)).toBe(0xe02f3f)
+  expect(ctxLabel({ ctxPct: 62 })).toBe('62%')
+  expect(ctxLabel({ ctxPct: 62, compacts: 1 })).toBe('62% ·1')
+  expect(ctxLabel({ ctxPct: 8, compacts: 0 })).toBe('8%')
+  expect(parts([CP('a', 'a')]).rects).toHaveLength(0)
+  expect(parts([CP('a', 'a')]).texts).toHaveLength(0)
+  const one = parts([CP('a', 'a', 50, 'staff', 2)])
+  expect(one.rects).toHaveLength(2) // 灰底＋填色
+  expect(one.rects[0].w).toBe(CTX_W)
+  expect(one.rects[1].w).toBe(CTX_W / 2)
+  expect(one.rects[1].fill).toBe(0x2fbf5b)
+  expect(one.texts.map(t => t.text)).toEqual(['50% ·2'])
+  const three = parts([CP('m', 'm', 95, 'manager'), CP('a', 'a', 85), CP('b', 'b')])
+  expect(three.rects).toHaveLength(4) // 主管桌、員工各一條（灰底＋填色），沒有值的不畫
+  expect(three.rects.map(r => r.fill)).toContain(0xe02f3f)
+  expect(three.rects.map(r => r.fill)).toContain(0xffb000)
 })
