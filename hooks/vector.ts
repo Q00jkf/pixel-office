@@ -388,11 +388,23 @@ function figure(p: Pen, x: number, y: number, who: Coworker, frame: number, walk
 /** agy 名牌右邊的藍紫 G 徽章（jacky 2026-10-29：衣服之外再加一眼可辨的記號） */
 const AGY_BADGE = 1.7
 
+/** context 佔比細條（名牌正下方）：灰底、填到 ctxPct%；<80% 青、≥80% 黃、≥90% 紅。沒有值（還沒回應、舊版外掛）不畫 */
+export const CTX_W = 6
+export const ctxColor = (pct: number): number => (pct >= 90 ? SW.red : pct >= 80 ? SW.yellow : SW.cyan)
+function ctxBar(p: Pen, cx: number, baseline: number, who: Coworker) {
+  const pct = who.ctxPct
+  if (pct === undefined) return
+  const y = baseline + 0.5
+  p.labelRect(cx - CTX_W / 2, y, CTX_W, 0.5, SW.dark, 0.25)
+  p.labelRect(cx - CTX_W / 2, y, Math.max(0.5, (CTX_W * Math.min(100, pct)) / 100), 0.5, ctxColor(pct), 0.25)
+}
+
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
   const badge = who.kind === 'agy' ? AGY_BADGE + 0.3 : 0
   const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
   const tx = align === 'middle' ? x - badge / 2 : x
   p.label(tx, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
+  ctxBar(p, align === 'middle' ? tx : tx + textWidth(t.text, t.size) / 2, y, who)
   if (!badge) return
   const bx = tx + (align === 'middle' ? textWidth(t.text, t.size) / 2 : textWidth(t.text, t.size)) + 0.3
   p.labelRect(bx, y - t.size * 0.85, AGY_BADGE, t.size * 1.05, AGY, 0.4)
@@ -432,6 +444,7 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
   if (who) {
     const t = fitLabel(`★${who.name}`, 13, NAME_SIZE, plateNo.get(who.id))
     p.label(x + 7, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
+    ctxBar(p, x + 7, y + 4.6, who)
   }
   if (extra > 0) plusBadge(p, x + 15.5, y + 3.2, extra)
 }
@@ -444,6 +457,7 @@ function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame
   if (who) {
     const t = fitLabel(`★${who.name}`, DESK_W + 0.6, NAME_SIZE, plateNo.get(who.id))
     p.label(x + DESK_W / 2, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
+    ctxBar(p, x + DESK_W / 2, y + 4.6, who)
   }
   if (extra > 0) plusBadge(p, x + DESK_W - 1, y + 0.2, extra)
 }
