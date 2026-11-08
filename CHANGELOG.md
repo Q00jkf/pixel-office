@@ -7,7 +7,7 @@
 
 ---
 
-## 未發行（待 jacky 准升版）
+## 0.57.0 — 2026-11-08
 
 - **改了什麼**：session 名稱＝角色名。`takeover.py` 接手時，session 名稱跟角色名（卡上有 `office_name` 用它）不同就提醒使用者 `/rename`（原本只有卡上寫了 `office_name` 才提醒）；已有在線 session 叫這個名字時印 STOP；登記提示的 team 改寫「主管的 session 名稱（＝它的角色名）」。`skills/team/roles.md` §3 第 4 步、`lead.md` 跟著改。比對 team 的程式不變
 - **為什麼**：team 記主管的 session 名稱，換一個 session 接手主管時下屬全掛在舊名字上，要一個個傳訊息重登。jacky 2026-11-08：「session 名稱就直接叫做角色名稱這樣統一比較好，一開始在帶入 role 時就應該要把 session 名稱與 team 名稱換好」。`open_role.py` 本來就用 `--name <角色>` 開，缺的只有在現有 session 接手這條
