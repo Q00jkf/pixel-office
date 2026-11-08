@@ -9,7 +9,7 @@
 | 辦公室看得到 Codex | ✅ 2026-11-09 實機：hook 寫 `sessions/codex-<id>.json`（`kind: "codex"`，X 標記）；看守程式在 Codex 停著等鍵盤時續心跳，完成 5 秒後變回閒置；exec 結束、關窗都標離開 |
 | 最後一則回覆 | ✅ 實機：Stop 事件的 `last_assistant_message` 寫 `replies/codex-<id>.json`（手機版 lastReply 同格式） |
 | Claude → Codex | ✅ 實機：`codex_office.py send` 跑 `codex queue --thread <id> --message …`，**開著的 Codex 閒置時自己撿起來回**（不用 `--resume`；帶了反而警告 `already has an active writer`）。直接呼叫該 Codex 行程的 `codex.exe`，不經 npm 的 `codex.cmd`（`& % ^ "` 原樣送到）。queue 不能用才退回收件夾，下次使用者送出訊息時由 UserPromptSubmit 塞進去（也實測過） |
-| Codex → Claude | ⏸ 延後（之後做 MCP 工具，像 agy 的 `office_send`） |
+| Codex → Claude | ✅ 2026-11-09 實機：外掛的 MCP 工具 `office_roster`／`office_profile`／`office_send`（`.mcp.json`）。寄給 Claude 寫 `commands/<id>.json`（agy 同一套），附回信指令（用 Codex 的 session id）。Codex 不會照另一個 AI 的話做，要使用者在 Codex 說一聲（合理，不繞過） |
 
 ## Codex 0.167 的事實（willy-codex 實測／官方說明，未全部親驗）
 
@@ -42,3 +42,12 @@
 - 升版一定要重新信任（2026-11-09 實測 0.57.0→0.58.0，`hooks.json` 沒改也要；雜湊含展開後帶版號的路徑或版號本身）。不用進 `/hooks` 逐個點：升版後開 Codex 會跳「N hooks are new or changed」，選 **2. Trust all and continue** 一鍵就好。jacky：這樣就夠，不另外做「升版免信任」（試過固定指令字串，沒做完就停）。
 - 本機市集的外掛：版號沒變時 `codex plugin add` 不會更新 cache；`codex plugin marketplace upgrade` 只管 Git 市集。
 - 名牌：工作資料夾全是中文時預設 `codex`，跟名牌叫 codex 的 Claude session 撞名就變 `codex01a1`。
+
+## MCP 與在線判斷（2026-11-09 實機）
+
+- 🔴 `.mcp.json` 裡的 `${PLUGIN_ROOT}` **不會展開**（hook 的會）：`codex mcp list` 看得到參數原封不動，伺服器起不來，Codex 說沒有這些工具。改成 `python -c` 去 `~/.codex/plugins/cache/pixel-office-codex/pixel-office/*/` 找最新那份來跑。
+- 🔴 MCP 的 stdin 要用 UTF-8 讀：Windows 預設 cp950，中文參數變亂碼或解碼失敗讓整支結束，Codex 只看到「工具連線中斷」。
+- 呼叫者：tools/call 的 `_meta` 帶 `sessionId`／`threadId`（還有 `x-codex-turn-metadata.session_id`），直接用，不猜。
+- 在線判斷：終端機的 `codex`（沒加 `--no-daemon`）和桌面 App 都經過背景常駐程式（app-server），很多對話共用一個行程、而且它不會結束，看行程活著會留下關掉的對話。改看 `~/.codex/thread-writer-locks/<session_id>.lock`：開著的對話鎖住，關掉的放掉或刪掉（實機比對 4 個都對）。看不到鎖（非 Windows）才退回看行程、共用的 30 分鐘沒事件當離開。
+- 本機市集的外掛：`codex plugin add` 對已安裝的不會更新（就算版號較新），要先 `codex plugin remove` 再 `add`。
+- 名牌撞名的後綴取 session id **尾** 4 碼：id 照時間排，前幾碼都一樣。

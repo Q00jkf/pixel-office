@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "pixel_office": {
+      "command": "python",
+      "args": [
+        "-c",
+        "import glob,os,runpy,sys;g=glob.glob(os.path.join(os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex'),'plugins','cache','pixel-office-codex','pixel-office','*','codex_office.py'));g or sys.exit('pixel-office: no cached codex_office.py under CODEX_HOME/plugins/cache/pixel-office-codex (reinstall the plugin)');f=max(g,key=lambda p:os.path.getmtime(os.path.dirname(p)));sys.argv=[f,'mcp'];runpy.run_path(f,run_name='__main__')"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 30,
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}

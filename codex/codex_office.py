@@ -4,6 +4,7 @@
   python codex_office.py hook <事件>   hooks/hooks.json 呼叫：寫狀態檔、最後一則回覆、收信
   python codex_office.py send <收件者> <訊息> [--from <寄件者>]
                                       給 Claude session 用：codex queue 送進那個 Codex（閒置也會馬上回）；不能用時退回收件夾，下次使用者送出訊息時塞進那一輪
+  python codex_office.py mcp          .mcp.json 呼叫：stdio MCP server（office_profile／office_roster／office_send），Codex 主動傳話給 Claude 用
   python codex_office.py watch        背景看守：Codex 程式還在就續心跳，結束就標離開
   python codex_office.py install      印出安裝指令（不替使用者改 Codex 設定）
 
@@ -28,6 +29,7 @@ DATA = BASE / "codex"        # 收件夾、看守 pid、最近一次各事件的
 CLI = DATA / "codex_office.py"
 INBOX = DATA / "inbox"
 STALE_MS = 20000  # 同 hooks/status.ts
+SHARED_IDLE_MS = 30 * 60 * 1000  # 桌面 App／常駐程式（多個對話共用一個行程）：這麼久沒 hook 事件就當離開
 BEAT = 5          # 看守多久續一次心跳（秒）
 IDLE_EXIT = 60    # 沒有 Codex 在線這麼久，看守自己結束
 DONE_MS = 5000    # 「完成」顯示多久後改回閒置（同 hooks/register.tsx revertLater）
@@ -77,7 +79,7 @@ def plate(cwd: str, sid: str) -> str:
     """預設名牌：工作資料夾名的英數字（最多 12 字）；跟在線的人撞名就接 session id 前 4 碼"""
     base = re.sub(r"[^A-Za-z0-9]", "", Path(cwd).name if cwd else "")[:12] or "codex"
     if any(s.get("name") == base and s.get("id") != f"codex-{sid}" for s in live_crew()):
-        base = base[:8] + re.sub(r"[^A-Za-z0-9]", "", sid)[:4]
+        base = base[:8] + re.sub(r"[^A-Za-z0-9]", "", sid)[-4:]  # 取尾碼：Codex 的 id 照時間排，前幾碼都一樣
     return base
 
 
@@ -148,6 +150,36 @@ def codex_pid() -> int:
             return ppid
         pid = ppid
     return 0
+
+
+def writer_locked(sid: str):
+    """Codex 開著一個對話時會鎖住 ~/.codex/thread-writer-locks/<id>.lock（2026-11-09 實測：開著的鎖住、關掉的放掉或刪掉）。
+    True＝開著、False＝關了、None＝看不出來（沒有這個資料夾或不是 Windows）"""
+    d = Path(os.environ.get("CODEX_HOME") or HOME / ".codex") / "thread-writer-locks"
+    if os.name != "nt" or not sid or not d.is_dir():
+        return None
+    f = d / f"{sid}.lock"
+    if not f.exists():
+        return False
+    import msvcrt
+    try:
+        with open(f, "r+b") as fh:
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return True
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+
+
+def shared_host(pid: int) -> bool:
+    """這個 Codex 行程是不是多個對話共用的（app-server 常駐程式、桌面 App）：它活著不代表對話還開著"""
+    path = codex_exe(pid).lower().replace("/", "\\") if pid else ""
+    return "app-server" in path or "\\openai\\codex\\bin\\" in path
 
 
 def alive(pid: int) -> bool:
@@ -226,7 +258,7 @@ def deliver(to: str, text: str, frm: str) -> str:
     if exe:  # codex queue：開著的 Codex 閒置時會自己撿起來回（2026-11-09 實測，不用 --resume）
         try:
             r = subprocess.run([exe, "queue", "--thread", sid, "--message", mail_line(frm, text)],
-                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
             if r.returncode == 0:
                 return f"Queued in {hits[0].get('name')}'s Codex session: it answers right away if idle, after its current turn if busy"
         except (OSError, subprocess.SubprocessError):
@@ -277,6 +309,139 @@ def take_mail(sid: str) -> str:
     return "\n\n".join(lines)
 
 
+# ---------------------------------------------------------------- MCP server（Codex 叫的工具；在沙箱外跑，寫得到 ~/.claude）
+
+COMMANDS = BASE / "commands"   # Claude 端外掛每秒撿一次（手機下命令、agy 寄信同一套）
+NAME_OK = re.compile(r"^[A-Za-z0-9]{1,12}$")
+TOOLS = [
+    {"name": "office_profile",
+     "description": "Set your nameplate and/or job title in the pixel office (shown to every Claude/agy/Codex session). "
+                    "name: 1-12 ASCII letters/digits. title: what you are working on, max 16 chars, Chinese OK.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}}}},
+    {"name": "office_roster",
+     "description": "List everyone online in the pixel office: nameplate, title, kind (Claude/agy/Codex), what they are doing. Use it to find who to message.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "office_send",
+     "description": "Send a message to another session in the pixel office (Claude Code, agy or another Codex). to: their nameplate or 'Send to' from office_roster.",
+     "inputSchema": {"type": "object", "properties": {"to": {"type": "string"}, "text": {"type": "string"}}, "required": ["to", "text"]}},
+]
+
+
+def caller(params: dict) -> str:
+    """呼叫工具的是哪個 Codex session：Codex 在 _meta 帶 sessionId（2026-11-09 實測），不猜"""
+    meta = params.get("_meta") or {}
+    sid = str(meta.get("sessionId") or meta.get("threadId") or (meta.get("x-codex-turn-metadata") or {}).get("session_id") or "")
+    if not re.fullmatch(r"[0-9A-Za-z-]{8,64}", sid):
+        raise ValueError("Codex did not say which session is calling (_meta has no sessionId)")
+    if not status_file(sid).exists():
+        raise ValueError("The office has no status for this session yet: its hooks have not run (trust them with /hooks, then send one message)")
+    return sid
+
+
+def tool_profile(sid: str, a: dict) -> str:
+    p = status_file(sid)
+    s = load(p)
+    s["updatedAt"] = now_ms()  # 看守讀寫之間改的名牌不會被蓋回去
+    name, title = a.get("name"), a.get("title")
+    if name is not None:
+        name = str(name).strip()
+        if not NAME_OK.match(name):
+            raise ValueError("Nameplate must be 1-12 letters or digits")
+        if any(c.get("name") == name and c.get("id") != s.get("id") for c in live_crew()):
+            raise ValueError(f"Nameplate {name} is taken, pick another")
+        s["name"] = name
+    if title is not None:
+        s.update(title=str(title).strip()[:16], titleAuto=False)
+    save(p, s)
+    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}"
+
+
+def tool_roster() -> str:
+    rows = ["| Name | Title | Kind | Send to | Now |", "|---|---|---|---|---|"]
+    for s in sorted(live_crew(), key=lambda c: str(c.get("name"))):
+        kind = {"agy": "agy", "codex": "Codex"}.get(s.get("kind"), "Claude")
+        rows.append(f"| {s.get('name')} | {s.get('title') or '—'} | {kind} | {s.get('agent') or s.get('name')} | {s.get('mode')} {s.get('tool') or ''} |")
+    return "\n".join(rows) if len(rows) > 2 else "Nobody in the office right now"
+
+
+def tool_send(sid: str, a: dict) -> str:
+    me = load(status_file(sid)).get("name") or "codex"
+    to, text = str(a.get("to", "")), str(a.get("text", "")).strip()
+    want = re.sub(r"\s*\[[0-9a-f]+\]$", "", to.strip())
+    crew = live_crew()
+    hits = []
+    for key in ("id", "agent", "name", "title"):  # 名牌可能撞名（兩個 Office）：依序找，先找到唯一的就用
+        hits = [s for s in crew if s.get(key) == want]
+        if len(hits) == 1:
+            break
+    if len(hits) != 1:
+        names = ", ".join(f"{s.get('name')} ({s.get('agent') or s.get('kind') or '—'})" for s in crew)
+        raise ValueError(f"No unique recipient \"{to}\" ({len(hits)} matches). Online: {names or 'nobody'}")
+    if not text or len(text) > 4000:
+        raise ValueError("Message is empty or too long (max 4000 characters)")
+    s = hits[0]
+    if s.get("id") == f"codex-{sid}":
+        raise ValueError("That is you; pick someone else from office_roster")
+    if s.get("kind") == "codex":
+        return deliver(str(s["id"]), text, me)
+    if s.get("kind") == "agy":
+        box = BASE / "agy" / "inbox"
+        box.mkdir(parents=True, exist_ok=True)
+        with open(box / f"{str(s['id'])[len('agy-'):]}.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"from": me, "text": text, "at": now_ms()}, ensure_ascii=False) + "\n")
+        return f"Put in {s.get('name')}'s inbox: delivered on its next action"
+    reply = f"python \"{CLI}\" send {sid} \"<reply>\" --from <your ListAgents name>"  # 用 session id：名牌會改、會撞
+    save(COMMANDS / f"{s['id']}.json", {
+        "nonce": uuid.uuid4().hex, "at": now_ms(), "from": f"{me} (Codex, not the user)",
+        "text": f"{text}\n(Reply with {reply}; it reaches this Codex session right away)"})
+    return f"Sent to {s.get('agent') or s.get('name')}: its plugin picks it up within a second; discarded if not picked up in 10 minutes. Its reply arrives as a new message in this conversation."
+
+
+def mcp() -> None:
+    def reply(mid, result=None, error=None):
+        m = {"jsonrpc": "2.0", "id": mid}
+        m.update({"error": error} if error else {"result": result})
+        sys.stdout.write(json.dumps(m, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
+    sync_cli()
+    for raw in sys.stdin.buffer:  # 🔴 用 UTF-8 讀：Windows 預設 cp950，中文參數會變亂碼或解碼失敗讓整支結束（2026-11-09 Codex 看到「工具連線中斷」）
+        try:
+            m = json.loads(raw.decode("utf-8", "replace"))
+        except Exception:
+            continue
+        mid, meth, params = m.get("id"), m.get("method"), m.get("params") or {}
+        if mid is None:
+            continue
+        if meth == "initialize":
+            reply(mid, {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "pixel-office", "version": "1"}})
+        elif meth == "ping":
+            reply(mid, {})
+        elif meth == "tools/list":
+            reply(mid, {"tools": TOOLS})
+        elif meth == "tools/call":
+            name, args = params.get("name"), params.get("arguments") or {}
+            try:  # 實測用：記下 Codex 帶了哪些 _meta 與環境變數名（不記內容）
+                save(DATA / "payloads" / "mcp.json", {"meta": params.get("_meta"), "env": sorted(k for k in os.environ if "CODEX" in k.upper()), "cwd": os.getcwd()})
+            except Exception:
+                pass
+            if name not in ("office_profile", "office_roster", "office_send"):
+                reply(mid, error={"code": -32602, "message": f"No such tool: {name}"})
+                continue
+            try:
+                if name == "office_roster":
+                    text = tool_roster()
+                else:
+                    sid = caller(params)
+                    text = tool_profile(sid, args) if name == "office_profile" else tool_send(sid, args)
+                reply(mid, {"content": [{"type": "text", "text": text}]})
+            except Exception as e:
+                reply(mid, {"content": [{"type": "text", "text": str(e)}], "isError": True})
+        else:
+            reply(mid, error={"code": -32601, "message": f"Method not found: {meth}"})
+
+
 # ---------------------------------------------------------------- hook
 
 def hook(event: str) -> None:
@@ -309,12 +474,8 @@ def hook(event: str) -> None:
                     save(REPLIES / f"codex-{sid}.json", {"text": reply[:4000], "at": now})
             if not s.get("pid") or not alive(int(s.get("pid") or 0)):
                 s["pid"] = codex_pid()
-            if event == "SessionStart" and s["pid"]:
-                for q in SESSIONS.glob("codex-*.json"):  # /clear、/new、fork 換了 session id：同一個程式的舊 session 標離開
-                    o = load(q)
-                    if q != p and o.get("pid") == s["pid"] and not o.get("left"):
-                        o.update({"left": True, "updatedAt": now})
-                        save(q, o)
+                s["shared"] = shared_host(s["pid"])
+            s["lastHook"] = now  # /clear、/new、fork 換了 session id：舊的放掉寫入鎖，看守 20 秒內標離開
             s.update({
                 "id": f"codex-{sid}", "kind": "codex", "role": s.get("role", "staff"),
                 "name": s.get("name") or plate(cwd, sid),
@@ -353,7 +514,13 @@ def watch() -> None:
                     continue
                 was = s.get("updatedAt")
                 pid = int(s.get("pid") or 0)
-                if pid and alive(pid):
+                held = writer_locked(str(s.get("id", ""))[len("codex-"):])
+                quiet = now_ms() - s.get("lastHook", s.get("updatedAt", 0))
+                if held is False and quiet > STALE_MS and (s.get("shared") or not (pid and alive(pid))):
+                    s["left"] = True  # 對話關了：Codex 放掉了它的寫入鎖（剛開的對話給 20 秒拿鎖）
+                elif held is None and s.get("shared") and quiet > SHARED_IDLE_MS:
+                    s["left"] = True  # 看不到鎖、又是共用的常駐程式：太久沒事件就當離開
+                elif held or (pid and alive(pid)):
                     live += 1
                     s["updatedAt"] = now_ms()
                     if s.get("mode") == "done" and now_ms() - s.get("since", 0) > DONE_MS:
@@ -405,4 +572,4 @@ if __name__ == "__main__":
         except ValueError as e:
             sys.exit(str(e))
     else:
-        {"install": install, "watch": watch}.get(cmd, lambda: print(__doc__))()
+        {"install": install, "watch": watch, "mcp": mcp}.get(cmd, lambda: print(__doc__))()
