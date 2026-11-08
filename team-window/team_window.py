@@ -151,7 +151,7 @@ def cards(folder, layer):
             continue
         if meta.get('layer', '1') == layer:
             found.append({'name': meta.get('role') or os.path.splitext(os.path.basename(p))[0], 'file': p, '_body': body,
-                          'top': meta.get('reports_to', '') in ('使用者', 'user') or meta.get('role') == '主管'})
+                          'top': meta.get('reports_to', '') in ('使用者', 'user') or str(meta.get('role', '')).endswith('主管')})  # <範圍>主管（jacky 2026-11-08）
     return found
 
 

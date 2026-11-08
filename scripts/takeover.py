@@ -98,6 +98,11 @@ def live():
     return out
 
 
+def is_lead(role):
+    """主管角色：名字是「<範圍>主管」（例 willy主管；jacky 2026-11-08 定不能只叫「主管」，舊卡的「主管」照樣認）"""
+    return role.endswith('主管')
+
+
 def holders(role, me):
     """辦公室裡在線、職稱＝角色、不是自己的人"""
     return [s.get('agent') or s.get('name') or s.get('id', '')[:8]
@@ -229,6 +234,8 @@ def main(argv=None):
     print(f'名稱 {name}（session {me.get("sessionId", "?")[:8]}）'
           + (f'；session 名稱要＝角色名 → 請使用者 /rename {rename_to}（只有使用者能改；改好後，team 記這個名字的下屬自動接上）' if rename_to != name else ''))
     taken = sorted({s.get('agent') for s in live() if s.get('agent') == rename_to and s.get('id') != me.get('sessionId')})
+    if a.role == '主管' or meta.get('reports_to') == '主管':
+        print('提醒：角色名或 reports_to 只叫「主管」，會跟別的專案撞名 → 請使用者把卡改成 <範圍>主管（例 willy主管；skill roles.md §1）')
     if taken and rename_to != name:
         print(f'STOP：已有在線的 session 叫 {rename_to}（舊的持有者還開著？）→ 先問使用者關掉或改名，不要改成同名')
     if others:
@@ -237,7 +244,7 @@ def main(argv=None):
     if len(twins) > 1:
         print(f'STOP：這份對話同時開在 {len(twins)} 個視窗（pid {", ".join(str(p) for p, _ in twins)}）→ 請使用者關掉一個再接')
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
-            'role=主管' if meta.get('layer', '1') == '1' and a.role == '主管' else None]
+            'role=主管' if meta.get('layer', '1') == '1' and is_lead(a.role) else None]
     print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
     if meta.get('layer') == '2':  # 小隊卡只放怎麼做：不讀檢查點、不讀 collab（jacky 2026-11-08）
         print('\n# 第 2 層')
@@ -251,7 +258,7 @@ def main(argv=None):
     digest = collab_digest(os.path.join(office, 'collab.md'))
     print(f'\n# collab.md 摘要（{os.path.join(office, "collab.md")}；只列{"／".join(KEEP)}，其他節用到才查）')
     print(digest if digest else '（沒有 collab.md）')
-    if a.role == '主管' or meta.get('role') == '主管':
+    if is_lead(a.role) or is_lead(meta.get('role') or ''):
         todo = collab_todo(os.path.join(office, 'collab.md'), {s['ref'] for s in live() if s.get('ref')}, time.time())
         if todo:
             print('\n# 待處理（只有主管改 collab）')
