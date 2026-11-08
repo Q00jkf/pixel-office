@@ -1,5 +1,5 @@
 // 手機版辦公室（第 3 期）：本機 HTTP 伺服器，讀 ~/.claude/pixel-office/ 共用資料夾，畫跟 Desktop 同一張向量辦公室。
-// 對外靠 Cloudflare Tunnel＋Cloudflare Access（只放行 owner）；只聽 127.0.0.1。
+// 對外二選一：Cloudflare Tunnel＋Cloudflare Access（只放行 owner），或 tailscale serve（tailnet 裡的裝置都放行）；只聽 127.0.0.1。
 // 啟動：bun <這個檔>；設定在 ~/.claude/pixel-office/remote.json：{ "port": 8767, "owner": "<Access 登入的 email>" }
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'

@@ -7,6 +7,13 @@
 
 ---
 
+## 0.55.1 — 2026-11-08
+
+- **改了什麼**：文件補上手機版也可以用 Tailscale 連：`README.md`／`README.zh-TW.md` 標題與說明改成「Cloudflare 或 Tailscale」、加兩者怎麼選、補 0.55.0 的傳照片；`docs/使用說明.md` 手機版「對外」拆成 Cloudflare 與 Tailscale 兩種，Tailscale 附前置（MagicDNS、HTTPS Certificates）、停用指令、不要用 funnel、使用者實測遇到的三件事、「tailnet 裡的裝置都放行」的提醒（serve 會帶 `Tailscale-User-Login`，主管 2026-11-08 實測；伺服器還沒用它檢查）；`remote/server.ts` 只改開頭註解。程式行為不變
+- **為什麼**：使用者照 Tailscale 試用說明實測可用（2026-11-08），但公開 repo 只寫 Cloudflare；jacky 問「有在上面提醒使用者要使用遠端可以用 tail 或者 cloud 嗎」，核可補上
+- **實測**：只改文件與註解，`bun test remote` 6 過
+- **commit**：（本版）
+
 ## 0.55.0 — 2026-11-08
 
 - **改了什麼**：手機版傳照片：

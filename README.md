@@ -12,7 +12,7 @@ A Claude Code plugin that turns every running Claude Code session into a pixel-a
 - **See what everyone is doing**: typing, reading, thinking, erroring, waiting for your approval — at a glance
 - **Multi-session teamwork**: one skill, `team` — managers and staff, task hand-off, meetings
 - **Cross-vendor AI teamwork**: Antigravity CLI (agy) conversations join the office with a blue-violet **G** badge and message Claude sessions
-- **Manage it from anywhere**: with Cloudflare, watch the office and send a command to any session from your phone
+- **Manage it from anywhere**: with Cloudflare or Tailscale, watch the office and send a command to any session from your phone
 
 ## ✨ Claude × Antigravity, working together
 
@@ -34,14 +34,16 @@ One-time setup: [docs/agy-寄件協作.md](docs/agy-寄件協作.md) (Chinese)
 > Moved out of [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) on 2026-10-29, with full history.
 > ⚠️ Built on Claude Code function hooks (early access; may change between versions).
 
-## 📱 Manage it from anywhere (Cloudflare remote)
+## 📱 Manage it from anywhere (Cloudflare or Tailscale)
 
-A small local server draws the same office; connect it through Cloudflare Tunnel and open it in your phone's browser (add it to your home screen):
+A small local server draws the same office; reach it from outside through Cloudflare Tunnel or Tailscale and open it in your phone's browser (add it to your home screen):
 
 - **Watch**: who is doing what, who is stuck, who is waiting for you
 - **Tap a coworker**: title, status, latest error, and its last reply
 - **Send a command**: type on the card and that session runs it as if you typed it (marked 📱)
-- **Only you get in**: Cloudflare Access in front lets only your login through; the server itself listens on localhost only
+- **Send a photo**: 📷 on the card sends a photo (with the text you typed); the session opens it with Read
+- **Only you get in**: the server listens on localhost only. Cloudflare: Access in front lets only your login through. Tailscale: every device in your tailnet gets in
+- **Which one**: Cloudflare gives a public URL that opens anywhere but needs a domain and Access set up; Tailscale needs no domain but the phone must run the Tailscale app. Use `tailscale serve`, never `funnel` (it opens the server to the whole internet)
 - No session needs its panel open — just keep the computer on. Permission approvals still happen on the computer
 
 Setup: the "手機版" (mobile) section of [docs/使用說明.md](docs/使用說明.md)

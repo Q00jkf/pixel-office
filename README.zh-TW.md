@@ -12,7 +12,7 @@
 - **看得到大家在做什麼**：打字、讀檔、思考、出錯、等你核准，一眼看出
 - **多 session 協作**：一個 skill `team`，負責分主管和員工、派工、開會
 - **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信
-- **人在外面也能管**：接上 Cloudflare，手機隨時看辦公室、對任一個 session 下指令
+- **人在外面也能管**：接上 Cloudflare 或 Tailscale，手機隨時看辦公室、對任一個 session 下指令
 
 ## ✨ Claude × Antigravity 一起工作
 
@@ -34,14 +34,16 @@ Claude（主管）◀── 回信：整理好的規格表 ───────
 > 2026-10-29 起從 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 搬出來獨立（歷史一起帶過來）。
 > ⚠️ 用的是 Claude Code 的 function hooks（early access，版本間可能變動）。
 
-## 📱 人在外面也能管（Cloudflare 遠端）
+## 📱 人在外面也能管（Cloudflare 或 Tailscale）
 
-本機跑一個小伺服器畫同一間辦公室，用 Cloudflare Tunnel 接到外面，手機瀏覽器打開（可以加到主畫面）：
+本機跑一個小伺服器畫同一間辦公室，用 Cloudflare Tunnel 或 Tailscale 接到外面，手機瀏覽器打開（可以加到主畫面）：
 
 - **看**：誰在做什麼、誰卡住、誰在等你
 - **點人**：看職稱、狀態、最近的錯誤，還有它最後回了什麼
 - **下指令**：在卡片打字送出，那個 session 會當成你打的字照做（前面標 📱）
-- **只有你進得來**：前面掛 Cloudflare Access，只放行你登入的帳號；伺服器本身只聽本機
+- **傳照片**：卡片上的 📷 連同打的字送一張照片，那個 session 用 Read 打開來看
+- **誰進得來**：伺服器本身只聽本機。Cloudflare：前面掛 Access，只放行你登入的帳號。Tailscale：你 tailnet 裡的裝置都進得來
+- **選哪個**：Cloudflare 有公開網址、哪裡都能開，但要有網域、要設 Access；Tailscale 不用網域，但手機要裝 Tailscale App。用 `tailscale serve`，不要用 `funnel`（會開到整個網際網路）
 - 不用開著任何 session 的面板，電腦開著就好。權限核准還是要回電腦按
 
 設定方式：[docs/使用說明.md](docs/使用說明.md) 的「手機版」
