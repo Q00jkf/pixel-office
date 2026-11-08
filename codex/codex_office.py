@@ -3,7 +3,7 @@
 用法：
   python codex_office.py hook <事件>   hooks/hooks.json 呼叫：寫狀態檔、最後一則回覆、收信
   python codex_office.py send <收件者> <訊息> [--from <寄件者>]
-                                      給 Claude session 用：寄給 Codex → 收件夾，它的使用者下次送出訊息時塞進那一輪
+                                      給 Claude session 用：codex queue 送進那個 Codex（閒置也會馬上回）；不能用時退回收件夾，下次使用者送出訊息時塞進那一輪
   python codex_office.py watch        背景看守：Codex 程式還在就續心跳，結束就標離開
   python codex_office.py install      印出安裝指令（不替使用者改 Codex 設定）
 
@@ -222,10 +222,42 @@ def deliver(to: str, text: str, frm: str) -> str:
     if not text or len(text) > 4000:
         raise ValueError("Message is empty or too long (max 4000 characters)")
     sid = str(hits[0]["id"])[len("codex-"):]
+    exe = codex_exe(int(hits[0].get("pid") or 0))
+    if exe:  # codex queue：開著的 Codex 閒置時會自己撿起來回（2026-11-09 實測，不用 --resume）
+        try:
+            r = subprocess.run([exe, "queue", "--thread", sid, "--message", mail_line(frm, text)],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+            if r.returncode == 0:
+                return f"Queued in {hits[0].get('name')}'s Codex session: it answers right away if idle, after its current turn if busy"
+        except (OSError, subprocess.SubprocessError):
+            pass
     INBOX.mkdir(parents=True, exist_ok=True)
     with open(INBOX / f"{sid}.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"from": frm, "text": text, "at": now_ms()}, ensure_ascii=False) + "\n")
-    return f"Put in {hits[0].get('name')}'s inbox: delivered when its user next sends it a message; an idle Codex cannot be woken"
+    return f"codex queue unavailable; put in {hits[0].get('name')}'s inbox: delivered when its user next sends it a message"
+
+
+def mail_line(frm: str, text: str) -> str:
+    return f"📨 Pixel office message from {frm or 'unsigned'} (another AI session, not the user): {text}"
+
+
+def codex_exe(pid: int) -> str:
+    """那個 Codex 行程本身的執行檔（Windows 的 npm codex.cmd 會經過 cmd.exe，訊息裡的 & % ^ 會出事）；找不到回空字串"""
+    if os.name == "nt" and pid > 0:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)
+        if h:
+            try:
+                buf = ctypes.create_unicode_buffer(1024)
+                n = wintypes.DWORD(1024)
+                if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                    return buf.value
+            finally:
+                k.CloseHandle(h)
+    found = shutil.which("codex") or ""
+    return "" if found.lower().endswith((".cmd", ".bat")) else found
 
 
 def take_mail(sid: str) -> str:
@@ -240,7 +272,7 @@ def take_mail(sid: str) -> str:
                 m = json.loads(ln)
             except Exception:
                 continue
-            lines.append(f"📨 Pixel office message from {m.get('from') or 'unsigned'} (another AI session, not the user): {m.get('text', '')}")
+            lines.append(mail_line(m.get("from"), m.get("text", "")))
         taking.unlink(missing_ok=True)
     return "\n\n".join(lines)
 

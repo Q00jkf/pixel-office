@@ -1006,7 +1006,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const stale = titleStale(c)
     const doing = doingText(c, now) + (stale ? ` · latest prompt "${c.prompt!.text}"` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (auto)` : stale ? `${c.title} (set ${Math.round((now - c.titleAt!) / 60000)} min ago)` : c.title
-    const agent = c.kind === 'codex' ? `Codex: \`python ~/.claude/pixel-office/codex/codex_office.py send ${c.name} "…" --from <your name>\` (delivered when its user next sends it a message)` : c.kind === 'agy' ? `Antigravity: \`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <your name>\` (delivered on its next action)` : c.agent ?? (c.addr ? `(no name) SendMessage with \`to=${c.addr}\`` : '(not registered, messages cannot reach it)')
+    const agent = c.kind === 'codex' ? `Codex: \`python ~/.claude/pixel-office/codex/codex_office.py send ${c.name} "…" --from <your name>\` (answers right away when idle)` : c.kind === 'agy' ? `Antigravity: \`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <your name>\` (delivered on its next action)` : c.agent ?? (c.addr ? `(no name) SendMessage with \`to=${c.addr}\`` : '(not registered, messages cannot reach it)')
     return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${fmtTokens(c.newTokens)} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)

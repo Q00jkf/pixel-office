@@ -6,11 +6,10 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 辦公室看得到 Codex | 🟡 寫好、模擬過，**等實機**：hook 寫 `sessions/codex-<id>.json`（`kind: "codex"`，X 標記），看守程式續心跳 |
-| 最後一則回覆 | 🟡 等實機：Stop 事件的 `last_assistant_message` 寫 `replies/codex-<id>.json`（手機版 lastReply 同格式） |
-| Claude → Codex | 🟡 等實機：`codex_office.py send` 寫收件夾，Codex 使用者**下次送出訊息**時由 UserPromptSubmit 塞進那一輪；之後實測 `codex queue --thread <id> --message … --resume` 能不能更即時 |
+| 辦公室看得到 Codex | ✅ 2026-11-09 實機：hook 寫 `sessions/codex-<id>.json`（`kind: "codex"`，X 標記）；看守程式在 Codex 停著等鍵盤時續心跳，完成 5 秒後變回閒置；exec 結束、關窗都標離開 |
+| 最後一則回覆 | ✅ 實機：Stop 事件的 `last_assistant_message` 寫 `replies/codex-<id>.json`（手機版 lastReply 同格式） |
+| Claude → Codex | ✅ 實機：`codex_office.py send` 跑 `codex queue --thread <id> --message …`，**開著的 Codex 閒置時自己撿起來回**（不用 `--resume`；帶了反而警告 `already has an active writer`）。直接呼叫該 Codex 行程的 `codex.exe`，不經 npm 的 `codex.cmd`（`& % ^ "` 原樣送到）。queue 不能用才退回收件夾，下次使用者送出訊息時由 UserPromptSubmit 塞進去（也實測過） |
 | Codex → Claude | ⏸ 延後（之後做 MCP 工具，像 agy 的 `office_send`） |
-| 叫醒閒置的 Codex | ❌ 跟 agy 一樣，等鍵盤時沒有 hook 在跑 |
 
 ## Codex 0.167 的事實（willy-codex 實測／官方說明，未全部親驗）
 
@@ -35,8 +34,9 @@
 - 不存使用者打的字；`codex/payloads/<事件>.json` 只記各事件最近一次有哪些欄位（內容換成 `…`），實測用。
 - hook 一律 exit 0、吞例外，不擋 Codex。
 
-## 待實機確認
+## 實機紀錄（2026-11-08～09，Codex CLI 0.167.0，Windows）
 
-1. `${PLUGIN_ROOT}` 變數名、SessionEnd 的 matcher（目前寫 `other`）對不對——錯了 hook 不會跑。
-2. 祖先程式找不找得到 `codex`（Windows 上可能叫 `codex.exe` 或經過 node）。
-3. `codex queue` 能不能把訊息送進開著的視窗。
+- `${PLUGIN_ROOT}` 對；SessionEnd 的 `reason` 是 `other`；祖先找得到 `codex.exe`（互動視窗是 `codex.exe --no-daemon`）。
+- 🔴 信任：`/hooks` 畫面寫「N hooks need review before they can run」，要逐個事件點進去、看 Source 是 `pixel-office@pixel-office-codex` 再信任（5 個：PostToolUse、SessionStart、SessionEnd、UserPromptSubmit、Stop）。只安裝不信任：hook 不跑也不報錯，`codex exec` 也不警告。帶 `--dangerously-bypass-hook-trust` 的執行會跑（payload 的 `permission_mode` 是 `bypassPermissions`），別拿它當「已信任」的證據。
+- 信任存在哪裡查不到（`config.toml`、`~/.codex/*.sqlite` 都沒有）；willy-codex 轉述官方文件：信任綁 hook 定義的雜湊，外掛重裝換了腳本要重新 review。
+- 名牌：工作資料夾全是中文時預設 `codex`，跟名牌叫 codex 的 Claude session 撞名就變 `codex01a1`。
