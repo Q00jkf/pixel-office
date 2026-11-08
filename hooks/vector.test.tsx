@@ -336,6 +336,17 @@ test('agy: G badge after the nameplate (not part of the name), Claude sessions h
   expect(texts).toContain('office')
 })
 
+test('codex: X badge after the nameplate, same shirt as other non-Claude agents', () => {
+  const crew: Coworker[] = [
+    { id: 'x', name: 'reviewer', mode: 'idle', tool: '', isMe: false, role: 'staff', kind: 'codex' },
+    { id: 'c', name: 'office', mode: 'idle', tool: '', isMe: false, role: 'staff' },
+  ]
+  const texts = drawVector(crew, 0, 60, 44).labels.flatMap(l => (l.k === 'text' ? [l.text] : []))
+  expect(texts.filter(t => t === 'X')).toHaveLength(1)
+  expect(texts.filter(t => t === 'G')).toHaveLength(0)
+  expect(lookOf({ name: 'reviewer', role: 'staff', kind: 'codex' }).shirt).toBe(lookOf({ name: 'reviewer', role: 'staff', kind: 'agy' }).shirt)
+})
+
 // ---- 0.48.0／0.48.1：名牌下的 context 條 ----
 import { CTX_H, CTX_W, ctxColor, ctxLabel } from './vector'
 import { assignSeats as assignSeats2 } from './scene'

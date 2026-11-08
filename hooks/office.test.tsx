@@ -2611,6 +2611,13 @@ test('an Antigravity (agy) status file shows up as a coworker that cannot be mes
   expect(parseStatus({ ...s, kind: 'other' }, now)!.kind).toBeUndefined()
 })
 
+test('a Codex status file shows up as a coworker reached through codex_office.py send', () => {
+  const now = 50_000
+  const c = parseStatus({ id: 'codex-t1', kind: 'codex', name: 'kb', mode: 'idle', tool: '', updatedAt: now - 1000, left: false }, now)!
+  expect(c.kind).toBe('codex')
+  expect(roster([c], now)).toContain('| kb | — | staff | Codex: `python ~/.claude/pixel-office/codex/codex_office.py send kb "…" --from <your name>` (delivered when its user next sends it a message) |')
+})
+
 test('a command written by another AI is labeled with its sender, never as the user', () => {
   expect(commandText({ text: 'hi' })).toBe('📱 hi')
   expect(commandText({ text: 'hi', from: 'wtoffice (Antigravity, not the user)' })).toBe('📨 wtoffice (Antigravity, not the user): hi')

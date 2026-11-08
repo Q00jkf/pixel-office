@@ -67,7 +67,7 @@ export type Coworker = {
   /** 啟動時的 --name（classic SessionStart 的 session_title）：一次性對話靠它的前綴分組 */
   label?: string
   /** 不是 Claude Code：agy＝Antigravity CLI（agy/agy_office.py 寫的狀態檔），SendMessage 送不到，改用 agy_office.py send */
-  kind?: 'agy'
+  kind?: 'agy' | 'codex'
 }
 
 /** 個人按鈕（~/.claude/pixel-office/buttons.json）：prompt 送給這個視窗，url 用瀏覽器開 */

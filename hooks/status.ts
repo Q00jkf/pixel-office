@@ -38,6 +38,6 @@ export function parseStatus(s: any, now: number): Coworker | undefined {
     ctxPct: typeof s.ctxPct === 'number' ? s.ctxPct : undefined,
     newTokens: typeof s.newTokens === 'number' && s.newTokens > 0 ? s.newTokens : undefined,
     compacts: typeof s.compacts === 'number' && s.compacts > 0 ? s.compacts : undefined,
-    kind: s.kind === 'agy' ? 'agy' : undefined,
+    kind: s.kind === 'agy' || s.kind === 'codex' ? s.kind : undefined,
   }
 }

@@ -43,6 +43,7 @@ const SW = {
 }
 const TEAM_TAG_BG = 0x0d1320
 const AGY = 0x7b61ff // agy 的藍紫：上衣邊（build_sheet.py）、G 徽章
+const CODEX = 0x10a37f // Codex 的綠：X 徽章
 const FLOOR_BASE = 0xe4eef6 // 大廳玻璃磚底色：門洞、大門用同色
 const GLASS_EDGE = 0x3fc6e0
 const GOLD_SOFT = 0xe2cd85 // 主管室內圈金邊（金色淡一階）
@@ -330,7 +331,7 @@ function screen(p: Pen, x: number, y: number, w: number, mode: OfficeMode | null
 /** 造型：名字雜湊決定 5 個人物之一，再決定上衣顏色（主管一律深藍西裝、agy 一律白衣藍紫邊） */
 export function lookOf(who: Pick<Coworker, 'name' | 'role' | 'kind'>): { person: number; shirt: number } {
   const hh = hash(who.name)
-  return { person: hh % PEOPLE, shirt: who.role === 'manager' ? SHIRTS - 1 : who.kind === 'agy' ? SHIRTS - 2 : Math.floor(hh / PEOPLE) % (SHIRTS - 2) }
+  return { person: hh % PEOPLE, shirt: who.role === 'manager' ? SHIRTS - 1 : who.kind ? SHIRTS - 2 : Math.floor(hh / PEOPLE) % (SHIRTS - 2) }
 }
 
 /**
@@ -405,15 +406,16 @@ function ctxBar(p: Pen, cx: number, baseline: number, who: Coworker) {
 }
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle', barAt = y) {
-  const badge = who.kind === 'agy' ? AGY_BADGE + 0.3 : 0
+  const badge = who.kind ? AGY_BADGE + 0.3 : 0 // 不是 Claude：agy 掛 G、Codex 掛 X
   const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
   const tx = align === 'middle' ? x - badge / 2 : x
   p.label(tx, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
   ctxBar(p, align === 'middle' ? tx : tx + textWidth(t.text, t.size) / 2, barAt, who)
   if (!badge) return
   const bx = tx + (align === 'middle' ? textWidth(t.text, t.size) / 2 : textWidth(t.text, t.size)) + 0.3
-  p.labelRect(bx, y - t.size * 0.85, AGY_BADGE, t.size * 1.05, AGY, 0.4)
-  p.label(bx + AGY_BADGE / 2, y - 0.2, 'G', t.size * 0.8, SW.white, { anchor: 'middle', bold: true, bg: AGY })
+  const [mark, color] = who.kind === 'codex' ? ['X', CODEX] : ['G', AGY]
+  p.labelRect(bx, y - t.size * 0.85, AGY_BADGE, t.size * 1.05, color, 0.4)
+  p.label(bx + AGY_BADGE / 2, y - 0.2, mark, t.size * 0.8, SW.white, { anchor: 'middle', bold: true, bg: color })
 }
 
 function carry(p: Pen, at: Step, kind: ErrandKind) {

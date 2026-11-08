@@ -1,0 +1,63 @@
+{
+  "description": "pixel-office: write this Codex session's status file for the Claude Code pixel office (mode, tool, last reply), deliver pixel-office mail on the next user prompt, mark the session gone on exit. Never blocks Codex.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${PLUGIN_ROOT}/codex_office.py\" hook SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${PLUGIN_ROOT}/codex_office.py\" hook UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${PLUGIN_ROOT}/codex_office.py\" hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${PLUGIN_ROOT}/codex_office.py\" hook Stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${PLUGIN_ROOT}/codex_office.py\" hook SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

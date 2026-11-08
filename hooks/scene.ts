@@ -671,7 +671,7 @@ function unit(p: Px, x: number, y: number, who: Coworker | null, frame: number) 
 
   if (who) {
     person(p, x + 5, y + 1, who, frame, 1)
-    const tag = `${who.isMe ? '>' : ''}${who.role === 'manager' ? '*' : ''}${who.kind === 'agy' ? `${who.name.slice(0, 7)} G` : who.name}`
+    const tag = `${who.isMe ? '>' : ''}${who.role === 'manager' ? '*' : ''}${who.kind ? `${who.name.slice(0, 7)} ${who.kind === 'codex' ? 'X' : 'G'}` : who.name}`
     const fg = who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text
     p.labels.push({ row: (y + 6) / 2, col: x + 1, text: tag.slice(0, 9), fg, bg: C.desk })
   }
@@ -684,7 +684,7 @@ function unit(p: Px, x: number, y: number, who: Coworker | null, frame: number) 
 function person(p: Px, cx: number, cy: number, who: Coworker, frame: number, dir: 1 | -1) {
   const mode = who.mode
   const hh = hash(who.id)
-  const shirt = who.role === 'manager' ? C.suit : who.kind === 'agy' ? C.agy : SHIRTS[hh % SHIRTS.length]
+  const shirt = who.role === 'manager' ? C.suit : who.kind ? C.agy : SHIRTS[hh % SHIRTS.length]
   const hair = HAIR[(hh >> 4) % HAIR.length]
   const shake = mode === 'error' ? (frame % 2 ? 1 : -1) : 0
   const sy = dir === 1 ? cy + 1 : cy
@@ -755,7 +755,7 @@ function carry(p: Px, at: Step, kind: ErrandKind) {
 
 function walking(p: Px, at: Step, who: Coworker, frame: number) {
   const hh = hash(who.id)
-  const shirt = who.role === 'manager' ? C.suit : who.kind === 'agy' ? C.agy : SHIRTS[hh % SHIRTS.length]
+  const shirt = who.role === 'manager' ? C.suit : who.kind ? C.agy : SHIRTS[hh % SHIRTS.length]
   const hair = HAIR[(hh >> 4) % HAIR.length]
   const cx = at.x
   const cy = at.y + 1
