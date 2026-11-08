@@ -354,7 +354,12 @@ async function showMenu(e, p) {
     items.push(el('div', 'sec', 'Summon squad'));
     // Pipeline: roles in order, one per click, ✓ = already under this person. A squad bound to project cards comes
     // in one variant per lead; only the clicked person's own variant shows when there is one
-    const who = [p.agent, p.plate].filter(Boolean), boss = p.agent || p.plate;
+    // Only 2 layers: right-clicking a squad member (staff under a department lead) summons under that lead instead
+    const of = n => people.find(q => q.agent === n || q.name === n || q.plate === n);
+    const up = p.role !== 'manager' && p.team ? of(p.team) : null;
+    const lead = up && up.role === 'manager' && up.team && of(up.team) ? up : p;
+    const who = [lead.agent, lead.plate].filter(Boolean), boss = lead.agent || lead.plate;
+    if (lead !== p) items.push(el('div', 'none', 'Opens under ' + boss));
     const mine = r => tabOf(r.name) >= 0 || people.some(q => q.team === boss && [q.agent, q.title].includes(r.name));
     cards.squads.forEach(s => {
       let opts = s.options && s.options.length ? s.options : [{ roles: s.roles }];
@@ -363,7 +368,7 @@ async function showMenu(e, p) {
         const head = el('div', 'proj', s.name + (o.lead ? ' · ' + o.lead : ''));
         if (s.when) head.title = s.when;
         items.push(head);
-        o.roles.forEach((r, k) => items.push(menuItem(`${k + 1} ${r.name}`, mine(r) ? '✓' : '', () => summon(r, p, dir))));
+        o.roles.forEach((r, k) => items.push(menuItem(`${k + 1} ${r.name}`, mine(r) ? '✓' : '', () => summon(r, lead, dir))));
       });
     });
   }

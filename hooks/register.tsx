@@ -939,9 +939,11 @@ export const hasReports = (self: Coworker, others: Coworker[]) => others.some(c 
 export const shouldRemindDemote = (role: Coworker['role'], seenAt: number | undefined, now: number, noted: boolean) =>
   role === 'manager' && !noted && seenAt !== undefined && now - seenAt >= DEMOTE_MS
 
-/** 該不該附升部門主管提醒：還是員工、有人掛在我底下（從團隊視窗叫出小隊成員時會這樣）；升了或底下沒人就重新算 */
+/** 該不該附升部門主管提醒：還是員工、有人掛在我底下（從團隊視窗叫出小隊成員時會這樣）、自己不是小隊成員；升了或底下沒人就重新算 */
 export const shouldRemindPromote = (self: Coworker, others: Coworker[], noted: boolean) =>
-  self.role !== 'manager' && !noted && hasReports(self, others)
+  self.role !== 'manager' && !noted && hasReports(self, others) &&
+  // 只有 2 層：自己已是部門主管底下的小隊成員就不升（底下的人該改掛部門主管，squad.md §2）
+  !others.some(m => self.team !== undefined && (self.team === m.agent || self.team === m.name) && isDeptLead(m, [self, ...others]))
 
 /** 錯誤訊息 → 名單用的一行摘要：第一個非空行、空白壓成一格、最多 80 字 */
 export function summarizeError(text: string): string {

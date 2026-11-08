@@ -2556,6 +2556,12 @@ test('promotion reminder: staff with someone online under them, once; not for a 
   expect(shouldRemindPromote(me, [kid], true)).toBe(false)
   expect(shouldRemindPromote(me, [P('s', 's')], false)).toBe(false)
   expect(shouldRemindPromote({ ...me, role: 'manager' }, [kid], false)).toBe(false)
+  // a squad member (under a department lead) is not promoted: only 2 layers
+  const top = { ...P('t', 'tt', 'idle', false, 'manager'), agent: 't-t' }
+  const dept = { ...P('d', 'dd', 'idle', false, 'manager'), agent: 'd-d', team: 't-t' }
+  const member = { ...me, team: 'd-d' }
+  expect(shouldRemindPromote(member, [top, dept, kid], false)).toBe(false)
+  expect(shouldRemindPromote({ ...me, team: 't-t' }, [top, dept, kid], false)).toBe(true)
 })
 
 test('an Antigravity (agy) status file shows up as a coworker that cannot be messaged', () => {
