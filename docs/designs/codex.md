@@ -39,4 +39,6 @@
 - `${PLUGIN_ROOT}` 對；SessionEnd 的 `reason` 是 `other`；祖先找得到 `codex.exe`（互動視窗是 `codex.exe --no-daemon`）。
 - 🔴 信任：`/hooks` 畫面寫「N hooks need review before they can run」，要逐個事件點進去、看 Source 是 `pixel-office@pixel-office-codex` 再信任（5 個：PostToolUse、SessionStart、SessionEnd、UserPromptSubmit、Stop）。只安裝不信任：hook 不跑也不報錯，`codex exec` 也不警告。帶 `--dangerously-bypass-hook-trust` 的執行會跑（payload 的 `permission_mode` 是 `bypassPermissions`），別拿它當「已信任」的證據。
 - 信任存在 `~/.codex/config.toml` 的 `[hooks.state."<外掛>@<市集>:hooks/hooks.json:<事件>:0:0"]`，內容是 `trusted_hash = "sha256:…"`（信任前那裡什麼都沒有）。綁的是 hook 定義的雜湊：外掛重裝、`hooks.json` 或指令改了就要重新 review。
+- 升版一定要重新信任（2026-11-09 實測 0.57.0→0.58.0，`hooks.json` 沒改也要；雜湊含展開後帶版號的路徑或版號本身）。不用進 `/hooks` 逐個點：升版後開 Codex 會跳「N hooks are new or changed」，選 **2. Trust all and continue** 一鍵就好。jacky：這樣就夠，不另外做「升版免信任」（試過固定指令字串，沒做完就停）。
+- 本機市集的外掛：版號沒變時 `codex plugin add` 不會更新 cache；`codex plugin marketplace upgrade` 只管 Git 市集。
 - 名牌：工作資料夾全是中文時預設 `codex`，跟名牌叫 codex 的 Claude session 撞名就變 `codex01a1`。
