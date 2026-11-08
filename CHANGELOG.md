@@ -7,6 +7,14 @@
 
 ---
 
+## 0.51.1 — 2026-11-08
+
+- **改了什麼**：Relations 面板在桌面 app 改畫跟團隊視窗 Relations 同一張圖（`relationsSvg`，照抄 `team-window/web/index.html` 的 `drawTrees`／`soloChip`：112×40 圓角框、左上狀態圓點、主管置中在員工上方的曲線連線、不在線主管虛線框、沒團隊的畫成膠囊、自己藍框、名稱用 ListAgents 名稱、超過 9 字截 8 字＋…、同一組配色）；終端機畫不了圖，仍是 0.51.0 的文字樹
+- **為什麼**：jacky 2026-11-08 看了 0.51.0：「我要的不是這一種是跟 relation 相同的介面」
+- **跟團隊視窗不同的地方**：卡住、出錯的點也畫紅（團隊視窗沒對應顏色，畫成藍）；`team` 也認名牌（團隊視窗只認 ListAgents 名稱）；沒有點分頁、右鍵選單（面板裡沒有分頁可切）
+- **實測**：`claude plugin test .` 205 pass（新增 2 個：SVG 內容、桌面畫 Svg）；範例 SVG 在瀏覽器窗格目視
+- **commit**：（本版）
+
 ## 0.51.0 — 2026-11-08
 
 - **改了什麼**：新增獨立的 Relations 面板（pane id `pixel-office-relations`），只畫團隊樹：`team` 對到主管的 ListAgents 名稱或名牌就掛在底下（部門主管再往下縮排），主管不在線畫成「(offline)」空殼，沒團隊的列在「No team」下；每人一行「名牌 · 職稱 — 狀態」，卡住紅、等核准橘、在做事綠、等輸入淡。每個 session 啟動時自動打開（`claude -p` 不開）；`/office relations` 手動開，`/office relations off|on` 關掉／恢復自動開（存 `$.store`）

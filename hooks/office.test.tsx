@@ -2963,3 +2963,40 @@ test('/office relations opens the Relations pane and on/off sets whether it open
   } as any)
   expect(await ui.find({ type: 'Text', text: /online/ })).toBeDefined()
 })
+
+import { relationsSvg } from './register'
+
+test('relationsSvg draws the same picture as the team window: boxes with dots, curved edges, dashed offline shell, chips for solos', () => {
+  const svg = relationsSvg([
+    { ...P('m', 'boss', 'idle', false, 'manager'), agent: '主管視窗', title: '主管' },
+    { ...P('a', 'dev', 'thinking'), team: '主管視窗', title: 'office設計很長的職稱' },
+    { ...P('b', 'qa', 'typing', true), agent: 'qa', team: 'boss' },
+    { ...P('c', 'lost'), team: '不在線<主管>' },
+    { ...P('d', 'solo', 'waiting'), title: 'IT' },
+  ])
+  expect(svg.startsWith('<svg')).toBe(true)
+  expect(svg).toContain('>Relations<')
+  expect(svg).toContain('★主管視窗') // 主管用 ListAgents 名稱，前面加星
+  expect(svg).toContain('>office設計…<') // 跟團隊視窗一樣超過 9 字截成 8 字＋…
+  expect(svg.match(/<path d="M/g)).toHaveLength(3) // boss→dev、boss→qa、空殼→lost
+  expect(svg).toContain('stroke-dasharray="4 3"') // 不在線的主管
+  expect(svg).toContain('不在線&lt;主管&gt;') // 跳脫
+  expect(svg).toContain('stroke="#3b5dc9" stroke-width="2"') // 自己
+  expect(svg).toContain('NO TEAM')
+  expect(svg).toContain('fill="#ef7d57"') // thinking 的點
+  expect(svg).toContain('rx="12"') // 沒團隊的膠囊
+})
+
+test('the Relations pane draws the Svg on desktop and falls back to text in the terminal', async ($, on) => {
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('fs.list', () => ({ value: [] }) as any)
+  const desk = await $.ui.mount({
+    plugin: 'pixel-office',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'pixel-office-relations',
+    props: { title: 'Relations', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: undefined, view: undefined },
+    viewport: { columns: 120, rows: 44 },
+  } as any)
+  expect(String((await desk.find({ type: 'Svg' }))?.props.source)).toContain('>Relations<')
+})

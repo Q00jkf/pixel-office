@@ -1067,6 +1067,116 @@ export function relationsLines(list: Coworker[]): RelationLine[] {
   return out
 }
 
+/** 跟團隊視窗 Relations（team-window/web/index.html 的 drawTrees、soloChip）同一套畫法：尺寸、配色、截字都照抄 */
+const REL = { W: 112, H: 40, GX: 10, GY: 30 }
+const REL_MODE_COLOR: Partial<Record<OfficeMode, string>> = { idle: '#94b0c2', thinking: '#ef7d57', typing: '#38b764', waiting: '#b13e53', blocked: '#b13e53', error: '#b13e53' }
+const relColor = (c: Coworker) => (c.blocked ? '#b13e53' : REL_MODE_COLOR[c.mode] ?? '#3b5dc9')
+const xmlEsc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const cut9 = (t: string) => ([...t].length > 9 ? [...t].slice(0, 8).join('') + '…' : t)
+/** 估字寬：全形約一個字高，半形約 0.6 */
+const textW = (t: string, size: number) => [...t].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? size : size * 0.6), 0)
+
+type RelNode = { c?: Coworker; ghost?: string; kids: RelNode[]; x?: number; y?: number }
+
+export function relationsSvg(list: Coworker[]): string {
+  const { W, H, GX, GY } = REL
+  const byKey = new Map<string, RelNode>()
+  const nodes = list.map(c => ({ c, kids: [] as RelNode[] }))
+  for (const n of nodes) byKey.set(n.c.name, n)
+  for (const n of nodes) if (n.c.agent !== undefined) byKey.set(n.c.agent, n)
+  const roots: RelNode[] = []
+  for (const n of nodes) {
+    const boss = n.c.team
+    if (boss === undefined || byKey.get(boss) === n) {
+      roots.push(n)
+      continue
+    }
+    let b = byKey.get(boss)
+    if (!b) {
+      b = { ghost: boss, kids: [] }
+      byKey.set(boss, b)
+      roots.push(b)
+    }
+    b.kids.push(n)
+  }
+  const label = (n: RelNode) => (n.ghost ?? `${n.c!.role === 'manager' ? '★' : ''}${n.c!.agent ?? n.c!.name}`)
+  const trees = roots.filter(r => r.kids.length > 0)
+  const solos = roots.filter(r => r.kids.length === 0 && r.c)
+  // 葉子由左排到右，主管置中在自己員工上方
+  let leaf = 0
+  let depth = 0
+  const seen = new Set<RelNode>()
+  const place = (n: RelNode, d: number) => {
+    if (seen.has(n)) return
+    seen.add(n)
+    n.y = d * (H + GY)
+    depth = Math.max(depth, d)
+    n.kids.forEach(k => place(k, d + 1))
+    const placed = n.kids.filter(k => k.x !== undefined)
+    n.x = placed.length > 0 ? (placed[0].x! + placed[placed.length - 1].x!) / 2 : leaf++ * (W + GX)
+  }
+  trees.forEach(r => place(r, 0))
+  const treeW = trees.length > 0 ? Math.max(1, leaf) * (W + GX) - GX + 4 : 0
+  const treeH = trees.length > 0 ? (depth + 1) * (H + GY) - GY + 4 : 0
+  const width = Math.max(treeW, 4 * (W + GX))
+  const parts: string[] = []
+  let y = 4
+  parts.push(`<text x="8" y="${y + 12}" font-size="12" font-weight="600" fill="#566c86">Relations</text>`)
+  y += 20
+  if (trees.length > 0) {
+    const g: string[] = []
+    seen.forEach(n =>
+      n.kids.forEach(k => {
+        if (k.x === undefined) return
+        const x1 = n.x! + W / 2, y1 = n.y! + H, x2 = k.x + W / 2, y2 = k.y!, my = (y1 + y2) / 2
+        g.push(`<path d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" fill="none" stroke="#94b0c2" stroke-width="1.5"/>`)
+      }),
+    )
+    seen.forEach(n => {
+      const me = n.c?.isMe === true
+      const fill = n.ghost ? '#e4eef6' : '#e8f0f7'
+      const stroke = me ? 'stroke="#3b5dc9" stroke-width="2"' : `stroke="#94b0c2" stroke-width="1.2"${n.ghost ? ' stroke-dasharray="4 3"' : ''}`
+      const sub = n.ghost ? '(offline)' : n.c!.title ?? MODE_LABEL[n.c!.mode] ?? ''
+      const tip = [label(n), n.c?.title, n.c ? MODE_LABEL[n.c.mode] : '(offline)'].filter(Boolean).join('\n')
+      g.push(
+        `<g transform="translate(${n.x},${n.y})"><title>${xmlEsc(tip)}</title><rect width="${W}" height="${H}" rx="7" fill="${fill}" ${stroke}/>` +
+          (n.ghost ? '' : `<circle cx="10" cy="13" r="4" fill="${relColor(n.c!)}"/>`) +
+          `<text x="20" y="17" font-size="12" font-weight="600" fill="#1a1c2c">${xmlEsc(cut9(label(n)))}</text>` +
+          `<text x="20" y="31" font-size="10" fill="#566c86">${xmlEsc(cut9(sub))}</text></g>`,
+      )
+    })
+    parts.push(`<g transform="translate(${2 + (width - treeW) / 2},${y + 2})">${g.join('')}</g>`)
+    y += treeH + 6
+  }
+  if (solos.length > 0) {
+    if (trees.length > 0) {
+      parts.push(`<text x="8" y="${y + 10}" font-size="10" font-weight="600" fill="#566c86" letter-spacing="0.5">NO TEAM</text>`)
+      y += 16
+    }
+    let x = 4
+    const rowH = 24
+    for (const n of solos.sort((a, b) => label(a).localeCompare(label(b)))) {
+      const c = n.c!
+      const name = label(n)
+      const w = 9 + 7 + 5 + textW(name, 12) + (c.title ? 5 + textW(c.title, 11) : 0) + 9
+      if (x > 4 && x + w > width - 4) {
+        x = 4
+        y += rowH + 4
+      }
+      const me = c.isMe ? 'stroke="#3b5dc9" stroke-width="2"' : 'stroke="#94b0c2" stroke-width="1"'
+      parts.push(
+        `<g transform="translate(${x},${y})"><title>${xmlEsc([name, c.title, MODE_LABEL[c.mode]].filter(Boolean).join('\n'))}</title>` +
+          `<rect width="${w}" height="${rowH}" rx="12" fill="#e8f0f7" ${me}/><circle cx="${9 + 3.5}" cy="${rowH / 2}" r="3.5" fill="${relColor(c)}"/>` +
+          `<text x="21" y="${rowH / 2 + 4}" font-size="12" fill="#1a1c2c">${xmlEsc(name)}${c.title ? `<tspan dx="5" font-size="11" fill="#566c86">${xmlEsc(c.title)}</tspan>` : ''}</text></g>`,
+      )
+      x += w + 4
+    }
+    y += rowH
+  }
+  const h = Math.max(y + 6, 40)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width + 4} ${h}" font-family="sans-serif"><rect width="100%" height="100%" fill="#e4eef6"/>${parts.join('')}</svg>`
+}
+
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
 const NO_HUMAN_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']) // 這些模式下的 ask 不會等人按
 
@@ -2339,7 +2449,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: RELATIONS }, async ($, e) => {
     const list = await read($, crew)
     const shown = list.length > 0 ? list : everyone()
+    const els = $.ui.resolve(e) as Record<string, unknown>
     const { Box, Text } = $.ui.resolve(e)
+    const Svg = els.Svg as typeof Box | undefined
+    // 畫得了圖（桌面 app）就跟團隊視窗 Relations 同一張圖；終端機退回文字樹
+    if (e.surface !== 'terminal' && Svg) return <Svg key="relations" source={relationsSvg(shown)} alt={`Relations: ${shown.length} online`} />
     return (
       <Box flexDirection="column">
         <Text key="rel-head" bold>{`${shown.length} online`}</Text>
