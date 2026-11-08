@@ -53,7 +53,8 @@
 <main><img id="scene" alt="Pixel Office"></main>
 <div id="card"><button id="close" aria-label="Close">×</button><div id="info"></div>
   <div id="reply"></div>
-  <form id="say"><textarea id="text" placeholder="Send a command (same as typing in its window)" enterkeyhint="send"></textarea><button id="send">Send</button></form>
+  <form id="say"><textarea id="text" placeholder="Send a command (same as typing in its window)" enterkeyhint="send"></textarea><button type="button" id="photo" aria-label="Send a photo">📷</button><button id="send">Send</button></form>
+  <input type="file" id="pick" accept="image/*" hidden>
   <div id="sent"></div></div>
 <script>
   const img = document.getElementById('scene')
@@ -146,6 +147,36 @@
       document.getElementById('sent').textContent = r.ok ? 'Sent, waiting for pickup' : `Not sent: ${j.error ?? r.status}`
     } catch {
       document.getElementById('sent').textContent = 'Not sent: cannot reach the computer'
+    } finally {
+      btn.disabled = false
+    }
+  })
+  // 照片：縮到長邊 1600、轉 JPEG（順便解掉 HEIC 等格式），連同輸入框的字一起送
+  const pick = document.getElementById('pick')
+  document.getElementById('photo').addEventListener('click', () => { if (picked) pick.click() })
+  pick.addEventListener('change', async () => {
+    const f = pick.files && pick.files[0]
+    pick.value = ''
+    if (!f || !picked) return
+    const box = document.getElementById('text')
+    const btn = document.getElementById('photo')
+    const sent = document.getElementById('sent')
+    btn.disabled = true
+    sent.textContent = 'Preparing photo…'
+    try {
+      const bmp = await createImageBitmap(f)
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
+      const c = document.createElement('canvas')
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k)
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+      const data = c.toDataURL('image/jpeg', 0.85).split(',')[1]
+      sent.textContent = 'Uploading photo…'
+      const r = await fetch('/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: picked, text: box.value, data }) })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok) box.value = ''
+      sent.textContent = r.ok ? 'Photo sent, waiting for pickup' : `Photo not sent: ${j.error ?? r.status}`
+    } catch {
+      sent.textContent = 'Photo not sent: cannot read the photo or reach the computer'
     } finally {
       btn.disabled = false
     }

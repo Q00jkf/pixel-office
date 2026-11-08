@@ -7,6 +7,16 @@
 
 ---
 
+## 0.55.0 — 2026-11-08
+
+- **改了什麼**：手機版傳照片：
+  - `remote/page.html`：卡片輸入框旁加 📷；選照片後 `createImageBitmap` → canvas 縮到長邊 1600 → JPEG 0.85，連同輸入框的字送 `POST /upload { id, text, data }`（data＝base64）
+  - `remote/server.ts`：新增 export `sendPhoto(id, text, jpeg: Uint8Array, now?)`，回傳錯誤訊息或 undefined（跟 `sendCommand` 一樣）。只收 JPEG 檔頭 `FF D8 FF`、≤ 8 MB、字 ≤ 3000、session 要在線；檔名由伺服器產生（時間＋隨機碼），存 `~/.claude/pixel-office/uploads/`，順便刪 7 天前的照片；再用 `sendCommand` 送「（手機傳來一張圖片：<路徑>，請用 Read 打開來看）」。`/upload` 只收同源 JSON（沿用 `sameOrigin`，不用 multipart：跨站表單送得出 multipart）
+  - 已知限制（未處理）：命令一個 session 一格，照片未被收走時再送會蓋掉；一次一張；電腦端面板沒有 📷
+- **為什麼**：使用者提案（2026-11-08，本機改過並以 Android＋Tailscale 實測兩張照片）；jacky 核可，保留期限 jacky 定 7 天。改成 export 函式是主管（Office 角色接手）的請求：客製伺服器要沿用同一套檢查；之後改 `sendPhoto` 參數要先跟主管說
+- **實測**：`bun test remote` 6 過（新增 1 個：大小、類型、字數、離線都擋、page 用 `/upload`）；用暫存資料夾起 server（port 8799）實打：JPEG → ok、寫出 commands 與 uploads；PNG → `Not a JPEG photo`；multipart → 403；頁面 script 過 `node --check`。手機實機未測
+- **commit**：（本版）
+
 ## 0.54.1 — 2026-11-08
 
 - **改了什麼**：Remote Control（bridge）開的 session 不再被當成一次性對話：`session.start` 多看環境變數 `CLAUDE_CODE_ENVIRONMENT_KIND`，是 `bridge` 就不標 `oneshot`（`hooks/register.tsx`）

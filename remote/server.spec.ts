@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { layout } from '../hooks/scene'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { VENDOR, allowed, deskRowsNeeded, phoneRows, sameOrigin, sceneSvg } from './server'
+import { VENDOR, allowed, deskRowsNeeded, phoneRows, sameOrigin, sceneSvg, sendPhoto } from './server'
 
 test('requests through Cloudflare need the Access email of the owner; local requests pass', () => {
   const h = (o: Record<string, string>) => new Headers(o)
@@ -45,4 +45,15 @@ test('the reply card renders Markdown only through DOMPurify, from vendored file
   const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
   expect(page).toContain('DOMPurify.sanitize(marked.parse(')
   expect(page.match(/marked\.parse\(/g)?.length).toBe(1) // 沒有繞過過濾的第二條路
+})
+
+test('photos: only JPEG up to 8 MB, only to a session that is online; nothing is written otherwise', () => {
+  const jpg = (n: number) => { const b = new Uint8Array(n); b.set([0xff, 0xd8, 0xff]); return b }
+  expect(sendPhoto('x', '', new Uint8Array(0))).toBe('Photo is empty or too large (max 8 MB)')
+  expect(sendPhoto('x', '', jpg(8 * 1024 * 1024 + 1))).toBe('Photo is empty or too large (max 8 MB)')
+  expect(sendPhoto('x', '', new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe('Not a JPEG photo')
+  expect(sendPhoto('x', 'a'.repeat(3001), jpg(10))).toContain('too long')
+  expect(sendPhoto('no-such-session', 'hi', jpg(10))).toBe('This session is no longer online')
+  const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
+  expect(page).toContain("fetch('/upload'") // 客製伺服器把 / 開頭的路徑換成相對路徑
 })

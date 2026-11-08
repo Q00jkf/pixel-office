@@ -1,7 +1,7 @@
 // 手機版辦公室（第 3 期）：本機 HTTP 伺服器，讀 ~/.claude/pixel-office/ 共用資料夾，畫跟 Desktop 同一張向量辦公室。
 // 對外靠 Cloudflare Tunnel＋Cloudflare Access（只放行 owner）；只聽 127.0.0.1。
 // 啟動：bun <這個檔>；設定在 ~/.claude/pixel-office/remote.json：{ "port": 8767, "owner": "<Access 登入的 email>" }
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -14,6 +14,9 @@ const BASE = join(homedir(), '.claude', 'pixel-office')
 const SESSIONS = join(BASE, 'sessions')
 const COMMANDS = join(BASE, 'commands')
 const REPLIES = join(BASE, 'replies')
+const UPLOADS = join(BASE, 'uploads')
+const UPLOAD_MAX = 8 * 1024 * 1024
+const UPLOAD_KEEP_MS = 7 * 24 * 3600 * 1000 // 手機傳的照片留 7 天
 const COMMAND_TTL_MS = 10 * 60 * 1000 // 跟 hooks/register.tsx 的 COMMAND_TTL_MS 一樣
 
 type Config = { port: number; owner?: string }
@@ -172,6 +175,28 @@ export function sendCommand(id: string, text: string, now = Date.now()): string 
   return undefined
 }
 
+/**
+ * 手機傳照片：只收 JPEG（看檔頭）、≤ 8 MB；檔名由伺服器產生，存 uploads/ 再用 sendCommand 叫那個 session 用 Read 打開。
+ * 順便刪掉 7 天前的照片。回傳錯誤訊息或 undefined（跟 sendCommand 一樣）
+ */
+export function sendPhoto(id: string, text: string, jpeg: Uint8Array, now = Date.now()): string | undefined {
+  if (jpeg.length === 0 || jpeg.length > UPLOAD_MAX) return 'Photo is empty or too large (max 8 MB)'
+  if (!(jpeg[0] === 0xff && jpeg[1] === 0xd8 && jpeg[2] === 0xff)) return 'Not a JPEG photo'
+  const t = text.trim()
+  if (t.length > 3000) return 'Text is too long (max 3000 characters with a photo)'
+  if (!crew(now).people.some(c => c.id === id)) return 'This session is no longer online'
+  mkdirSync(UPLOADS, { recursive: true })
+  for (const n of readdirSync(UPLOADS)) {
+    try {
+      if (now - statSync(join(UPLOADS, n)).mtimeMs > UPLOAD_KEEP_MS) rmSync(join(UPLOADS, n))
+    } catch {}
+  }
+  const p = join(UPLOADS, `${new Date(now).toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${crypto.randomUUID().slice(0, 8)}.jpg`)
+  writeFileSync(p, jpeg)
+  return sendCommand(id, `${t ? `${t}
+` : ''}（手機傳來一張圖片：${p}，請用 Read 打開來看）`, now)
+}
+
 /** 送命令只收同源的 JSON：跨站表單送不了 application/json，跨站 fetch 會卡在 CORS 預檢 */
 export function sameOrigin(req: Request): boolean {
   if (!(req.headers.get('content-type') ?? '').startsWith('application/json')) return false
@@ -217,6 +242,12 @@ if (import.meta.main) {
         if (!sameOrigin(req)) return new Response('forbidden', { status: 403 })
         const b = await req.json().catch(() => ({}))
         const err = typeof b.id === 'string' && typeof b.text === 'string' ? sendCommand(b.id, b.text) : 'Bad request'
+        return Response.json(err ? { ok: false, error: err } : { ok: true }, { status: err ? 400 : 200, headers: nocache })
+      }
+      if (url.pathname === '/upload' && req.method === 'POST') {
+        if (!sameOrigin(req)) return new Response('forbidden', { status: 403 })
+        const b = await req.json().catch(() => ({}))
+        const err = typeof b.id === 'string' && typeof b.data === 'string' ? sendPhoto(b.id, typeof b.text === 'string' ? b.text : '', Buffer.from(b.data, 'base64')) : 'Bad request'
         return Response.json(err ? { ok: false, error: err } : { ok: true }, { status: err ? 400 : 200, headers: nocache })
       }
       if (url.pathname === '/state.json') {
