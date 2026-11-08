@@ -7,6 +7,14 @@
 
 ---
 
+## 0.58.0 — 2026-11-09
+
+- **改了什麼**：Codex CLI 接進辦公室。新資料夾 `codex/` 本身是一個 Codex 外掛（只有 hooks）：`codex_office.py` 在 SessionStart／UserPromptSubmit／PostToolUse／Stop／SessionEnd 寫狀態檔 `sessions/codex-<id>.json`（`kind: "codex"`）、Stop 的 `last_assistant_message` 寫 `replies/`，看守程式在 Codex 停著等鍵盤時續心跳。Claude 端 `codex_office.py send <名牌> "…" --from <自己>` 跑 `codex queue`，開著的 Codex 閒置時自己撿起來回；不能用時退回收件夾，下次使用者送出訊息時塞進那一輪。畫面：名牌後綠色 X 徽章（Desktop `vector.ts`、終端機 `scene.ts`），名單附 send 用法。Codex → Claude 還沒做
+- **為什麼**：jacky 2026-11-08「這一個系統可以看到 agy，那是不是也可以看到 codex 呢」；做法跟 willy-codex 討論後 jacky「照計畫做」
+- **安裝**：使用者自己跑 `codex plugin marketplace add "<pixel-office>/codex"`、`codex plugin add pixel-office@pixel-office-codex`，再在 Codex 打 `/hooks` 逐個事件點進去信任（沒信任不跑也不報錯）。信任綁 hook 內容的雜湊，升版重裝要重新信任
+- **實測**：2026-11-09 jacky 的互動 Codex（0.167.0，Windows）：狀態、心跳、完成變閒置、最後一則回覆、關窗、收件夾、`codex queue`（含 `& % ^ "`）都過。`claude plugin test .` 207 過；code review（`claude -p`，0.96 美元）8 條都修。細節 `docs/designs/codex.md`
+- **commit**：4061330、594951a、dc7fbce
+
 ## 0.57.0 — 2026-11-08
 
 - **改了什麼**：session 名稱＝角色名。`takeover.py` 接手時，session 名稱跟角色名（卡上有 `office_name` 用它）不同就提醒使用者 `/rename`（原本只有卡上寫了 `office_name` 才提醒）；已有在線 session 叫這個名字時印 STOP；登記提示的 team 改寫「主管的 session 名稱（＝它的角色名）」。`skills/team/roles.md` §3 第 4 步、`lead.md` 跟著改。比對 team 的程式不變

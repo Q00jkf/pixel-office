@@ -1,6 +1,6 @@
 {
   "name": "pixel-office",
-  "version": "0.57.0",
+  "version": "0.58.0",
   "description": "Pixel office for Codex CLI: shows this Codex session in the Claude Code pixel office (status, last reply) and delivers messages from Claude sessions on its next turn.",
   "author": {
     "name": "pixel-office"
