@@ -1794,7 +1794,9 @@ export const register: Register = on => {
       instance = crypto.randomUUID()
       await update($, instanceRef, () => instance)
     }
-    oneshotRun = e.isInteractive === false && !attached && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
+    // Remote Control（bridge）開的對話有人在用：isInteractive 是 false、也沒有 surface，只能看環境變數
+    const viaBridge = (await $.env.get('CLAUDE_CODE_ENVIRONMENT_KIND').catch(() => undefined)) === 'bridge'
+    oneshotRun = e.isInteractive === false && !attached && !viaBridge && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
     await adopt($, await $.session.id())
     await applyPreset($).catch(() => undefined)
     await updateTokens($).catch(() => undefined) // resume：先把之前的算進來

@@ -7,6 +7,13 @@
 
 ---
 
+## 0.54.1 — 2026-11-08
+
+- **改了什麼**：Remote Control（bridge）開的 session 不再被當成一次性對話：`session.start` 多看環境變數 `CLAUDE_CODE_ENVIRONMENT_KIND`，是 `bridge` 就不標 `oneshot`（`hooks/register.tsx`）
+- **為什麼**：使用者回報（2026-11-08，Mac mini＋手機 Claude App 經 Remote Control 開 session）：這種 session 的 `isInteractive` 是 false、`$.session.surfaces()` 是空的、也收不到非 terminal 的 `session.attach`，於是全被標 `oneshot`：辦公室只算人數不畫員工、手機版顯示 0 online、手機送的命令被 `takeCommand()` 跳過、回覆不存。使用者本機改過並實測可用，jacky 核可併入
+- **實測**：`claude plugin test .` 203 過（新增 1 個：bridge session 一開始就是員工）；「the cat walks…」第一次跑逾時（5 秒上限、機器忙），重跑 4.8 秒通過，未改它
+- **commit**：（本版）
+
 ## 0.54.0 — 2026-11-08
 
 - **改了什麼**：第 2 層（小隊卡，`layer: 2`）只放「怎麼做」、不留狀態：

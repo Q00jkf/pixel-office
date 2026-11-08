@@ -2286,8 +2286,8 @@ const G4_FILES = (NOW: number): Record<string, string> => ({
   'sessions/g4k2.json': JSON.stringify({ id: 'g4k2', name: 'kb', role: 'staff', mode: 'thinking', tool: '', oneshot: true, label: 'API-標籤正本-02-4', updatedAt: NOW - 1000, left: false }),
   'sessions/g4k3.json': JSON.stringify({ id: 'g4k3', name: 'kb', role: 'staff', mode: 'idle', tool: '', oneshot: true, updatedAt: NOW - 1000, left: false }),
 })
-const G4_MOCKS = (on: any, files: Record<string, string>, NOW: number) => {
-  on('env.get', () => ({ value: 'C:/Users/tester' }))
+const G4_MOCKS = (on: any, files: Record<string, string>, NOW: number, env: Record<string, string> = {}) => {
+  on('env.get', (_$: any, e: any) => ({ value: env[e.name] ?? 'C:/Users/tester' }))
   on('clock.now', () => ({ value: NOW }))
   on('fs.list', () => ({ value: Object.keys(files).filter(k => k.startsWith('sessions/')).map(k => ({ name: k.slice(9), kind: 'file', size: 1, mtimeMs: NOW, isLink: false })) }) as any)
   on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).slice(-2).join('/')] ?? '{}' }))
@@ -2359,6 +2359,17 @@ test('a Claude Desktop session (SDK, isInteractive false) is an employee again o
   expect(JSON.parse(files['sessions/d1.json']).oneshot).toBe(true)
   await ($ as any).session.attach({ surface: 'desktop', clientId: 'desktop:default' })
   const mine = JSON.parse(files['sessions/d1.json'])
+  expect(mine.oneshot).toBeUndefined()
+  expect(mine.left).toBe(false)
+})
+
+test('a Remote Control (bridge) session is an employee from the start, not a one-shot', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW, { CLAUDE_CODE_ENVIRONMENT_KIND: 'bridge' })
+  G4_START(on, files, 'r1')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
+  const mine = JSON.parse(files['sessions/r1.json'])
   expect(mine.oneshot).toBeUndefined()
   expect(mine.left).toBe(false)
 })
