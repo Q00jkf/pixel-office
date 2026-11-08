@@ -886,7 +886,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, newTokens: me.newTokens, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, configDir, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, newTokens: me.newTokens, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -1336,6 +1336,7 @@ async function saveProfile($: EngineInterface) {
 let sessionTitle: string | undefined // classic SessionStart／UserPromptSubmit 帶的 session_title（--name 或自動標題）
 let launchName: string | undefined // 啟動時的 --name（classic SessionStart、source＝startup 的 session_title）
 let oneshotRun = false // session.start 的 isInteractive＝false：claude -p 或 SDK
+let configDir: string | undefined // 這個 session 行程的 CLAUDE_CONFIG_DIR，寫進狀態檔給手機版分辨用哪套設定
 let attached = false // Desktop／手機／VS Code 接上過
 
 /**
@@ -1797,6 +1798,7 @@ export const register: Register = on => {
     // Remote Control（bridge）開的對話有人在用：isInteractive 是 false、也沒有 surface，只能看環境變數
     const viaBridge = (await $.env.get('CLAUDE_CODE_ENVIRONMENT_KIND').catch(() => undefined)) === 'bridge'
     oneshotRun = e.isInteractive === false && !attached && !viaBridge && !(await $.session.surfaces().catch(() => [] as const)).some(s => s !== 'terminal')
+    configDir = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || undefined
     await adopt($, await $.session.id())
     await applyPreset($).catch(() => undefined)
     await updateTokens($).catch(() => undefined) // resume：先把之前的算進來

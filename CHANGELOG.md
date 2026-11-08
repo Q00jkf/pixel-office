@@ -7,6 +7,12 @@
 
 ---
 
+## 0.56.0 — 2026-11-08
+
+- **改了什麼**：session 狀態檔多一欄 `configDir`：記下那個 session 行程的 `CLAUDE_CONFIG_DIR`（沒設就不寫）；`parseStatus` 讀進來，手機版伺服器的 `crew()` 會帶出這一欄。畫面不變
+- **為什麼**：一台電腦用不同設定目錄（`CLAUDE_CONFIG_DIR`）跑幾套隔開的設定時，客製的手機伺服器要分辨 session 屬於哪一套；名牌、職稱、team 都是 AI 能自己改的，環境變數 AI 改不了。jacky 2026-11-08 核可
+- **實測**：`claude plugin test .` 205 過（新增 2 項：有設會記下、沒設不寫）；`bun test remote` 6 過
+
 ## 0.55.1 — 2026-11-08
 
 - **改了什麼**：文件補上手機版也可以用 Tailscale 連：`README.md`／`README.zh-TW.md` 標題與說明改成「Cloudflare 或 Tailscale」、加兩者怎麼選、補 0.55.0 的傳照片；`docs/使用說明.md` 手機版「對外」拆成 Cloudflare 與 Tailscale 兩種，Tailscale 附前置（MagicDNS、HTTPS Certificates）、停用指令、不要用 funnel、使用者實測遇到的三件事、「tailnet 裡的裝置都放行」的提醒（serve 會帶 `Tailscale-User-Login`，主管 2026-11-08 實測；伺服器還沒用它檢查）；`remote/server.ts` 只改開頭註解。程式行為不變

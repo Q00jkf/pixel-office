@@ -32,6 +32,7 @@ export function parseStatus(s: any, now: number): Coworker | undefined {
     sentAt: typeof s.sentAt === 'number' ? s.sentAt : undefined,
     gotAt: typeof s.gotAt === 'number' ? s.gotAt : undefined,
     oneshot: s.oneshot === true ? true : undefined,
+    configDir: typeof s.configDir === 'string' && s.configDir.length > 0 ? s.configDir : undefined,
     dup: s.dup === true ? true : undefined,
     label: typeof s.label === 'string' && s.label.length > 0 ? s.label : undefined,
     ctxPct: typeof s.ctxPct === 'number' ? s.ctxPct : undefined,

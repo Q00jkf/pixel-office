@@ -55,6 +55,8 @@ export type Coworker = {
   gotAt?: number
   /** 非互動的一次性對話（claude -p、SDK）：不畫成員工，在走廊收成一個「⚙ <前綴> ×N」徽章 */
   oneshot?: boolean
+  /** 這個 session 行程的 CLAUDE_CONFIG_DIR（沒設就沒有）；AI 改不了自己的環境變數，可拿來分辨 session 屬於哪一套設定 */
+  configDir?: string
   /** 同一個 session 編號另有一個視窗在跑（--resume 接到同一段對話）：兩邊輪流蓋同一個狀態檔，名單只看得到一列 */
   dup?: boolean
   /** 目前 context 佔比（0-100，最近一次回應；剛開或剛壓縮完還沒有回應時沒有）與這個 session 被壓縮過幾次；名單的 ctx 欄 */

@@ -2374,6 +2374,24 @@ test('a Remote Control (bridge) session is an employee from the start, not a one
   expect(mine.left).toBe(false)
 })
 
+test('the session records its own CLAUDE_CONFIG_DIR in its status file; unset, nothing is written', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW, { CLAUDE_CONFIG_DIR: 'C:/Users/u/.claude-a' })
+  G4_START(on, files, 'c1')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['sessions/c1.json']).configDir).toBe('C:/Users/u/.claude-a')
+})
+
+test('no CLAUDE_CONFIG_DIR, no configDir field', async ($, on) => {
+  const NOW = 1_000_000
+  const files: Record<string, string> = {}
+  G4_MOCKS(on, files, NOW, { CLAUDE_CONFIG_DIR: '' })
+  G4_START(on, files, 'c2')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['sessions/c2.json']).configDir).toBeUndefined()
+})
+
 test('an interactive session started with --name gets it as its plate instead of the folder name; not marked one-shot', async ($, on) => {
   const NOW = 1_000_000
   const files: Record<string, string> = {}
