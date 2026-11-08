@@ -404,12 +404,12 @@ function ctxBar(p: Pen, cx: number, baseline: number, who: Coworker) {
   p.label(cx, y + CTX_H - 0.28, ctxLabel(who), 1.15, SW.white, { anchor: 'middle', bold: true })
 }
 
-function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle') {
+function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle', barAt = y) {
   const badge = who.kind === 'agy' ? AGY_BADGE + 0.3 : 0
   const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
   const tx = align === 'middle' ? x - badge / 2 : x
   p.label(tx, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
-  ctxBar(p, align === 'middle' ? tx : tx + textWidth(t.text, t.size) / 2, y, who)
+  ctxBar(p, align === 'middle' ? tx : tx + textWidth(t.text, t.size) / 2, barAt, who)
   if (!badge) return
   const bx = tx + (align === 'middle' ? textWidth(t.text, t.size) / 2 : textWidth(t.text, t.size)) + 0.3
   p.labelRect(bx, y - t.size * 0.85, AGY_BADGE, t.size * 1.05, AGY, 0.4)
@@ -431,11 +431,11 @@ function unit(p: Pen, x: number, y: number, who: Coworker | null, frame: number)
   chairFront(p, CHAIR, x + 5.5, y + 2.2)
   if (who) figure(p, x + 5.5, y + 2.2, who, frame)
   p.sprite('table', x + 0.5, y + 5, 10)
-  screen(p, x + 3, y + 8.6, 5, who ? who.mode : null, frame)
+  screen(p, x + 3, y + 8, 5, who ? who.mode : null, frame) // 名牌下、用量條上：條放螢幕下面，不蓋住螢幕（jacky 2026-11-08）
   const hh = hash(`${x},${y}`)
   const prop: SpriteId = hh % 2 ? 'mug' : 'coffee'
   p.spriteAt(prop, x + 8.4, y + 5.95 - SPRITES[prop][3] * 0.25, 0.25) // 杯底在名牌框（y+6.1 起）上方，不壓名牌
-  if (who) nameTag(p, x + 5.5, y + 7.7, who, 8.6, 'none')
+  if (who) nameTag(p, x + 5.5, y + 7.7, who, 8.6, 'none', 'middle', y + 9.5)
 }
 
 function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: number, extra: number) {
