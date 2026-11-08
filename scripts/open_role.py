@@ -1,11 +1,12 @@
 """開一個角色視窗：一個角色一個 PowerShell 視窗跑 claude（skill pixel-office:team 的「開角色」）。
 
-  python open_role.py --role <角色> --dir <工作位置> --kickoff <開場檔> [--team <主管的 ListAgents 名稱>]
+  python open_role.py --role <角色> [--dir <工作位置>] [--kickoff <開場檔>] [--team <主管的 ListAgents 名稱>]
                       [--title <職稱>] [--plate <名牌>] [--plugin-dir <外掛資料夾>] [--dry-run]
 
 - 子程序的環境拿掉 DROP_ENV（理由見下）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
 - 先產生 session id 帶 --session-id，並寫 ~/.claude/pixel-office/presets/<id>.json（title／team／名牌／role=staff）：
   外掛在那個 session 第一次啟動時套用，開場檔不必再寫「開工先登記辦公室」；agent 與 ref 外掛本來就會自己讀 ListAgents 填
+- --dir 省略 → 用角色卡的啟動位置（roles.py；卡上沒寫用卡所在專案根目錄）；--kickoff 省略 → 開場句「你是 <角色>，接手」
 - 路徑不存在 → 報錯、不開；--dry-run 只印要跑的指令與預設登記，不開視窗、不寫檔
 - 團隊視窗（pty 分頁）import DROP_ENV、child_env()、live_sessions()，兩邊不各寫一份
 """
@@ -89,10 +90,17 @@ def q(s):
     return "'" + s.replace("'", "''") + "'"
 
 
-def ps_script(role, folder, kickoff, session_id, plugin_dir=None):
+def ps_script(role, folder, prompt, session_id, plugin_dir=None):
     plugin = f' --plugin-dir {q(plugin_dir)}' if plugin_dir else ''
     return (f'Set-Location -LiteralPath {q(folder)}; $host.UI.RawUI.WindowTitle = {q(role)}; '
-            f'claude --name {q(role)} --session-id {q(session_id)}{plugin} {q(f"請讀 {kickoff} 並照做。")}')
+            f'claude --name {q(role)} --session-id {q(session_id)}{plugin} {q(prompt)}')
+
+
+def card_dir(role):
+    """--dir 沒給：從角色卡的啟動位置拿（卡上沒寫就是卡所在專案的根目錄）；找不到或同名多張回 None"""
+    from roles import find  # roles → takeover → 本檔，放這裡免得循環
+    hits = [r for r in find(role) if r['start']]
+    return hits[0]['start'] if len(hits) == 1 else None
 
 
 def encoded(script):
@@ -104,8 +112,8 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser(description='Open one role window (PowerShell running claude) with office presets.')
     ap.add_argument('--role', required=True, help='role name: --name, window title, default title')
-    ap.add_argument('--dir', required=True, help='working folder (must exist)')
-    ap.add_argument('--kickoff', required=True, help='kickoff file the role reads first (must exist)')
+    ap.add_argument('--dir', help="working folder (must exist; default: the role card's start folder)")
+    ap.add_argument('--kickoff', help='kickoff file the role reads first (must exist; default: say "你是 <role>，接手")')
     ap.add_argument('--team', help="manager's ListAgents name (office team)")
     ap.add_argument('--title', help='office title, max 16 chars (default: role)')
     ap.add_argument('--plate', help='nameplate, 1-12 letters/digits (default: from --name if ASCII)')
@@ -113,6 +121,10 @@ def main(argv=None):
     ap.add_argument('--dry-run', action='store_true', help='print the command and preset only; open nothing, write nothing')
     a = ap.parse_args(argv)
 
+    a.dir = a.dir or card_dir(a.role)
+    if not a.dir:
+        print(f'No --dir and no single role card with a start folder for {a.role} (python roles.py {a.role})', file=sys.stderr)
+        return 1
     missing = [p for p in (a.dir, a.kickoff, a.plugin_dir) if p and not os.path.exists(p)]
     if missing:
         print('Not found: ' + ', '.join(missing), file=sys.stderr)
@@ -120,7 +132,8 @@ def main(argv=None):
     title = (a.title or a.role)[:16]
     sid = str(uuid.uuid4())
     preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
-    script = ps_script(a.role, os.path.abspath(a.dir), os.path.abspath(a.kickoff), sid,
+    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做。' if a.kickoff else f'你是 {a.role}，接手'
+    script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
                        os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
     if a.dry_run:
         print(f'env drop: {", ".join(DROP_ENV)}')

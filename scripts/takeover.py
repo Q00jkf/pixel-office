@@ -1,9 +1,10 @@
 """接手一個角色（skill pixel-office:team roles.md §3）的前置工作一次做完，只印要用的，省掉逐檔讀。
 
-  python takeover.py <角色> [--office <協作目錄>] [--cwd <專案資料夾>]
+  python takeover.py <角色或卡上的 office_name> [--office <協作目錄>] [--cwd <專案資料夾>]
 
 印出（不寫任何檔）：
 - 角色卡的定義（拿掉註解與 frontmatter）
+- 卡的啟動位置（卡上沒寫：別處的卡用它所在專案根目錄）不是目前資料夾 → 印 MOVE 與開新視窗的 open_role.py 指令、exit 3，其他都不印
 - 你是誰：~/.claude/sessions 裡這個 session 的名稱；卡上有 office_name 而名稱不同 → 提醒請使用者 /rename
 - 撞角色：辦公室裡別的在線 session 職稱＝這個角色，或這份對話同時開在兩個視窗 → 印 STOP，停下來問使用者
 - 登記辦公室那一行（office_profile 的參數；卡的 office_name／office_title 優先）
@@ -48,6 +49,13 @@ def project_office(cwd):
     except (OSError, ValueError, AttributeError):
         pass
     return main, os.path.join(main, '.claude', 'office')
+
+
+def here(cwd, start):
+    """已經在啟動位置：同一個資料夾、在它底下，或同一個主 repo 的 worktree"""
+    n = lambda p: os.path.normcase(os.path.normpath(os.path.abspath(p)))
+    s, c = n(start), n(cwd)
+    return c == s or c.startswith(s.rstrip(os.sep) + os.sep) or n(project_office(cwd)[0]) == s
 
 
 def office_dir(cwd):
@@ -178,15 +186,17 @@ def main(argv=None):
     ap.add_argument('--cwd', default=os.getcwd(), help='project folder (default: current)')
     a = ap.parse_args(argv)
 
+    from roles import find, start_of  # roles.py 反過來 import 本檔，放這裡免得循環
     office = a.office or office_dir(a.cwd)
     card = os.path.join(office, 'roles', f'{a.role}.md')
+    start = None
     if not os.path.isfile(card) and not a.office:
-        from roles import find  # roles.py 反過來 import 本檔，放這裡免得循環
         hits = find(a.role)
         if len(hits) == 1:
-            card = hits[0]['card']
+            card, start = hits[0]['card'], hits[0]['start']
+            a.role = hits[0]['role']
             office = os.path.dirname(os.path.dirname(card))
-            print(f'（本專案沒有這張卡，用別處的：{card}；啟動位置 {hits[0]["start"] or "依派工單"}）')
+            print(f'（本專案沒有這張卡，用別處的：{card}；啟動位置 {start or "依派工單"}）')
         elif hits:
             print(f'STOP：別處有 {len(hits)} 張同名卡 → 問使用者用哪張，再帶 --office 重跑', file=sys.stderr)
             for r in hits:
@@ -197,6 +207,16 @@ def main(argv=None):
         return 1
     meta, body = front(open(card, encoding='utf-8').read())
     body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()
+    start = start_of(body) or start
+    if start and os.path.isabs(start) and os.path.isdir(start) and not here(a.cwd, start):
+        name = meta.get('office_name') or a.role
+        cmd = (f'python "{os.path.join(os.path.dirname(os.path.abspath(__file__)), "open_role.py")}" --role "{name}" '
+               f'--dir "{os.path.normpath(start)}" --title "{cut(meta.get("office_title") or a.role, 16)}"')
+        print(f'MOVE：{a.role} 的啟動位置是 {os.path.normpath(start)}，這裡是 {a.cwd} → 不要在這裡接。')
+        print(f'問使用者一次「要在 {os.path.normpath(start)} 開新視窗接手 {a.role} 嗎？」，好就跑：')
+        print(f'  {cmd}')
+        print(f'開好後這個 session 不接這個角色（卡 {card}）')
+        return 3
     me = my_session()
     name = me.get('name') or '(unnamed)'
     want = meta.get('office_name')

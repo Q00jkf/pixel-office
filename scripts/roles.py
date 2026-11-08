@@ -2,7 +2,7 @@
 
   python roles.py                 列出全部：角色、職稱、專案、啟動位置
   python roles.py <關鍵字>         角色名或職稱含關鍵字的
-  python roles.py --path <角色>    只印那張卡的路徑（沒有 exit 1；同名多張全列、exit 2）
+  python roles.py --path <角色>    只印那張卡的路徑（角色名或 office_name；沒有 exit 1；同名多張全列、exit 2）
 
 只看各處 .claude/office/roles/ 這一層，不全文搜尋、不翻對話紀錄（印出、不寫檔）：
 - ~/.claude.json 的 projects：開過 Claude Code 的每個資料夾，換算成 <office>（worktree 併回主 repo）
@@ -22,7 +22,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from takeover import front, project_office  # noqa: E402
 
 HOME = os.path.expanduser('~')
-START = re.compile(r'^##\s*啟動位置\s*\n+\s*`?([^`\n]+?)`?\s*$', re.M)
+START = re.compile(r'^##\s*啟動位置\s*\n+\s*(?:`([^`\n]+)`|([^\s（(`]+))', re.M)  # 第一個 `路徑`，或行首到空白／括號；後面的說明不算
+
+
+def start_of(body):
+    m = START.search(body)
+    return (m.group(1) or m.group(2)).strip() if m else None
 
 
 def norm(p):
@@ -50,9 +55,8 @@ def read_card(card, project, start=None):
         meta, body = front(open(card, encoding='utf-8').read())
     except OSError:
         return None
-    m = START.search(body)
-    return {'role': os.path.splitext(os.path.basename(card))[0], 'title': meta.get('office_title', ''),
-            'card': os.path.normpath(card), 'project': project, 'start': m.group(1).strip() if m else start}
+    return {'role': os.path.splitext(os.path.basename(card))[0], 'title': meta.get('office_title', ''), 'name': meta.get('office_name', ''),
+            'card': os.path.normpath(card), 'project': project, 'start': start_of(body) or start}
 
 
 def all_roles():
@@ -74,8 +78,9 @@ def all_roles():
 
 
 def find(role):
-    """角色名完全相同的卡（不分大小寫）"""
-    return [r for r in all_roles() if r['role'].lower() == role.lower()]
+    """角色名或卡上 office_name 完全相同的卡（不分大小寫）：「接手 GUANGUAN」找得到 office_name: GUANGUAN 的主管卡"""
+    k = role.lower()
+    return [r for r in all_roles() if k in (r['role'].lower(), r['name'].lower())]
 
 
 def main(argv=None):

@@ -7,6 +7,13 @@
 
 ---
 
+## 0.50.0 — 2026-11-08
+
+- **改了什麼**：接手時自動到角色卡的啟動位置。`takeover.py` 比對卡的啟動位置（卡上沒寫：別處的卡用它所在專案根目錄）與目前資料夾（同資料夾、在它底下、同一主 repo 的 worktree 都算在），不同就只印 `MOVE` 與一行到那裡開新視窗的 `open_role.py` 指令、exit 3；`<角色>` 也認卡上的 `office_name`（`roles.py` 的 `find` 同步）。`open_role.py` 的 `--dir` 省略用卡的啟動位置、`--kickoff` 省略開場句是「你是 <角色>，接手」。`roles.md` §3 加 MOVE 怎麼處理。順手修：啟動位置那行路徑後面接說明（例「`…`（公開 repo…）」）時讀不到、退回成卡所在專案
+- **為什麼**：jacky 2026-11-08：「我就是想要自動讓他 在正確的位置啟用」。在別的資料夾說接手，session 搬不了家：讀不到那個 repo 的 `CLAUDE.md`，同名卡（例：兩個專案都有「主管」）會先接到本專案那張
+- **實測**：6 種位置跑 `takeover.py`（studio 接 office設計 → MOVE 到 pixel-office；pixel-office 接 office設計 → 照常；studio 接 GUANGUAN → MOVE 到 AEGIVERSE、指令帶 `--role GUANGUAN --title 協作主管`；AEGIVERSE 接 GUANGUAN → 照常、角色換成 主管；studio 接 主管 → 本專案那張；pixel-office 接 主管 → 兩張同名 STOP）；`open_role.py --dry-run` 4 種；真視窗 `open_role.py --role office設計`（不給 `--dir`）開在 pixel-office、名稱 office設計
+- **commit**：（本版）
+
 ## 0.49.0 — 2026-11-04
 
 - **改了什麼**：名單加 `new tok` 欄＝這個 session 累計用掉的「新 token」（未快取輸入＋寫入快取＋輸出，不含快取讀取），從對話檔 `~/.claude/projects/<資料夾>/<session>.jsonl` 加總（同一則回應依訊息 id 去重、略過子代理的行）。`/office who` 改成依這欄由大到小排（人看的，最花的在最上面）；給模型的 `office_roster` 維持主管在前。每輪結束算一次、最多每分鐘一次、檔案沒變不算；resume 時先把之前的算進來，數字寫進狀態檔（`newTokens`）
