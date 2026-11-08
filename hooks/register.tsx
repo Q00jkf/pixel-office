@@ -8,6 +8,7 @@ import { STALE_MS, parseStatus } from './status'
 import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
 
 const PANE = 'pixel-office'
+const RELATIONS = 'pixel-office-relations' // 只畫組織樹的獨立面板（jacky 2026-11-08：快速看團隊狀況）
 const DEAD_RECHECK_MS = 60000 // 已關的 session 檔，每分鐘才再讀一次
 const dead = new Map<string, number>() // 檔名 → 上次確認已關的時間
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
@@ -1010,6 +1011,62 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
   return [...head, ...rows].join('\n') + extra
 }
 
+export type RelationLine = { text: string; color?: string; dim?: boolean }
+
+/** 一個人一句狀態＋顏色：卡住紅、等核准橘、在做事綠、等輸入淡 */
+function relationState(c: Coworker): { state: string; color?: string; dim?: boolean } {
+  if (c.blocked || c.mode === 'blocked') return { state: '🔴 blocked', color: '#b13e53' }
+  if (c.mode === 'waiting') return { state: '🟡 awaiting approval', color: '#ef7d57' }
+  if (c.mode === 'error') return { state: 'error', color: '#b13e53' }
+  if (c.mode === 'idle' || c.mode === 'done') return { state: c.mode === 'done' ? 'just finished' : 'waiting for input', dim: true }
+  return { state: 'working', color: '#38b764' }
+}
+
+/** Relations 面板：team 對到主管（ListAgents 名稱或名牌）就掛在他底下；主管不在線畫成「(offline)」的空殼；有團隊的在前，沒團隊的列在最後 */
+export function relationsLines(list: Coworker[]): RelationLine[] {
+  const byKey = new Map<string, Coworker>()
+  for (const c of list) {
+    byKey.set(c.name, c)
+    if (c.agent !== undefined) byKey.set(c.agent, c)
+  }
+  const kids = new Map<string, Coworker[]>() // 主管的 key（在線：id；空殼：ghost:<team>）→ 員工
+  const ghosts: string[] = []
+  const roots: Coworker[] = []
+  for (const c of list) {
+    const boss = c.team !== undefined ? byKey.get(c.team) : undefined
+    const key = boss ? (boss.id !== c.id ? boss.id : undefined) : c.team !== undefined ? `ghost:${c.team}` : undefined
+    if (key === undefined) {
+      roots.push(c)
+      continue
+    }
+    if (key.startsWith('ghost:') && !ghosts.includes(c.team!)) ghosts.push(c.team!)
+    kids.set(key, [...(kids.get(key) ?? []), c])
+  }
+  const byName = (a: Coworker, b: Coworker) => a.name.localeCompare(b.name)
+  const out: RelationLine[] = []
+  const seen = new Set<string>()
+  const person = (c: Coworker, depth: number) => {
+    if (seen.has(c.id)) return
+    seen.add(c.id)
+    const s = relationState(c)
+    const star = c.role === 'manager' ? '★ ' : ''
+    const lead = depth === 0 ? star : `${'  '.repeat(depth - 1)}└ ${star}`
+    out.push({ text: `${lead}${c.isMe ? '▶ ' : ''}${c.name}${c.title ? ` · ${c.title}` : ''} — ${s.state}`, color: s.color, dim: s.dim })
+    for (const k of [...(kids.get(c.id) ?? [])].sort(byName)) person(k, depth + 1)
+  }
+  const teams = roots.filter(c => kids.has(c.id)).sort(byName)
+  const solos = roots.filter(c => !kids.has(c.id)).sort(byName)
+  for (const c of teams) person(c, 0)
+  for (const g of ghosts.sort()) {
+    out.push({ text: `★ ${g} (offline)`, dim: true })
+    for (const k of [...kids.get(`ghost:${g}`)!].sort(byName)) person(k, 1)
+  }
+  if (solos.length > 0 && out.length > 0) out.push({ text: 'No team', dim: true })
+  for (const c of solos) person(c, 0)
+  for (const c of list) person(c, 0) // team 繞成一圈時沒畫到的人補在最後
+  return out
+}
+
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
 const NO_HUMAN_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']) // 這些模式下的 ask 不會等人按
 
@@ -1817,6 +1874,8 @@ export const register: Register = on => {
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
     $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
+    // Relations 面板每個 session 一開就打開（/office relations off 關掉）；終端機太窄時引擎先留著不畫、寬了才畫，所以不等它
+    if (!oneshotRun && (await $.store.get('relations').catch(() => undefined)) !== false) void $.ui.open({ id: RELATIONS, title: 'Relations' }).catch(() => undefined)
 
     return next(e)
   })
@@ -2020,7 +2079,16 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots), 'tokens') } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
     }
-    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
+    if (sub === 'relations') {
+      const v = rest[0]
+      if (v === 'on' || v === 'off') {
+        await $.store.set('relations', v === 'on').catch(() => undefined)
+        return { text: v === 'on' ? 'Relations pane will open by itself when a session starts.' : 'Relations pane will no longer open by itself; open it with /office relations.' }
+      }
+      const opened = await $.ui.open({ id: RELATIONS, title: 'Relations' })
+      return { text: opened.isPlaced ? 'Relations pane open.' : `Relations pane not drawn: ${opened.reason}` }
+    }
+    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office relations [on|off] (team tree pane; on/off = open it by itself at session start, on by default) | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -2264,6 +2332,22 @@ export const register: Register = on => {
           {petNote && frame < petNote.until ? <Text dimColor>{`  ${petNote.text}`}</Text> : null}
           {oneshots.length > 0 ? <Text key="oneshot" dimColor>{`  ${oneshotText(oneshotGroups(oneshots))}`}</Text> : null}
         </Box>
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: RELATIONS }, async ($, e) => {
+    const list = await read($, crew)
+    const shown = list.length > 0 ? list : everyone()
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text key="rel-head" bold>{`${shown.length} online`}</Text>
+        {relationsLines(shown).map((l, i) => (
+          <Text key={`rel-${i}`} color={l.color} dimColor={l.dim}>
+            {l.text}
+          </Text>
+        ))}
       </Box>
     )
   })

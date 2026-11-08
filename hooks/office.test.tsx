@@ -2893,3 +2893,73 @@ test('fmtTokens and the roster: new tok column, /office who style sort puts the 
   expect(rows(roster2(crew, 0, [], 'tokens'))).toEqual(['A', 'M', 'C']) // 沒有值的排最後
   expect(plain).toContain('882k')
 })
+
+// ---------- 0.51.0：Relations 獨立面板 ----------
+
+import { relationsLines } from './register'
+
+test('relationsLines draws the team tree: reports under their manager, offline manager as a shell, solos last', () => {
+  const crew: Coworker[] = [
+    { ...P('m', 'boss', 'idle', false, 'manager'), agent: '主管視窗', title: '主管' },
+    { ...P('a', 'dev', 'thinking'), team: '主管視窗', title: 'office設計' }, // 掛 ListAgents 名稱
+    { ...P('b', 'qa', 'waiting', true), team: 'boss' }, // 掛名牌
+    { ...P('c', 'lost', 'idle'), team: '不在線的主管' },
+    { ...P('d', 'solo', 'idle'), blocked: { tool: 'Bash', at: 0 } },
+  ]
+  const lines = relationsLines(crew)
+  expect(lines.map(l => l.text)).toEqual([
+    '★ boss · 主管 — waiting for input',
+    '└ dev · office設計 — working',
+    '└ ▶ qa — 🟡 awaiting approval',
+    '★ 不在線的主管 (offline)',
+    '└ lost — waiting for input',
+    'No team',
+    'solo — 🔴 blocked',
+  ])
+  expect(lines[1].color).toBe('#38b764')
+  expect(lines[0].dim).toBe(true)
+  expect(lines[6].color).toBe('#b13e53')
+})
+
+test('relationsLines nests department leads and survives a team loop', () => {
+  const deep = relationsLines([
+    { ...P('m', 'top', 'idle', false, 'manager'), agent: 'top' },
+    { ...P('l', 'lead', 'idle', false, 'manager'), agent: 'lead', team: 'top' },
+    { ...P('s', 'member', 'typing'), team: 'lead' },
+  ]).map(l => l.text)
+  expect(deep).toEqual(['★ top — waiting for input', '└ ★ lead — waiting for input', '  └ member — working'])
+  const loop = relationsLines([
+    { ...P('x', 'x'), agent: 'x', team: 'y' },
+    { ...P('y', 'y'), agent: 'y', team: 'x' },
+  ])
+  expect(loop).toHaveLength(2) // 兩個人都畫到、不重複
+})
+
+test('/office relations opens the Relations pane and on/off sets whether it opens at session start', async ($, on) => {
+  const opened: string[] = []
+  const kept: Record<string, unknown> = {}
+  on('store.get', (_$: any, e: any) => ({ value: kept[e.key] }) as any)
+  on('store.set', (_$: any, e: any) => {
+    kept[e.key] = e.value
+    return { value: undefined } as any
+  })
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('fs.list', () => ({ value: [] }) as any)
+  on('ui.open', (_$, e: any) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } } as any
+  })
+  expect((await $.command.run({ command: 'office', args: 'relations' } as any)).text).toContain('Relations pane open')
+  expect(opened).toContain('pixel-office-relations')
+  expect((await $.command.run({ command: 'office', args: 'relations off' } as any)).text).toContain('no longer open by itself')
+  expect(kept.relations).toBe(false)
+  const ui = await $.ui.mount({
+    plugin: 'pixel-office',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'pixel-office-relations',
+    props: { title: 'Relations', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: undefined, view: undefined },
+    viewport: { columns: 120, rows: 44 },
+  } as any)
+  expect(await ui.find({ type: 'Text', text: /online/ })).toBeDefined()
+})

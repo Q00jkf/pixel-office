@@ -7,6 +7,14 @@
 
 ---
 
+## 0.51.0 — 2026-11-08
+
+- **改了什麼**：新增獨立的 Relations 面板（pane id `pixel-office-relations`），只畫團隊樹：`team` 對到主管的 ListAgents 名稱或名牌就掛在底下（部門主管再往下縮排），主管不在線畫成「(offline)」空殼，沒團隊的列在「No team」下；每人一行「名牌 · 職稱 — 狀態」，卡住紅、等核准橘、在做事綠、等輸入淡。每個 session 啟動時自動打開（`claude -p` 不開）；`/office relations` 手動開，`/office relations off|on` 關掉／恢復自動開（存 `$.store`）
+- **為什麼**：jacky 2026-11-08：「一般使用會想要看到 relation 的小格子」「我想要他獨立出來 這樣我才可以快速知道我目前的團隊狀況」；原本 Relations 只在團隊視窗左欄，要先叫出團隊視窗才看得到。選方案 A（Claude 裡的面板）而非獨立小視窗：外掛本身不能啟動外部程式，A 只改 `register.tsx`
+- **限制**：依 `$.ui.open` 說明，沒人要求時開的面板，終端機要 144 欄以上才畫（不到就先留著不畫）；桌面 app 由畫面自己擺。狀態沒有「等了幾分鐘」，只在名單變動時重畫
+- **實測**：`claude plugin test .` 203 pass（新增 3 個：團隊樹含空殼與沒團隊、部門主管縮排與 team 繞圈、`/office relations` 開面板與 on/off）
+- **commit**：（本版）
+
 ## 0.50.0 — 2026-11-08
 
 - **改了什麼**：接手時自動到角色卡的啟動位置。`takeover.py` 比對卡的啟動位置（卡上沒寫：別處的卡用它所在專案根目錄）與目前資料夾（同資料夾、在它底下、同一主 repo 的 worktree 都算在），不同就只印 `MOVE` 與一行到那裡開新視窗的 `open_role.py` 指令、exit 3；`<角色>` 也認卡上的 `office_name`（`roles.py` 的 `find` 同步）。`open_role.py` 的 `--dir` 省略用卡的啟動位置、`--kickoff` 省略開場句是「你是 <角色>，接手」。`roles.md` §3 加 MOVE 怎麼處理。順手修：啟動位置那行路徑後面接說明（例「`…`（公開 repo…）」）時讀不到、退回成卡所在專案
