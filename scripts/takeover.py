@@ -5,7 +5,7 @@
 印出（不寫任何檔）：
 - 角色卡的定義（拿掉註解與 frontmatter）
 - 卡的啟動位置（卡上沒寫：別處的卡用它所在專案根目錄）不是目前資料夾 → 印 MOVE 與開新視窗的 open_role.py 指令、exit 3，其他都不印
-- 你是誰：~/.claude/sessions 裡這個 session 的名稱；卡上有 office_name 而名稱不同 → 提醒請使用者 /rename
+- 你是誰：~/.claude/sessions 裡這個 session 的名稱；跟角色名（卡上有 office_name 用它）不同 → 提醒請使用者 /rename（session 名稱＝角色名，換人接手下屬的 team 才接得上；jacky 2026-11-08）
 - 撞角色：辦公室裡別的在線 session 職稱＝這個角色，或這份對話同時開在兩個視窗 → 印 STOP，停下來問使用者
 - 登記辦公室那一行（office_profile 的參數；卡的 office_name／office_title 優先）
 - 最後一筆檢查點
@@ -220,13 +220,17 @@ def main(argv=None):
     me = my_session()
     name = me.get('name') or '(unnamed)'
     want = meta.get('office_name')
+    rename_to = want or a.role  # session 名稱一律＝角色名：下屬的 team 記的是這個名字，換人接手也接得上（jacky 2026-11-08）
     others = holders(meta.get('office_title') or a.role, me.get('sessionId')) + holders(a.role, me.get('sessionId'))
 
     print(f'# 接手 {a.role}（卡 {card}）')
     print(body)
     print('\n# 你')
     print(f'名稱 {name}（session {me.get("sessionId", "?")[:8]}）'
-          + (f'；卡要求名稱 {want} → 請使用者 /rename {want}（只有使用者能改）' if want and want != name else ''))
+          + (f'；session 名稱要＝角色名 → 請使用者 /rename {rename_to}（只有使用者能改；改好後，team 記這個名字的下屬自動接上）' if rename_to != name else ''))
+    taken = sorted({s.get('agent') for s in live() if s.get('agent') == rename_to and s.get('id') != me.get('sessionId')})
+    if taken and rename_to != name:
+        print(f'STOP：已有在線的 session 叫 {rename_to}（舊的持有者還開著？）→ 先問使用者關掉或改名，不要改成同名')
     if others:
         print(f'STOP：{", ".join(sorted(set(others)))} 也登記這個角色且在線 → 先問使用者，不要接')
     twins = live_sessions(me.get('sessionId')) if me.get('sessionId') else []
@@ -234,7 +238,7 @@ def main(argv=None):
         print(f'STOP：這份對話同時開在 {len(twins)} 個視窗（pid {", ".join(str(p) for p, _ in twins)}）→ 請使用者關掉一個再接')
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
             'role=主管' if meta.get('layer', '1') == '1' and a.role == '主管' else None]
-    print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 ListAgents 名稱，沒有就不帶>, auto=<auto 模式就 true>)')
+    print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
     if meta.get('layer') == '2':  # 小隊卡只放怎麼做：不讀檢查點、不讀 collab（jacky 2026-11-08）
         print('\n# 第 2 層')
         print('不讀檢查點、不讀 collab.md：照派工單做，做完交付、回報開你的人（名單上的 team）就收工')

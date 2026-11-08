@@ -17,7 +17,7 @@
    
    新建或已有，最後都在「主管」加自己一列。
 3. 開人：照使用者的方式（他自己開，或由你開視窗）。由你開 → 一個角色一支：
-   `python <外掛根>/scripts/open_role.py --role <角色> --dir <工作位置> --kickoff <開場檔> --team <你的 ListAgents 名稱> [--plate <名牌>] [--plugin-dir <資料夾>]`
+   `python <外掛根>/scripts/open_role.py --role <角色> --dir <工作位置> --kickoff <開場檔> --team <你的 ListAgents 名稱（＝你的角色名）> [--plate <名牌>] [--plugin-dir <資料夾>]`
    （`<外掛根>`＝這份 skill 資料夾往上兩層；先加 `--dry-run` 看指令）。它清掉會讓新 session 失聯的環境變數、路徑不存在就不開，並預先登記辦公室（title＝角色、team、名牌），開場檔不必再寫登記那段。
    每個新 session 用角色卡接手（`roles.md` §3），或在派工單寫明 `team=<你的 ListAgents 名稱>`。
 4. 你本身是某位主管底下的員工 → 這是第 2 層，照 `squad.md`。
