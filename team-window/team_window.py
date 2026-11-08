@@ -27,8 +27,11 @@ except ImportError as e:  # pythonw 沒有主控台，缺套件要跳視窗講
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, 'web')
-CFG = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'team.json'))
-if len(sys.argv) == 1 and not os.path.exists(CFG):  # 第一次開：從範例建一份自己的 team.json（不進 git）
+# --relations：只有 Relations 的視窗（jacky 2026-11-08）：沒有分頁、不讀寫 team.json；叫出的角色各開一個 PowerShell 視窗（open_role.py）
+RELATIONS = '--relations' in sys.argv
+ARGS = [a for a in sys.argv[1:] if a != '--relations']
+CFG = os.path.abspath(ARGS[0] if ARGS else os.path.join(HERE, 'team.json'))
+if not RELATIONS and not ARGS and not os.path.exists(CFG):  # 第一次開：從範例建一份自己的 team.json（不進 git）
     shutil.copyfile(os.path.join(HERE, 'team.example.json'), CFG)
 
 
@@ -51,6 +54,7 @@ def plugin_scripts():
 
 sys.path.insert(0, plugin_scripts())
 from open_role import child_env  # 開分頁時拿掉哪些環境變數，跟外掛開角色視窗共用一份
+from open_role import main as open_role_main  # Relations 視窗叫出角色＝開一個角色視窗
 try:
     from open_role import live_sessions  # 外掛 0.39.0 起
 except ImportError:
@@ -67,12 +71,16 @@ ANSI = re.compile(r'\x1b\[[0-9;?<>=]*[a-zA-Z~]|\x1b\][^\x07]*\x07|\x1b[=>()][B0]
 
 
 def save_team(team):
+    if RELATIONS:
+        return
     out = {**team, 'agents': [{k: v for k, v in a.items() if not k.startswith('_')} for a in team['agents']]}
     with open(CFG, 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
 
 def load_team():
+    if RELATIONS:
+        return {'title': 'Relations', 'project': os.path.expanduser('~'), 'agents': []}
     with open(CFG, encoding='utf-8') as f:
         team = json.load(f)
     if any(not a.get('id') for a in team['agents']):
@@ -347,7 +355,7 @@ class Api:
         self._closed = False
 
     def tabs(self):
-        return {'title': self._team.get('title', ''),
+        return {'title': self._team.get('title', ''), 'relations': RELATIONS,
                 'names': [a['name'] for a in self._team['agents']], 'ids': [a['id'] for a in self._team['agents']],
                 'roles': [a.get('role', a['name']) for a in self._team['agents']]}  # role＝/rename 前的角色名
 
@@ -491,6 +499,12 @@ class Api:
                 if not plan['fallback']:
                     return {'error': f'Path does not exist: {cwd}'}
                 cwd = plan['fallback']
+            if RELATIONS:  # 沒有分頁：開在自己的 PowerShell 視窗，已在線就不重開
+                if sessions_named(name, cwd):
+                    return {'error': f'{name} is already open ({cwd})'}
+                if open_role_main(['--role', name, '--dir', cwd, '--card', card_file]) != 0:
+                    return {'error': f'Could not open {name} ({cwd})'}
+                return {'opened': True, 'name': name, 'cwd': cwd}
             a = {'name': name, 'id': str(uuid.uuid4()), 'cwd': cwd, 'prompt': f'你是 {name}，接手。角色卡：{card_file}'}
             if self._team.get('args'):
                 a['args'] = list(self._team['args'])
@@ -653,14 +667,14 @@ class Proxy(BaseHTTPRequestHandler):
 
 def main():
     # 自己的工作列分組，才不會跟其他 python 視窗疊在一起、顯示 Python 圖示
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('pixeloffice.teamwindow')
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('pixeloffice.relations' if RELATIONS else 'pixeloffice.teamwindow')
     team = load_team()
     api = Api(team)
     Proxy.office = f'http://127.0.0.1:{office_port()}'
     server = ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    api._window = webview.create_window('Pixel Office', f'http://127.0.0.1:{server.server_port}/team/index.html',
-                                        js_api=api, width=1400, height=800, frameless=True,
+    api._window = webview.create_window('Relations' if RELATIONS else 'Pixel Office', f'http://127.0.0.1:{server.server_port}/team/index.html',
+                                        js_api=api, width=560 if RELATIONS else 1400, height=640 if RELATIONS else 800, frameless=True,
                                         easy_drag=False)  # 預設 True＝按住視窗任何地方都在搬視窗；只留標題列（pywebview-drag-region）
     api._window.events.closing += api._close
     def boot():

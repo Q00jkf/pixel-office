@@ -114,6 +114,7 @@ def main(argv=None):
     ap.add_argument('--role', required=True, help='role name: --name, window title, default title')
     ap.add_argument('--dir', help="working folder (must exist; default: the role card's start folder)")
     ap.add_argument('--kickoff', help='kickoff file the role reads first (must exist; default: say "你是 <role>，接手")')
+    ap.add_argument('--card', help='role card path, added to the default opening line (no --kickoff)')
     ap.add_argument('--team', help="manager's ListAgents name (office team)")
     ap.add_argument('--title', help='office title, max 16 chars (default: role)')
     ap.add_argument('--plate', help='nameplate, 1-12 letters/digits (default: from --name if ASCII)')
@@ -132,7 +133,7 @@ def main(argv=None):
     title = (a.title or a.role)[:16]
     sid = str(uuid.uuid4())
     preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
-    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做。' if a.kickoff else f'你是 {a.role}，接手'
+    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
                        os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
     if a.dry_run:

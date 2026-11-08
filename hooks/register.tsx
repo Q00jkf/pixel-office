@@ -8,7 +8,6 @@ import { STALE_MS, parseStatus } from './status'
 import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
 
 const PANE = 'pixel-office'
-const RELATIONS = 'pixel-office-relations' // 只畫組織樹的獨立面板（jacky 2026-11-08：快速看團隊狀況）
 const DEAD_RECHECK_MS = 60000 // 已關的 session 檔，每分鐘才再讀一次
 const dead = new Map<string, number>() // 檔名 → 上次確認已關的時間
 const crew = atom({ plugin: 'pixel-office', key: 'crew' } as const, [] as Coworker[])
@@ -1011,172 +1010,6 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
   return [...head, ...rows].join('\n') + extra
 }
 
-export type RelationLine = { text: string; color?: string; dim?: boolean }
-
-/** 一個人一句狀態＋顏色：卡住紅、等核准橘、在做事綠、等輸入淡 */
-function relationState(c: Coworker): { state: string; color?: string; dim?: boolean } {
-  if (c.blocked || c.mode === 'blocked') return { state: '🔴 blocked', color: '#b13e53' }
-  if (c.mode === 'waiting') return { state: '🟡 awaiting approval', color: '#ef7d57' }
-  if (c.mode === 'error') return { state: 'error', color: '#b13e53' }
-  if (c.mode === 'idle' || c.mode === 'done') return { state: c.mode === 'done' ? 'just finished' : 'waiting for input', dim: true }
-  return { state: 'working', color: '#38b764' }
-}
-
-/** Relations 面板：team 對到主管（ListAgents 名稱或名牌）就掛在他底下；主管不在線畫成「(offline)」的空殼；有團隊的在前，沒團隊的列在最後 */
-export function relationsLines(list: Coworker[]): RelationLine[] {
-  const byKey = new Map<string, Coworker>()
-  for (const c of list) {
-    byKey.set(c.name, c)
-    if (c.agent !== undefined) byKey.set(c.agent, c)
-  }
-  const kids = new Map<string, Coworker[]>() // 主管的 key（在線：id；空殼：ghost:<team>）→ 員工
-  const ghosts: string[] = []
-  const roots: Coworker[] = []
-  for (const c of list) {
-    const boss = c.team !== undefined ? byKey.get(c.team) : undefined
-    const key = boss ? (boss.id !== c.id ? boss.id : undefined) : c.team !== undefined ? `ghost:${c.team}` : undefined
-    if (key === undefined) {
-      roots.push(c)
-      continue
-    }
-    if (key.startsWith('ghost:') && !ghosts.includes(c.team!)) ghosts.push(c.team!)
-    kids.set(key, [...(kids.get(key) ?? []), c])
-  }
-  const byName = (a: Coworker, b: Coworker) => a.name.localeCompare(b.name)
-  const out: RelationLine[] = []
-  const seen = new Set<string>()
-  const person = (c: Coworker, depth: number) => {
-    if (seen.has(c.id)) return
-    seen.add(c.id)
-    const s = relationState(c)
-    const star = c.role === 'manager' ? '★ ' : ''
-    const lead = depth === 0 ? star : `${'  '.repeat(depth - 1)}└ ${star}`
-    out.push({ text: `${lead}${c.isMe ? '▶ ' : ''}${c.name}${c.title ? ` · ${c.title}` : ''} — ${s.state}`, color: s.color, dim: s.dim })
-    for (const k of [...(kids.get(c.id) ?? [])].sort(byName)) person(k, depth + 1)
-  }
-  const teams = roots.filter(c => kids.has(c.id)).sort(byName)
-  const solos = roots.filter(c => !kids.has(c.id)).sort(byName)
-  for (const c of teams) person(c, 0)
-  for (const g of ghosts.sort()) {
-    out.push({ text: `★ ${g} (offline)`, dim: true })
-    for (const k of [...kids.get(`ghost:${g}`)!].sort(byName)) person(k, 1)
-  }
-  if (solos.length > 0 && out.length > 0) out.push({ text: 'No team', dim: true })
-  for (const c of solos) person(c, 0)
-  for (const c of list) person(c, 0) // team 繞成一圈時沒畫到的人補在最後
-  return out
-}
-
-/** 跟團隊視窗 Relations（team-window/web/index.html 的 drawTrees、soloChip）同一套畫法：尺寸、配色、截字都照抄 */
-const REL = { W: 112, H: 40, GX: 10, GY: 30 }
-const REL_MODE_COLOR: Partial<Record<OfficeMode, string>> = { idle: '#94b0c2', thinking: '#ef7d57', typing: '#38b764', waiting: '#b13e53', blocked: '#b13e53', error: '#b13e53' }
-const relColor = (c: Coworker) => (c.blocked ? '#b13e53' : REL_MODE_COLOR[c.mode] ?? '#3b5dc9')
-const xmlEsc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const cut9 = (t: string) => ([...t].length > 9 ? [...t].slice(0, 8).join('') + '…' : t)
-/** 估字寬：全形約一個字高，半形約 0.6 */
-const textW = (t: string, size: number) => [...t].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? size : size * 0.6), 0)
-
-type RelNode = { c?: Coworker; ghost?: string; kids: RelNode[]; x?: number; y?: number }
-
-export function relationsSvg(list: Coworker[]): string {
-  const { W, H, GX, GY } = REL
-  const byKey = new Map<string, RelNode>()
-  const nodes = list.map(c => ({ c, kids: [] as RelNode[] }))
-  for (const n of nodes) byKey.set(n.c.name, n)
-  for (const n of nodes) if (n.c.agent !== undefined) byKey.set(n.c.agent, n)
-  const roots: RelNode[] = []
-  for (const n of nodes) {
-    const boss = n.c.team
-    if (boss === undefined || byKey.get(boss) === n) {
-      roots.push(n)
-      continue
-    }
-    let b = byKey.get(boss)
-    if (!b) {
-      b = { ghost: boss, kids: [] }
-      byKey.set(boss, b)
-      roots.push(b)
-    }
-    b.kids.push(n)
-  }
-  const label = (n: RelNode) => (n.ghost ?? `${n.c!.role === 'manager' ? '★' : ''}${n.c!.agent ?? n.c!.name}`)
-  const trees = roots.filter(r => r.kids.length > 0)
-  const solos = roots.filter(r => r.kids.length === 0 && r.c)
-  // 葉子由左排到右，主管置中在自己員工上方
-  let leaf = 0
-  let depth = 0
-  const seen = new Set<RelNode>()
-  const place = (n: RelNode, d: number) => {
-    if (seen.has(n)) return
-    seen.add(n)
-    n.y = d * (H + GY)
-    depth = Math.max(depth, d)
-    n.kids.forEach(k => place(k, d + 1))
-    const placed = n.kids.filter(k => k.x !== undefined)
-    n.x = placed.length > 0 ? (placed[0].x! + placed[placed.length - 1].x!) / 2 : leaf++ * (W + GX)
-  }
-  trees.forEach(r => place(r, 0))
-  const treeW = trees.length > 0 ? Math.max(1, leaf) * (W + GX) - GX + 4 : 0
-  const treeH = trees.length > 0 ? (depth + 1) * (H + GY) - GY + 4 : 0
-  const width = Math.max(treeW, 4 * (W + GX))
-  const parts: string[] = []
-  let y = 4
-  parts.push(`<text x="8" y="${y + 12}" font-size="12" font-weight="600" fill="#566c86">Relations</text>`)
-  y += 20
-  if (trees.length > 0) {
-    const g: string[] = []
-    seen.forEach(n =>
-      n.kids.forEach(k => {
-        if (k.x === undefined) return
-        const x1 = n.x! + W / 2, y1 = n.y! + H, x2 = k.x + W / 2, y2 = k.y!, my = (y1 + y2) / 2
-        g.push(`<path d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" fill="none" stroke="#94b0c2" stroke-width="1.5"/>`)
-      }),
-    )
-    seen.forEach(n => {
-      const me = n.c?.isMe === true
-      const fill = n.ghost ? '#e4eef6' : '#e8f0f7'
-      const stroke = me ? 'stroke="#3b5dc9" stroke-width="2"' : `stroke="#94b0c2" stroke-width="1.2"${n.ghost ? ' stroke-dasharray="4 3"' : ''}`
-      const sub = n.ghost ? '(offline)' : n.c!.title ?? MODE_LABEL[n.c!.mode] ?? ''
-      const tip = [label(n), n.c?.title, n.c ? MODE_LABEL[n.c.mode] : '(offline)'].filter(Boolean).join('\n')
-      g.push(
-        `<g transform="translate(${n.x},${n.y})"><title>${xmlEsc(tip)}</title><rect width="${W}" height="${H}" rx="7" fill="${fill}" ${stroke}/>` +
-          (n.ghost ? '' : `<circle cx="10" cy="13" r="4" fill="${relColor(n.c!)}"/>`) +
-          `<text x="20" y="17" font-size="12" font-weight="600" fill="#1a1c2c">${xmlEsc(cut9(label(n)))}</text>` +
-          `<text x="20" y="31" font-size="10" fill="#566c86">${xmlEsc(cut9(sub))}</text></g>`,
-      )
-    })
-    parts.push(`<g transform="translate(${2 + (width - treeW) / 2},${y + 2})">${g.join('')}</g>`)
-    y += treeH + 6
-  }
-  if (solos.length > 0) {
-    if (trees.length > 0) {
-      parts.push(`<text x="8" y="${y + 10}" font-size="10" font-weight="600" fill="#566c86" letter-spacing="0.5">NO TEAM</text>`)
-      y += 16
-    }
-    let x = 4
-    const rowH = 24
-    for (const n of solos.sort((a, b) => label(a).localeCompare(label(b)))) {
-      const c = n.c!
-      const name = label(n)
-      const w = 9 + 7 + 5 + textW(name, 12) + (c.title ? 5 + textW(c.title, 11) : 0) + 9
-      if (x > 4 && x + w > width - 4) {
-        x = 4
-        y += rowH + 4
-      }
-      const me = c.isMe ? 'stroke="#3b5dc9" stroke-width="2"' : 'stroke="#94b0c2" stroke-width="1"'
-      parts.push(
-        `<g transform="translate(${x},${y})"><title>${xmlEsc([name, c.title, MODE_LABEL[c.mode]].filter(Boolean).join('\n'))}</title>` +
-          `<rect width="${w}" height="${rowH}" rx="12" fill="#e8f0f7" ${me}/><circle cx="${9 + 3.5}" cy="${rowH / 2}" r="3.5" fill="${relColor(c)}"/>` +
-          `<text x="21" y="${rowH / 2 + 4}" font-size="12" fill="#1a1c2c">${xmlEsc(name)}${c.title ? `<tspan dx="5" font-size="11" fill="#566c86">${xmlEsc(c.title)}</tspan>` : ''}</text></g>`,
-      )
-      x += w + 4
-    }
-    y += rowH
-  }
-  const h = Math.max(y + 6, 40)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width + 4} ${h}" font-family="sans-serif"><rect width="100%" height="100%" fill="#e4eef6"/>${parts.join('')}</svg>`
-}
-
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
 const NO_HUMAN_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']) // 這些模式下的 ask 不會等人按
 
@@ -1984,8 +1817,6 @@ export const register: Register = on => {
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
     $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
-    // Relations 面板每個 session 一開就打開（/office relations off 關掉）；終端機太窄時引擎先留著不畫、寬了才畫，所以不等它
-    if (!oneshotRun && (await $.store.get('relations').catch(() => undefined)) !== false) void $.ui.open({ id: RELATIONS, title: 'Relations' }).catch(() => undefined)
 
     return next(e)
   })
@@ -2189,16 +2020,7 @@ export const register: Register = on => {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots), 'tokens') } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
     }
-    if (sub === 'relations') {
-      const v = rest[0]
-      if (v === 'on' || v === 'off') {
-        await $.store.set('relations', v === 'on').catch(() => undefined)
-        return { text: v === 'on' ? 'Relations pane will open by itself when a session starts.' : 'Relations pane will no longer open by itself; open it with /office relations.' }
-      }
-      const opened = await $.ui.open({ id: RELATIONS, title: 'Relations' })
-      return { text: opened.isPlaced ? 'Relations pane open.' : `Relations pane not drawn: ${opened.reason}` }
-    }
-    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office relations [on|off] (team tree pane; on/off = open it by itself at session start, on by default) | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
+    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -2442,26 +2264,6 @@ export const register: Register = on => {
           {petNote && frame < petNote.until ? <Text dimColor>{`  ${petNote.text}`}</Text> : null}
           {oneshots.length > 0 ? <Text key="oneshot" dimColor>{`  ${oneshotText(oneshotGroups(oneshots))}`}</Text> : null}
         </Box>
-      </Box>
-    )
-  })
-
-  on('ui.render', { component: 'Pane', requestId: RELATIONS }, async ($, e) => {
-    const list = await read($, crew)
-    const shown = list.length > 0 ? list : everyone()
-    const els = $.ui.resolve(e) as Record<string, unknown>
-    const { Box, Text } = $.ui.resolve(e)
-    const Svg = els.Svg as typeof Box | undefined
-    // 畫得了圖（桌面 app）就跟團隊視窗 Relations 同一張圖；終端機退回文字樹
-    if (e.surface !== 'terminal' && Svg) return <Svg key="relations" source={relationsSvg(shown)} alt={`Relations: ${shown.length} online`} />
-    return (
-      <Box flexDirection="column">
-        <Text key="rel-head" bold>{`${shown.length} online`}</Text>
-        {relationsLines(shown).map((l, i) => (
-          <Text key={`rel-${i}`} color={l.color} dimColor={l.dim}>
-            {l.text}
-          </Text>
-        ))}
       </Box>
     )
   })

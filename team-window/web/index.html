@@ -33,6 +33,9 @@
   #left { width: var(--office-w); flex: none; display: flex; flex-direction: column; background: var(--panel); }
   #office { flex: 1; min-height: 120px; border: 0; background: var(--panel); }
   body.collapsed #left { display: none; }
+  body.relations #office, body.relations #hsplit, body.relations #split, body.relations #right { display: none; }
+  body.relations #left { flex: 1; width: auto; display: flex; }
+  body.relations #graph { flex: 1; height: auto; }
   body.dragging, body.dragging * { cursor: col-resize !important; user-select: none; }
   body.dragging-h, body.dragging-h * { cursor: row-resize !important; user-select: none; }
   body.dragging #office, body.dragging-h #office { pointer-events: none; }
@@ -272,6 +275,7 @@ async function openRole(r, ctx = {}) {
     res = await api.add_tab(r.name + ' ' + c.label, r.file, c.path, ctx.project || null);
   }
   if (res.error) { toast(res.error); return 'error'; }
+  if (res.opened) { toast(`Opened ${res.name} (${res.cwd})`, true); return 'ok'; }  // Relations 視窗：開在自己的視窗
   if (!res.existed) makeTab(res.i, res.name, res.id, r.name);
   show(res.i);
   return 'ok';
@@ -548,9 +552,9 @@ async function init() {
   if (inited || !(window.pywebview && window.pywebview.api && window.pywebview.api.tabs)) return;
   inited = true;
   api = window.pywebview.api;
-  const { names, ids, roles } = await api.tabs();
+  const { names, ids, roles, relations } = await api.tabs();
   const tbar = document.getElementById('titlebar'), [minB, maxB, closeB] = tbar.querySelectorAll('button');
-  tbar.querySelector('.name').textContent = document.title = 'Pixel Office';
+  tbar.querySelector('.name').textContent = document.title = relations ? 'Relations' : 'Pixel Office';
   // is_maximized reads the real window state, so Win+↑ and Aero Snap are caught too
   const syncMax = async () => { try { document.body.classList.toggle('maximized', !!await api.is_maximized()); } catch {} };
   const toggleMax = async () => { await api.toggle_maximize(); syncMax(); };
@@ -562,6 +566,13 @@ async function init() {
   // pywebview listens for drag on body; keep the buttons from starting a window move
   [minB, maxB, closeB].forEach(b => { b.onmousedown = (e) => e.stopPropagation(); });
   addGrips();
+  if (relations) {  // 只有 Relations：不載辦公室頁、沒有分頁
+    document.body.classList.remove('collapsed');
+    document.body.classList.add('relations');
+    document.getElementById('office').src = 'about:blank';
+    drawGraph();
+    return;
+  }
   names.forEach((name, i) => makeTab(i, name, ids[i], (roles && roles[i]) || name));
   window.addEventListener('resize', refit);
   setInterval(syncNames, 2000);

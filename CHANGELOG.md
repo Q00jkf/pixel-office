@@ -7,6 +7,17 @@
 
 ---
 
+## 0.52.0 — 2026-11-08
+
+- **改了什麼**：
+  - 新增只有 Relations 的視窗：`team-window/team_window.py --relations`（雙擊 `team-window/start-relations.bat`）。畫面只有團隊視窗的 Relations 圖，右鍵選單照舊（Open role、Summon squad、Close session、空白處開主管）；沒有分頁、不讀寫 `team.json`，叫出的角色各開一個 PowerShell 視窗（`open_role.py`，開在卡的啟動位置），同名同資料夾已在線就不重開
+  - `open_role.py` 加 `--card`：沒給 `--kickoff` 時開場句帶角色卡路徑（「你是 X，接手。角色卡：…」，跟團隊視窗分頁同一句）
+  - 拿掉 0.51.0／0.51.1 的外掛 Relations 面板（`/office relations`、session 啟動自動開）
+- **為什麼**：jacky 2026-11-08 看了外掛面板：「用這一個方式是不是不能如 GUI 那樣叫出工作流程或是 session 呢 如果不行 我們就開一個 GUI 只有 relation 即可」——外掛不能開新的 Claude session（API 只能在本 session 開 subagent），面板做不到右鍵開角色、叫小隊；接著「把 desk 的介面刪除 這是多餘的功能」
+- **限制**：跟團隊視窗一樣要手機面板伺服器（8767，`~/.claude/pixel-office/start-remote.bat`）在跑，沒跑時圖的位置寫「Office state unavailable」；點方框不會切到那人的視窗；外掛不能啟動外部程式，所以不會在 session 啟動時自動打開
+- **實測**：`claude plugin test .` 200 pass（拿掉面板的 5 個測試）；真視窗（TW_EVAL）：只有 Relations 顯示、辦公室與分頁隱藏、iframe 不載；伺服器沒跑時顯示 unavailable，跑起來畫出在線的主管與員工；`add_tab('office設計')` 在 pixel-office 開出新 PowerShell 視窗，開場句帶卡路徑，新 session 接手時撞角色印 STOP
+- **commit**：（本版）
+
 ## 0.51.1 — 2026-11-08
 
 - **改了什麼**：Relations 面板在桌面 app 改畫跟團隊視窗 Relations 同一張圖（`relationsSvg`，照抄 `team-window/web/index.html` 的 `drawTrees`／`soloChip`：112×40 圓角框、左上狀態圓點、主管置中在員工上方的曲線連線、不在線主管虛線框、沒團隊的畫成膠囊、自己藍框、名稱用 ListAgents 名稱、超過 9 字截 8 字＋…、同一組配色）；終端機畫不了圖，仍是 0.51.0 的文字樹
