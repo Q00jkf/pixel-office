@@ -2500,7 +2500,7 @@ test('/office runs ListAgents itself (no model) to register the ListAgents name;
 // ---------- 0.25.0：部門主管（第 2 層）、降層提醒（jacky 2026-10-29） ----------
 
 import { isDeptLead } from './scene'
-import { DEMOTE_MS, hasReports, shouldRemindDemote, shouldRemindPromote } from './register'
+import { DEMOTE_MS, hasReports, isLayer2, shouldRemindDemote, shouldRemindPromote } from './register'
 
 test('a manager with team on another online manager is a department lead: sits first in their own zone, not in the manager office', () => {
   const top = boss('t', 'tt', 'm-t')
@@ -2547,6 +2547,14 @@ test('demotion reminder: only a manager, only after 20 minutes with nobody under
   expect(shouldRemindDemote('manager', 0, DEMOTE_MS, true)).toBe(false)
   expect(shouldRemindDemote('staff', 0, DEMOTE_MS, false)).toBe(false)
   expect(shouldRemindDemote('manager', undefined, DEMOTE_MS, false)).toBe(false)
+})
+
+test('layer 2 cards (squad) keep no checkpoint: detected from frontmatter only', () => {
+  expect(isLayer2('---\nrole: 測試\nlayer: 2\n---\n## 職責\n')).toBe(true)
+  expect(isLayer2('---\r\nrole: x\r\nlayer: 2\r\n---\r\n')).toBe(true)
+  expect(isLayer2('---\nrole: 主管\nlayer: 1\nreports_to: 主管\n---\n')).toBe(false)
+  expect(isLayer2('---\nrole: x\n---\nlayer: 2\n')).toBe(false) // 內文不算
+  expect(isLayer2('')).toBe(false)
 })
 
 test('promotion reminder: staff with someone online under them, once; not for a manager', () => {

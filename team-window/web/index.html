@@ -358,12 +358,14 @@ async function showMenu(e, p) {
     const of = n => people.find(q => q.agent === n || q.name === n || q.plate === n);
     const up = p.role !== 'manager' && p.team ? of(p.team) : null;
     const lead = up && up.role === 'manager' && up.team && of(up.team) ? up : p;
-    const who = [lead.agent, lead.plate].filter(Boolean), boss = lead.agent || lead.plate;
+    const who = [lead.agent, lead.title, lead.plate].filter(Boolean), boss = lead.agent || lead.plate;
     if (lead !== p) items.push(el('div', 'none', 'Opens under ' + boss));
     const mine = r => tabOf(r.name) >= 0 || people.some(q => q.team === boss && [q.agent, q.title].includes(r.name));
     cards.squads.forEach(s => {
       let opts = s.options && s.options.length ? s.options : [{ roles: s.roles }];
-      if (opts.some(o => who.includes(o.lead))) opts = opts.filter(o => who.includes(o.lead));
+      // o.lead is the group name from card names (willy實作 → willy); the lead's own group is the one their title/name starts with
+      const ours = o => !!o.lead && who.some(w => w.startsWith(o.lead));
+      if (opts.some(ours)) opts = opts.filter(ours);
       opts.forEach(o => {
         const head = el('div', 'proj', s.name + (o.lead ? ' · ' + o.lead : ''));
         if (s.when) head.title = s.when;

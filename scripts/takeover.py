@@ -235,6 +235,10 @@ def main(argv=None):
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
             'role=主管' if meta.get('layer', '1') == '1' and a.role == '主管' else None]
     print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 ListAgents 名稱，沒有就不帶>, auto=<auto 模式就 true>)')
+    if meta.get('layer') == '2':  # 小隊卡只放怎麼做：不讀檢查點、不讀 collab（jacky 2026-11-08）
+        print('\n# 第 2 層')
+        print('不讀檢查點、不讀 collab.md：照派工單做，做完交付、回報開你的人（名單上的 team）就收工')
+        return 0
     cp = last_checkpoint(os.path.join(office, 'checkpoints', f'{a.role}.md'))
     print('\n# 上次檢查點')
     print(cut(cp, 1500) if cp else '（沒有）')

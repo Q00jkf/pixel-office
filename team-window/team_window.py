@@ -416,7 +416,7 @@ class Api:
 
     def roster_cards(self, session_id=None):
         """團隊清單：被點的人（session id）所在專案的第 1 層角色卡、整台電腦的第 2 層小隊；查不到他在哪就用 team.json 的 project。
-        專案的第 2 層卡寫「通用定義見小隊 <小隊> 的 <角色> 卡」＋「部門主管是 <名>」→ 依部門主管分組成 options，叫小隊時開專案卡"""
+        專案的第 2 層卡寫「通用定義見小隊 <小隊> 的 <角色> 卡」、卡名 <組名><角色> → 依組名分組成 options（lead＝組名），叫小隊時開專案卡"""
         where = session_id and session_cwd(session_id)
         project = main_repo(where) if where else self._project
         roles = os.path.join(office_dir(project), 'roles')
@@ -433,9 +433,9 @@ class Api:
             groups = {}
             for c in local:
                 m = re.search(rf'通用定義見小隊\s*{re.escape(name)}\s*的\s*(\S+?)\s*卡', c['_body'])
-                if m:
-                    lead = re.search(r'部門主管是\s*([^\s。，,]+)', c['_body'])
-                    groups.setdefault(lead.group(1) if lead else '', {})[m.group(1)] = public(c)
+                if m:  # 卡名＝<組名><角色>（例 willy實作）：前綴就是組；卡上不寫主管是誰（jacky 2026-11-08）
+                    group = c['name'][:-len(m.group(1))] if c['name'].endswith(m.group(1)) else ''
+                    groups.setdefault(group, {})[m.group(1)] = public(c)
             options = [{'lead': lead, 'roles': [got.get(g['name'], public(g)) for g in generic]} for lead, got in groups.items()]
             squads.append({'name': name, 'when': when.group(1).strip() if when else '',
                            'roles': [public(g) for g in generic], 'options': options})

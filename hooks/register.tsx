@@ -660,6 +660,9 @@ export async function heldRole(names: (string | undefined)[], exists: (name: str
   return undefined
 }
 
+/** 角色卡 frontmatter 寫 layer: 2（小隊卡：只放怎麼做、不留狀態） */
+export const isLayer2 = (card: string) => /^---\r?\n[\s\S]*?^layer:\s*2\s*$[\s\S]*?^---/m.test(card)
+
 /** 自己持有的角色的檢查點檔；找到過就記住，之後 title 怎麼改都不丟（只有 agent／title 換了又找不到時才沿用舊的） */
 async function checkpointFile($: EngineInterface): Promise<string | undefined> {
   if (me.oneshot || me.id === 'me' || (!me.title && !me.agent)) return undefined
@@ -667,7 +670,9 @@ async function checkpointFile($: EngineInterface): Promise<string | undefined> {
   if (cpCache?.key !== key) {
     const office = await officeDir($).catch(() => undefined)
     const role = office ? await heldRole([me.agent, me.title], n => $.fs.exists(`${office}/roles/${n}.md`)) : undefined
-    cpCache = { key, file: role ? `${office}/checkpoints/${role}.md` : cpCache?.file }
+    // 第 2 層（小隊卡）不存檢查點：不提醒、/compact 不要求摘要、下線不補寫（jacky 2026-11-08）
+    const card = role ? await $.fs.read(`${office}/roles/${role}.md`).then(t => (typeof t === 'string' ? t : ''), () => '') : ''
+    cpCache = { key, file: role && isLayer2(card) ? undefined : role ? `${office}/checkpoints/${role}.md` : cpCache?.file }
   }
   return cpCache.file
 }
