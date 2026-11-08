@@ -925,6 +925,9 @@ export const DUP_NOTE =
   'Pixel office: another window is running this same conversation (same session id, usually a second claude --resume). Stop and tell the user to close one window; both copies write the same checkpoint and office record, and messages reach either one.'
 export const DEMOTE_NOTE =
   "Pixel office: you are registered as manager but nobody online has had team=you for 20 minutes. If multiple sessions are no longer needed, ask the user whether to step down (office_profile role=staff, then clear collab.md's 在線 rows per skill pixel-office:team). If windows are only closed for now, keep as is. Don't change it yourself."
+export const PROMOTE_NOTE =
+  "Pixel office: someone online now has team=you (opened as your squad member), but you are registered as staff, so the office draws them outside any team. Step up to department lead now without asking: office_profile role=manager with team=<your current manager>, add your row to collab.md and tell your manager, per skill pixel-office:team squad.md §2."
+let promoteNoted = false // 這次有人掛到我底下已經提醒過升部門主管
 let reportsSeenAt: number | undefined // 最後一次看到有人掛在我底下（或我還不是主管）的時間
 let demoteNoted = false // 這段沒人的期間已經提醒過
 let dupNoted = false // 撞號只提醒模型一次
@@ -935,6 +938,10 @@ export const hasReports = (self: Coworker, others: Coworker[]) => others.some(c 
 /** 該不該附降層提醒：主管、底下沒人滿 DEMOTE_MS（只提醒，不自動改；外掛不主動） */
 export const shouldRemindDemote = (role: Coworker['role'], seenAt: number | undefined, now: number, noted: boolean) =>
   role === 'manager' && !noted && seenAt !== undefined && now - seenAt >= DEMOTE_MS
+
+/** 該不該附升部門主管提醒：還是員工、有人掛在我底下（從團隊視窗叫出小隊成員時會這樣）；升了或底下沒人就重新算 */
+export const shouldRemindPromote = (self: Coworker, others: Coworker[], noted: boolean) =>
+  self.role !== 'manager' && !noted && hasReports(self, others)
 
 /** 錯誤訊息 → 名單用的一行摘要：第一個非空行、空白壓成一格、最多 80 字 */
 export function summarizeError(text: string): string {
@@ -1112,6 +1119,7 @@ async function refresh($: EngineInterface) {
   }
   others = found.filter(c => !c.oneshot)
   oneshots = found.filter(c => c.oneshot)
+  if (me.role === 'manager' || !hasReports(me, others)) promoteNoted = false
   if (me.role !== 'manager' || hasReports(me, others) || reportsSeenAt === undefined) {
     reportsSeenAt = now
     demoteNoted = false
@@ -2075,6 +2083,10 @@ export const register: Register = on => {
         if (me.dup && !dupNoted) {
           dupNoted = true
           e = { ...e, context: [...(e.context ?? []), DUP_NOTE] }
+        }
+        if (shouldRemindPromote(me, others, promoteNoted)) {
+          promoteNoted = true
+          e = { ...e, context: [...(e.context ?? []), PROMOTE_NOTE] }
         }
         if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
           demoteNoted = true

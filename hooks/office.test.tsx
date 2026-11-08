@@ -2500,7 +2500,7 @@ test('/office runs ListAgents itself (no model) to register the ListAgents name;
 // ---------- 0.25.0：部門主管（第 2 層）、降層提醒（jacky 2026-10-29） ----------
 
 import { isDeptLead } from './scene'
-import { DEMOTE_MS, hasReports, shouldRemindDemote } from './register'
+import { DEMOTE_MS, hasReports, shouldRemindDemote, shouldRemindPromote } from './register'
 
 test('a manager with team on another online manager is a department lead: sits first in their own zone, not in the manager office', () => {
   const top = boss('t', 'tt', 'm-t')
@@ -2547,6 +2547,15 @@ test('demotion reminder: only a manager, only after 20 minutes with nobody under
   expect(shouldRemindDemote('manager', 0, DEMOTE_MS, true)).toBe(false)
   expect(shouldRemindDemote('staff', 0, DEMOTE_MS, false)).toBe(false)
   expect(shouldRemindDemote('manager', undefined, DEMOTE_MS, false)).toBe(false)
+})
+
+test('promotion reminder: staff with someone online under them, once; not for a manager', () => {
+  const me = { ...P('o', 'oo'), agent: 'o-o' }
+  const kid = { ...P('s', 's'), team: 'o-o' }
+  expect(shouldRemindPromote(me, [kid], false)).toBe(true)
+  expect(shouldRemindPromote(me, [kid], true)).toBe(false)
+  expect(shouldRemindPromote(me, [P('s', 's')], false)).toBe(false)
+  expect(shouldRemindPromote({ ...me, role: 'manager' }, [kid], false)).toBe(false)
 })
 
 test('an Antigravity (agy) status file shows up as a coworker that cannot be messaged', () => {
