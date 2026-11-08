@@ -15,6 +15,8 @@ pip install pywebview pywinpty
 ```
 
 **Relations only** (`team_window.py --relations`): just the Relations graph, same right-click menu (Open role, Summon squad, Close session).
+
+**Summon squad** (right-click a person): the squad's roles in order (1 實作, 2 測試, 3 確認); a click opens just that one, hung under the clicked person (`team`) and opened in that person's current folder. A card start location is used only when it needs no choosing. Roles already under that person show ✓.
 No tabs and no `team.json`: each role it opens gets its own PowerShell window via `scripts/open_role.py`, in the card's start location; a role already open there is not opened twice.
 
 Edit `team.json` (not committed): `title`, `project`, and one entry per role in `agents`

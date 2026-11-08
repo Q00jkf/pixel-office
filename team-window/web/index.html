@@ -282,9 +282,13 @@ async function openRole(r, ctx = {}) {
   show(res.i);
   return 'ok';
 }
-async function summon(s, project) {
-  const ctx = { project };
-  for (const r of s.roles) if (await openRole(r, ctx) === 'cancel') break;
+// Squad member (layer 2): hangs under the summoner and opens in the summoner's folder; one role per click
+async function summon(r, p, project) {
+  const res = await api.summon_role(r.name, r.file, p.id || null, p.agent || p.plate, project);
+  if (res.error) return toast(res.error);
+  if (res.opened) return toast(`Opened ${res.name} (${res.cwd})`, true);
+  if (!res.existed) makeTab(res.i, res.name, res.id, r.name);
+  show(res.i);
 }
 function menuItem(label, note, fn) {
   const b = el('button');
@@ -346,18 +350,20 @@ async function showMenu(e, p) {
     items.push(el('div', 'sec', 'Open role'));
     cards.project.forEach(r => items.push(menuItem(r.name, tabOf(r.name) >= 0 ? 'tab ✓' : '', () => openRole(r, { project: dir }))));
   }
-  if (cards.squads.length) {
+  if (cards.squads.length && p && !p.ghost && (p.agent || p.plate)) {
     items.push(el('div', 'sec', 'Summon squad'));
-    // A squad bound to project cards comes in one variant per lead; the clicked person's own variant goes first with ★
-    const who = p ? [p.agent, p.plate] : [];
+    // Pipeline: roles in order, one per click, ✓ = already under this person. A squad bound to project cards comes
+    // in one variant per lead; only the clicked person's own variant shows when there is one
+    const who = [p.agent, p.plate].filter(Boolean), boss = p.agent || p.plate;
+    const mine = r => tabOf(r.name) >= 0 || people.some(q => q.team === boss && [q.agent, q.title].includes(r.name));
     cards.squads.forEach(s => {
-      const opts = (s.options && s.options.length ? s.options : [{ roles: s.roles }])
-        .map(o => ({ ...o, mine: !!o.lead && who.includes(o.lead) }))
-        .sort((a, b) => b.mine - a.mine);
+      let opts = s.options && s.options.length ? s.options : [{ roles: s.roles }];
+      if (opts.some(o => who.includes(o.lead))) opts = opts.filter(o => who.includes(o.lead));
       opts.forEach(o => {
-        const b = menuItem((o.mine ? '★ ' : '') + s.name + (o.lead ? ' · ' + o.lead : ''), o.roles.length + ' roles', () => summon(o, dir));
-        b.title = [s.when, o.roles.map(r => r.name).join(', ')].filter(Boolean).join('\n');
-        items.push(b);
+        const head = el('div', 'proj', s.name + (o.lead ? ' · ' + o.lead : ''));
+        if (s.when) head.title = s.when;
+        items.push(head);
+        o.roles.forEach((r, k) => items.push(menuItem(`${k + 1} ${r.name}`, mine(r) ? '✓' : '', () => summon(r, p, dir))));
       });
     });
   }
@@ -406,11 +412,10 @@ function svgEl(tag, attrs, parent) {
   parent && parent.appendChild(e);
   return e;
 }
-let lastFit = '';
+let lastFit = '', people = [];  // people: last /state.json, also used by the squad menu's ✓
 async function drawGraph() {
   const pane = document.getElementById('graph');
   if (document.body.classList.contains('collapsed') || menu.style.display === 'block') return;
-  let people;
   try { people = (await (await fetch('/state.json', { cache: 'no-store' })).json()).people || []; }
   catch { pane.textContent = 'Office state unavailable (/state.json)'; return; }
   const byAgent = {}, nodes = people.map(p => ({ p, kids: [] }));

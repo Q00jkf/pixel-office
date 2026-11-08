@@ -54,7 +54,7 @@ def plugin_scripts():
 
 sys.path.insert(0, plugin_scripts())
 from open_role import child_env  # 開分頁時拿掉哪些環境變數，跟外掛開角色視窗共用一份
-from open_role import main as open_role_main  # Relations 視窗叫出角色＝開一個角色視窗
+from open_role import main as open_role_main, preset_file  # Relations 視窗叫出角色＝開一個角色視窗
 try:
     from open_role import live_sessions  # 外掛 0.39.0 起
 except ImportError:
@@ -482,7 +482,14 @@ class Api:
         except OSError as e:
             return {'ready': None, 'choices': [], 'fallback': None, 'template': None, 'error': str(e)}
 
-    def add_tab(self, name, card_file, cwd=None, project=None):
+    def summon_role(self, name, card_file, summoner_id=None, team=None, project=None):
+        """小隊成員（第 2 層）：掛 team＝叫的人，開在叫的人目前的資料夾；卡上有可直接用的啟動位置才照卡，不跳選單、不擋"""
+        plan = self.launch_options(card_file, project)
+        has_start = re.search(r'^## 啟動位置', front(card_file)[1], re.M)
+        cwd = (has_start and plan['ready']) or (summoner_id and session_cwd(summoner_id)) or project or self._project
+        return self.add_tab(name, card_file, cwd, project, team)
+
+    def add_tab(self, name, card_file, cwd=None, project=None, team=None):
         """執行中加一個分頁並寫回團隊設定；同名（或改名前是這個角色名）的分頁已在就回原本那個。
         cwd 不給 → 用啟動位置的 ready；沒有 ready → 回 error=choose 加上 launch_options 的內容，請前端讓人選。
         給了但不存在 → 用卡上的退路；沒有退路 → 回 error，不開分頁（不默默退回專案）"""
@@ -502,12 +509,16 @@ class Api:
             if RELATIONS:  # 沒有分頁：開在自己的 PowerShell 視窗，已在線就不重開
                 if sessions_named(name, cwd):
                     return {'error': f'{name} is already open ({cwd})'}
-                if open_role_main(['--role', name, '--dir', cwd, '--card', card_file]) != 0:
+                if open_role_main(['--role', name, '--dir', cwd, '--card', card_file] + (['--team', team] if team else [])) != 0:
                     return {'error': f'Could not open {name} ({cwd})'}
                 return {'opened': True, 'name': name, 'cwd': cwd}
             a = {'name': name, 'id': str(uuid.uuid4()), 'cwd': cwd, 'prompt': f'你是 {name}，接手。角色卡：{card_file}'}
             if self._team.get('args'):
                 a['args'] = list(self._team['args'])
+            if team:  # 辦公室外掛開場時讀 presets/<session id>.json，登記成 team 底下的員工
+                os.makedirs(os.path.dirname(preset_file(a['id'])), exist_ok=True)
+                with open(preset_file(a['id']), 'w', encoding='utf-8') as f:
+                    json.dump({'title': name[:16], 'role': 'staff', 'team': team}, f, ensure_ascii=False)
             self._team['agents'].append(a)
             self._tabs.append(Tab(a, self._cwd))
             save_team(self._team)
