@@ -48,6 +48,6 @@
 - 🔴 `.mcp.json` 裡的 `${PLUGIN_ROOT}` **不會展開**（hook 的會）：`codex mcp list` 看得到參數原封不動，伺服器起不來，Codex 說沒有這些工具。改成 `python -c` 去 `~/.codex/plugins/cache/pixel-office-codex/pixel-office/*/` 找最新那份來跑。
 - 🔴 MCP 的 stdin 要用 UTF-8 讀：Windows 預設 cp950，中文參數變亂碼或解碼失敗讓整支結束，Codex 只看到「工具連線中斷」。
 - 呼叫者：tools/call 的 `_meta` 帶 `sessionId`／`threadId`（還有 `x-codex-turn-metadata.session_id`），直接用，不猜。
-- 在線判斷：終端機的 `codex`（沒加 `--no-daemon`）和桌面 App 都經過背景常駐程式（app-server），很多對話共用一個行程、而且它不會結束，看行程活著會留下關掉的對話。改看 `~/.codex/thread-writer-locks/<session_id>.lock`：開著的對話鎖住，關掉的放掉或刪掉（實機比對 4 個都對）。看不到鎖（非 Windows）才退回看行程、共用的 30 分鐘沒事件當離開。
+- 在線判斷：終端機的 `codex`（沒加 `--no-daemon`）和桌面 App 都經過背景常駐程式（app-server），很多對話共用一個行程、而且它不會結束，看行程活著會留下關掉的對話。改看 `~/.codex/thread-writer-locks/<session_id>.lock`：開著的對話鎖住，關掉的放掉或刪掉（實機比對 4 個都對）。經常駐程式的對話關掉後，常駐程式約過 1 分鐘才放鎖，這段時間名牌還在（2026-11-09 實測：關窗後不到 1 分鐘鎖放掉、標離開，沒有 SessionEnd）。看不到鎖（非 Windows）才退回看行程、共用的 30 分鐘沒事件當離開。
 - 本機市集的外掛：`codex plugin add` 對已安裝的不會更新（就算版號較新），要先 `codex plugin remove` 再 `add`。
 - 名牌撞名的後綴取 session id **尾** 4 碼：id 照時間排，前幾碼都一樣。
