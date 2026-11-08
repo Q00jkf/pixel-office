@@ -7,6 +7,13 @@
 
 ---
 
+## 0.53.3 — 2026-11-08
+
+- **改了什麼**：被人開出來的角色認得誰是主管：`open_role.py --team <X>` 與團隊視窗分頁（叫小隊帶 team 時）的開場句加「開你的是 <X>，它是你的主管，有事向它回報」；`skills/team/roles.md` §3 第 5 步改成名單上自己已有 `team` 就以那位為主管，卡上寫的主管不算，沒有 `team` 才照 `collab.md` 找
+- **為什麼**：willy實作 2026-11-08 回報接手時把主管答成 willy設計（卡上「部門主管是 willy設計」），實際開它的是 Office 角色接手；根因：開場句沒寫誰開的、roles.md 規定照 collab.md 找主管。提案 A＋B（卡不改：在 studio repo，且有 A、B 後卡上那句當「沒人開你時」的預設），jacky「照 A＋B 做」
+- **實測**：`open_role.py --team "Office 角色接手" --dry-run` 開場句帶上那句、preset 照舊；team_window.py 語法檢查過；`claude plugin test .` 201 過；沒真的開新 session
+- **commit**：（本版）
+
 ## 0.53.2 — 2026-11-08
 
 - **改了什麼**：只有 2 層——小隊成員再叫人，新的人掛部門主管、不掛成員：Relations／團隊視窗右鍵小隊成員（員工、上層是部門主管）時，Summon squad 改以那位部門主管為準（掛 team、開在他的資料夾、✓ 也照他算），選單多一行「Opens under <部門主管>」；`squad.md` §2 第 3 步加「成員要再開人也掛 `team=<部門主管>`」；升部門主管提醒不發給小隊成員（自己的上層已是部門主管就不提醒）

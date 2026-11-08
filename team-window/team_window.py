@@ -512,7 +512,8 @@ class Api:
                 if open_role_main(['--role', name, '--dir', cwd, '--card', card_file] + (['--team', team] if team else [])) != 0:
                     return {'error': f'Could not open {name} ({cwd})'}
                 return {'opened': True, 'name': name, 'cwd': cwd}
-            a = {'name': name, 'id': str(uuid.uuid4()), 'cwd': cwd, 'prompt': f'你是 {name}，接手。角色卡：{card_file}'}
+            a = {'name': name, 'id': str(uuid.uuid4()), 'cwd': cwd, 'prompt': f'你是 {name}，接手。角色卡：{card_file}'
+                 + (f'。開你的是 {team}，它是你的主管，有事向它回報' if team else '')}
             if self._team.get('args'):
                 a['args'] = list(self._team['args'])
             if team:  # 辦公室外掛開場時讀 presets/<session id>.json，登記成 team 底下的員工

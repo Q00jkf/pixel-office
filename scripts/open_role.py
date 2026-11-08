@@ -134,6 +134,8 @@ def main(argv=None):
     sid = str(uuid.uuid4())
     preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
     prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
+    if a.team:  # 卡上寫的主管是正式流程的那位；實際開你的人以這句與名單上的 team 為準（jacky 2026-11-08）
+        prompt += f'。開你的是 {a.team}，它是你的主管，有事向它回報'
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
                        os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
     if a.dry_run:
