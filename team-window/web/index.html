@@ -35,7 +35,9 @@
   body.collapsed #left { display: none; }
   body.relations #office, body.relations #hsplit, body.relations #split, body.relations #right { display: none; }
   body.relations #left { flex: 1; width: auto; display: flex; }
-  body.relations #graph { flex: 1; height: auto; }
+  body.relations #left { overflow: auto; }
+  body.relations #graph { flex: none; width: max-content; max-width: 900px; height: auto; overflow: visible; }  /* 量得到內容的實際大小，視窗照它縮放 */
+  body.relations #graph svg { flex: none; width: auto; min-height: auto; align-self: flex-start; }  /* 照原本大小畫，不撐滿視窗；放不下就捲動 */
   body.dragging, body.dragging * { cursor: col-resize !important; user-select: none; }
   body.dragging-h, body.dragging-h * { cursor: row-resize !important; user-select: none; }
   body.dragging #office, body.dragging-h #office { pointer-events: none; }
@@ -404,6 +406,7 @@ function svgEl(tag, attrs, parent) {
   parent && parent.appendChild(e);
   return e;
 }
+let lastFit = '';
 async function drawGraph() {
   const pane = document.getElementById('graph');
   if (document.body.classList.contains('collapsed') || menu.style.display === 'block') return;
@@ -430,6 +433,12 @@ async function drawGraph() {
     parts.push(box);
   }
   pane.replaceChildren(...parts);
+  // Relations window: resize the window to fit the tree whenever its size changes
+  if (document.body.classList.contains('relations') && api && api.fit) {
+    const r = pane.getBoundingClientRect();
+    const size = [Math.ceil(r.width), Math.ceil(r.height + 33)];  // CSS px; pywebview resize scales for DPI
+    if (size.join() !== lastFit) { lastFit = size.join(); api.fit(...size); }
+  }
 }
 function soloChip(p) {
   const tab = tabIds.indexOf(p.id), c = el('span', 'chip' + (tab >= 0 ? ' mine' : ''));
@@ -445,33 +454,45 @@ function soloChip(p) {
 function drawTrees(roots) {
   // Leaves laid out left to right, parents centred over their children
   const W = 112, H = 40, GX = 10, GY = 30;
-  let leaf = 0, depth = 0;
+  // Relations window: full names, box as wide as its text, drawn at 1:1 (the team window keeps 112-wide boxes, 9-char cut, scaled to fit)
+  const full = document.body.classList.contains('relations');
+  const plateOf = p => (p.role === 'manager' ? '★' : '') + (p.agent || p.plate || '?');
+  const subOf = p => p.ghost ? '(offline)' : (p.title || p.modeText || '');
+  const ctx = full && document.createElement('canvas').getContext('2d');
+  const textW = (t, font) => { ctx.font = font; return ctx.measureText(t).width; };
+  const widthOf = n => full ? Math.max(W, Math.ceil(Math.max(textW(plateOf(n.p), '600 12px sans-serif'), textW(subOf(n.p), '10px sans-serif'))) + 30) : W;
+  let next = 0, depth = 0;
   const place = (n, d, seen) => {
     if (seen.has(n)) return; seen.add(n);
+    n.w = widthOf(n);
     n.y = d * (H + GY); depth = Math.max(depth, d);
     n.kids.forEach(k => place(k, d + 1, seen));
     const placed = n.kids.filter(k => k.x !== undefined);
-    n.x = placed.length ? (placed[0].x + placed[placed.length - 1].x) / 2 : (leaf++) * (W + GX);
+    if (placed.length) {
+      const last = placed[placed.length - 1];
+      n.x = Math.max(0, (placed[0].x + last.x + last.w) / 2 - n.w / 2);
+      next = Math.max(next, n.x + n.w + GX);
+    } else { n.x = next; next += n.w + GX; }
   };
   const seen = new Set();
   roots.forEach(r => place(r, 0, seen));
-  const w = Math.max(1, leaf) * (W + GX) - GX + 4, h = (depth + 1) * (H + GY) - GY + 4;
-  const svg = svgEl('svg', { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'xMidYMid meet' });
+  const w = Math.max(W, next - GX) + 4, h = (depth + 1) * (H + GY) - GY + 4;
+  const svg = svgEl('svg', full ? { viewBox: `0 0 ${w} ${h}`, width: w, height: h } : { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'xMidYMid meet' });
   const g = svgEl('g', { transform: 'translate(2,2)' }, svg);
   seen.forEach(n => n.kids.forEach(k => {
-    const x1 = n.x + W / 2, y1 = n.y + H, x2 = k.x + W / 2, y2 = k.y, my = (y1 + y2) / 2;
+    const x1 = n.x + n.w / 2, y1 = n.y + H, x2 = k.x + k.w / 2, y2 = k.y, my = (y1 + y2) / 2;
     svgEl('path', { class: 'edge', d: `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}` }, g);
   }));
   seen.forEach(n => {
     const p = n.p, tab = tabIds.indexOf(p.id);
     const node = svgEl('g', { class: 'node' + (tab >= 0 ? ' mine' : '') + (p.ghost ? ' ghost' : ''), transform: `translate(${n.x},${n.y})` }, g);
-    svgEl('rect', { width: W, height: H, rx: 7 }, node);
+    svgEl('rect', { width: n.w, height: H, rx: 7 }, node);
     const name = svgEl('text', { class: 'plate', x: 20, y: 17 }, node);
-    const label = (p.role === 'manager' ? '★' : '') + (p.agent || p.plate || '?');
-    name.textContent = label.length > 9 ? label.slice(0, 8) + '…' : label;
+    const label = plateOf(p);
+    name.textContent = full || label.length <= 9 ? label : label.slice(0, 8) + '…';
     const sub = svgEl('text', { class: 'sub', x: 20, y: 31 }, node);
-    const t = p.ghost ? '(offline)' : (p.title || p.modeText || '');
-    sub.textContent = t.length > 9 ? t.slice(0, 8) + '…' : t;
+    const t = subOf(p);
+    sub.textContent = full || t.length <= 9 ? t : t.slice(0, 8) + '…';
     svgEl('title', {}, node).textContent = (p.agent || p.plate || '') + (p.title ? '\n' + p.title : '') + (p.modeText ? '\n' + p.modeText : '');
     if (!p.ghost) svgEl('circle', { cx: 10, cy: 13, r: 4, fill: MODE_COLOR[p.mode] || '#3b5dc9' }, node);
     if (tab >= 0) node.onclick = () => show(tab);
@@ -515,8 +536,8 @@ function makeTab(i, name, id, role = name) {
 
 // Frameless windows lose the OS resize border: edge/corner grips drive api.set_bounds (screen pixels, hence devicePixelRatio)
 function addGrips() {
-  const MIN_W = 640, MIN_H = 400;
   ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].forEach(dir => {
+    const rel = () => document.body.classList.contains('relations');  // Relations 視窗可以拉得比團隊視窗小
     const g = el('div', 'grip ' + dir);
     document.body.appendChild(g);
     let start = null, frame = 0, next = null;
@@ -532,6 +553,7 @@ function addGrips() {
       if (!start) return;
       const r = devicePixelRatio, dx = (e.screenX - start.sx) * r, dy = (e.screenY - start.sy) * r;
       let { x, y, w, h } = start;
+      const MIN_W = rel() ? 220 : 640, MIN_H = rel() ? 120 : 400;
       if (dir.includes('e')) w = Math.max(MIN_W, w + dx);
       if (dir.includes('s')) h = Math.max(MIN_H, h + dy);
       if (dir.includes('w')) { w = Math.max(MIN_W, start.w - dx); x = start.x + start.w - w; }

@@ -608,7 +608,13 @@ class Api:
     def set_bounds(self, x, y, w, h):
         SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
         ctypes.windll.user32.SetWindowPos(self._window.native.Handle.ToInt32(), 0, int(x), int(y),
-                                          max(int(w), 640), max(int(h), 400), SWP_NOZORDER | SWP_NOACTIVATE)
+                                          max(int(w), 220 if RELATIONS else 640), max(int(h), 120 if RELATIONS else 400), SWP_NOZORDER | SWP_NOACTIVATE)
+
+    def fit(self, w, h):
+        """Relations 視窗照內容縮放（CSS 像素，左上角不動）；團隊視窗不用。
+        用 pywebview 的 resize：直接 SetWindowPos 會被 WinForms 記著的大小蓋回去（2026-11-08 實測 323×231 → 640×400）"""
+        if RELATIONS:
+            self._window.resize(max(int(w), 220), max(int(h), 120))
 
     def _close(self):
         if self._closed:
@@ -674,7 +680,8 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     api._window = webview.create_window('Relations' if RELATIONS else 'Pixel Office', f'http://127.0.0.1:{server.server_port}/team/index.html',
-                                        js_api=api, width=560 if RELATIONS else 1400, height=640 if RELATIONS else 800, frameless=True,
+                                        js_api=api, width=360 if RELATIONS else 1400, height=240 if RELATIONS else 800, frameless=True,
+                                        min_size=(220, 120) if RELATIONS else (200, 100),
                                         easy_drag=False)  # 預設 True＝按住視窗任何地方都在搬視窗；只留標題列（pywebview-drag-region）
     api._window.events.closing += api._close
     def boot():
