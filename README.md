@@ -11,7 +11,7 @@ A Claude Code plugin that turns every running Claude Code session into a pixel-a
 
 - **See what everyone is doing**: typing, reading, thinking, erroring, waiting for your approval — at a glance
 - **Multi-session teamwork**: one skill, `team` — managers and staff, task hand-off, meetings
-- **Cross-vendor AI teamwork**: Antigravity CLI (agy) conversations join the office with a blue-violet **G** badge and message Claude sessions; Codex CLI sessions join with a green **X** badge and take messages from Claude (an idle Codex answers right away)
+- **Cross-vendor AI teamwork**: Antigravity CLI (agy) conversations join the office with a blue-violet **G** badge and message Claude sessions; Codex CLI sessions join with a green **X** badge and message Claude sessions both ways (an idle Codex answers right away)
 - **Manage it from anywhere**: with Cloudflare or Tailscale, watch the office and send a command to any session from your phone
 
 ## ✨ Claude × Antigravity, working together
@@ -111,5 +111,5 @@ The in-app text is English; the detailed docs are in Traditional Chinese.
 - All commands, personal buttons, click-to-approve, mobile, rendering details: [docs/使用說明.md](docs/使用說明.md)
 - Team window (one window, one tab per role, Windows): [team-window/README.md](team-window/README.md)
 - Antigravity CLI: [docs/agy-寄件協作.md](docs/agy-寄件協作.md)
-- Codex CLI (install, trust the hooks with `/hooks`): [docs/designs/codex.md](docs/designs/codex.md)
+- Codex CLI (install, trust the hooks: pick "Trust all" when Codex asks): [docs/designs/codex.md](docs/designs/codex.md)
 - Hacking on it: [CLAUDE.md](CLAUDE.md)

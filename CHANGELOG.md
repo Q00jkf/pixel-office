@@ -7,6 +7,15 @@
 
 ---
 
+## 0.59.0 — 2026-11-09
+
+- **改了什麼**：Codex → Claude。Codex 外掛多一個 MCP server（`codex/.mcp.json`），給 Codex 三個工具：`office_roster`（誰在線、要寄給誰填什麼）、`office_profile`（改名牌、職稱）、`office_send`（傳話給 Claude、agy 或另一個 Codex；寄給 Claude 時附「用 session id 回信」的指令）。呼叫者從 MCP `_meta` 的 `sessionId` 取，不猜。收件人在 id、ListAgents 名稱、名牌、職稱任一欄對到兩人以上就拒絕並列出候選（含 id）；roster 撞名時直接給 id。在線判斷改看 Codex 自己的寫入鎖（`~/.codex/thread-writer-locks/<id>.lock`）：終端機 `codex` 和桌面 App 都經背景常駐程式，看行程會留下關掉的對話。撞名後綴改取 session id 尾 4 碼（id 照時間排，前幾碼都一樣）
+- **為什麼**：0.58.0 只做到 Claude → Codex。jacky 2026-11-09「你跟他一起解決這些問題」（跟 Codex 一起試辦公室功能時，Codex 沒有工具能主動傳話）、「其他codex 我應該關閉了怎麼還在座位上面」、收件人比對核可「好，改」（Codex 寄「Office」送到另一個 ListAgents 叫 Office 的 session）
+- **坑**：`.mcp.json` 裡 `${PLUGIN_ROOT}` 不會展開（hook 的會），改用 `python -c` 到 Codex 外掛 cache 找最新那份；MCP 的 stdin 在 Windows 預設 cp950，要用 UTF-8 讀，不然中文參數讓伺服器結束、Codex 只看到「工具連線中斷」
+- **安裝**：已裝的要先 `codex plugin remove pixel-office@pixel-office-codex` 再 `codex plugin add pixel-office@pixel-office-codex`（`add` 不會更新已裝的）；開 Codex 跳「hooks are new or changed」選 **2. Trust all and continue**
+- **實測**：2026-11-09 jacky 的 Codex（0.167.0，Windows）重裝 0.59.3：辦公室看得到、Claude ↔ Codex 雙向傳話、關窗後約 1 分鐘常駐程式放鎖並標離開（不會有 SessionEnd）。收件人比對的修改只用假資料測過。code review（`claude -p`，0.85 美元）10 條都修。TypeScript 沒動，沒跑 `claude plugin test .`
+- **commit**：b581da2、3456be7、65f46f7、6c287d7
+
 ## 0.58.0 — 2026-11-09
 
 - **改了什麼**：Codex CLI 接進辦公室。新資料夾 `codex/` 本身是一個 Codex 外掛（只有 hooks）：`codex_office.py` 在 SessionStart／UserPromptSubmit／PostToolUse／Stop／SessionEnd 寫狀態檔 `sessions/codex-<id>.json`（`kind: "codex"`）、Stop 的 `last_assistant_message` 寫 `replies/`，看守程式在 Codex 停著等鍵盤時續心跳。Claude 端 `codex_office.py send <名牌> "…" --from <自己>` 跑 `codex queue`，開著的 Codex 閒置時自己撿起來回；不能用時退回收件夾，下次使用者送出訊息時塞進那一輪。畫面：名牌後綠色 X 徽章（Desktop `vector.ts`、終端機 `scene.ts`），名單附 send 用法。Codex → Claude 還沒做

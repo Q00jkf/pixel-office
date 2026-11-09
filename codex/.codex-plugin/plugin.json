@@ -1,6 +1,6 @@
 {
   "name": "pixel-office",
-  "version": "0.59.4",
+  "version": "0.59.0",
   "description": "Pixel office for Codex CLI: shows this Codex session in the Claude Code pixel office (status, last reply), takes messages from Claude sessions, and gives Codex office tools (roster, nameplate, send).",
   "author": {
     "name": "pixel-office"

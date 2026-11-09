@@ -11,7 +11,7 @@
 
 - **看得到大家在做什麼**：打字、讀檔、思考、出錯、等你核准，一眼看出
 - **多 session 協作**：一個 skill `team`，負責分主管和員工、派工、開會
-- **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信；Codex CLI 的對話帶綠色 **X** 徽章，收得到 Claude 傳的話（閒置的 Codex 會馬上回）
+- **跨家 AI 協作**：Antigravity CLI（agy）的對話也會出現在辦公室，名牌帶藍紫色 **G** 徽章，跟 Claude 互相寄信；Codex CLI 的對話帶綠色 **X** 徽章，跟 Claude 雙向傳話（閒置的 Codex 會馬上回）
 - **人在外面也能管**：接上 Cloudflare 或 Tailscale，手機隨時看辦公室、對任一個 session 下指令
 
 ## ✨ Claude × Antigravity 一起工作
@@ -108,5 +108,5 @@ Claude（主管）◀── 回信：整理好的規格表 ───────
 
 - 全部指令、個人按鈕、點人核准、手機版、畫面細節：[docs/使用說明.md](docs/使用說明.md)
 - Antigravity CLI：[docs/agy-寄件協作.md](docs/agy-寄件協作.md)
-- Codex CLI（安裝、用 `/hooks` 信任）：[docs/designs/codex.md](docs/designs/codex.md)
+- Codex CLI（安裝、信任 hook：Codex 問時選 Trust all）：[docs/designs/codex.md](docs/designs/codex.md)
 - 改程式：[CLAUDE.md](CLAUDE.md)
