@@ -50,4 +50,5 @@
 - 呼叫者：tools/call 的 `_meta` 帶 `sessionId`／`threadId`（還有 `x-codex-turn-metadata.session_id`），直接用，不猜。
 - 在線判斷：終端機的 `codex`（沒加 `--no-daemon`）和桌面 App 都經過背景常駐程式（app-server），很多對話共用一個行程、而且它不會結束，看行程活著會留下關掉的對話。改看 `~/.codex/thread-writer-locks/<session_id>.lock`：開著的對話鎖住，關掉的放掉或刪掉（實機比對 4 個都對）。經常駐程式的對話關掉後，常駐程式約過 1 分鐘才放鎖，這段時間名牌還在（2026-11-09 實測：關窗後不到 1 分鐘鎖放掉、標離開，沒有 SessionEnd）。看不到鎖（非 Windows）才退回看行程、共用的 30 分鐘沒事件當離開。
 - 本機市集的外掛：`codex plugin add` 對已安裝的不會更新（就算版號較新），要先 `codex plugin remove` 再 `add`。
+- 收件人：`office_send` 的 `to` 跟每個在線者的 id、ListAgents 名稱、名牌、職稱比，**對到兩人以上就拒絕**、列出候選（含 id）請 Codex 問使用者再用 id 重寄；`office_roster` 的「Send to」欄撞名時直接給 id。起因：2026-11-09 Codex 寄「Office」，舊規則依序比對、先在 ListAgents 欄對到唯一的另一個 Office，送錯人。
 - 名牌撞名的後綴取 session id **尾** 4 碼：id 照時間排，前幾碼都一樣。

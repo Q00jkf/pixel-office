@@ -322,7 +322,7 @@ TOOLS = [
      "description": "List everyone online in the pixel office: nameplate, title, kind (Claude/agy/Codex), what they are doing. Use it to find who to message.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "office_send",
-     "description": "Send a message to another session in the pixel office (Claude Code, agy or another Codex). to: their nameplate or 'Send to' from office_roster.",
+     "description": "Send a message to another session in the pixel office (Claude Code, agy or another Codex). to: the 'Send to' value from office_roster (a name that fits more than one person is refused).",
      "inputSchema": {"type": "object", "properties": {"to": {"type": "string"}, "text": {"type": "string"}}, "required": ["to", "text"]}},
 ]
 
@@ -358,9 +358,13 @@ def tool_profile(sid: str, a: dict) -> str:
 
 def tool_roster() -> str:
     rows = ["| Name | Title | Kind | Send to | Now |", "|---|---|---|---|---|"]
-    for s in sorted(live_crew(), key=lambda c: str(c.get("name"))):
+    crew = live_crew()
+    for s in sorted(crew, key=lambda c: str(c.get("name"))):
         kind = {"agy": "agy", "codex": "Codex"}.get(s.get("kind"), "Claude")
-        rows.append(f"| {s.get('name')} | {s.get('title') or '—'} | {kind} | {s.get('agent') or s.get('name')} | {s.get('mode')} {s.get('tool') or ''} |")
+        to = s.get("agent") or s.get("name")
+        if sum(to in (c.get("id"), c.get("agent"), c.get("name"), c.get("title")) for c in crew) > 1:
+            to = s.get("id")  # 撞名就給 id，office_send 才對得到唯一一人
+        rows.append(f"| {s.get('name')} | {s.get('title') or '—'} | {kind} | {to} | {s.get('mode')} {s.get('tool') or ''} |")
     return "\n".join(rows) if len(rows) > 2 else "Nobody in the office right now"
 
 
@@ -369,14 +373,13 @@ def tool_send(sid: str, a: dict) -> str:
     to, text = str(a.get("to", "")), str(a.get("text", "")).strip()
     want = re.sub(r"\s*\[[0-9a-f]+\]$", "", to.strip())
     crew = live_crew()
-    hits = []
-    for key in ("id", "agent", "name", "title"):  # 名牌可能撞名（兩個 Office）：依序找，先找到唯一的就用
-        hits = [s for s in crew if s.get(key) == want]
-        if len(hits) == 1:
-            break
+    # 任一欄對到就算；對到兩人以上就拒絕，不猜（「Office」曾對到另一個 ListAgents 叫 Office 的人）
+    hits = [s for s in crew if want in (s.get("id"), s.get("agent"), s.get("name"), s.get("title"))]
     if len(hits) != 1:
-        names = ", ".join(f"{s.get('name')} ({s.get('agent') or s.get('kind') or '—'})" for s in crew)
-        raise ValueError(f"No unique recipient \"{to}\" ({len(hits)} matches). Online: {names or 'nobody'}")
+        pool = hits or crew
+        names = "; ".join(f"{s.get('agent') or s.get('name')} (title {s.get('title') or '—'}, id {s.get('id')})" for s in pool)
+        head = f"\"{to}\" matches {len(hits)} people, ask your user which one and resend with its id" if hits else f"Nobody called \"{to}\""
+        raise ValueError(f"{head}. {'Candidates' if hits else 'Online'}: {names or 'nobody'}")
     if not text or len(text) > 4000:
         raise ValueError("Message is empty or too long (max 4000 characters)")
     s = hits[0]
