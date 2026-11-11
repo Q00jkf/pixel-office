@@ -11,7 +11,7 @@ description: "Multi-session collaboration: manager/staff layers, role cards from
 | 你現在的情境 | 讀 |
 |---|---|
 | 「照 <規則> 設角色」、建角色卡、「你是 <角色>，接手」、存檢查點 | `roles.md` |
-| 要不要多開人（升層）、當主管、收到 peer 回報／佔用申請／BLOCKED、派工、降層提醒、「大家在幹嘛」 | `lead.md` |
+| 要不要多開人（升層）、當主管、收到 peer 回報／佔用申請／BLOCKED、派工、關 peer 的 session、降層提醒、「大家在幹嘛」 | `lead.md` |
 | 開會、收到 `📋 開會`、主持人送來「請裁示：」 | `meet.md` |
 | 升部門主管、開小隊成員、建小隊（第 2 層） | `squad.md` |
 
