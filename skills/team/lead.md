@@ -98,7 +98,19 @@
 - 不手動 `git stash`（stash 堆疊所有 worktree 共用）；rebase 撞檔用 `--autostash`。
 - commit author 用自己的 session 名：`git -c user.name="<短代號>" commit …`。
 
-## 7. 降層（第 1 → 0 層）
+## 7. 關 peer 的 session（使用者 2026-11-11 授權）
+
+主管（含部門主管）有權關自己底下 peer 的 session，不用請使用者關。只關自己這條線底下的（部門主管底下的也算）；別的主管的人、使用者自己開的 session 不關。
+
+1. 請對方存最後一筆檢查點、沒 commit 的報告先 commit（強制結束時外掛補不到檢查點，見 `roles.md` §4）。
+2. `SendMessage(to=<名稱>, notify_when_idle=true)` 等它停下來；還在跑（busy）不關。
+3. 關：
+   - 用終端機開的（`open_role.py`）：找命令列有 `--name <名稱> ` 的 `claude.exe`（Windows：`Get-CimInstance Win32_Process`），對它的父視窗 `taskkill /T /F /PID <父>`。少數子程序回「not supported」，事後查還在不在就好，通常已經結束。
+   - 桌面版 session：`archive_session`（app 會問使用者）。
+4. 確認程序不在了；`office_roster` 要過約 1 分鐘才會拿掉名字。
+5. `collab.md` 把那一列標收工。
+
+## 8. 降層（第 1 → 0 層）
 
 外掛提醒「底下 20 分鐘沒人」，或使用者說收了：
 
