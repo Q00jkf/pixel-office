@@ -514,11 +514,14 @@ class Api:
             if RELATIONS:  # 沒有分頁：開在自己的 PowerShell 視窗，已在線就不重開
                 if sessions_named(name, cwd):
                     return {'error': f'{name} is already open ({cwd})'}
-                taken = online_as(name)
-                if taken:  # open_role.py 也會擋（exit 3），在這裡先講清楚撞到誰、怎麼辦
-                    return {'error': f'{name} is already online as {", ".join(taken)} (name or office title). '
-                                     f'Message it instead (SendMessage, or switch to its window); to open a second one anyway, '
-                                     f'run: python open_role.py --role {name} --force'}
+                try:
+                    taken = online_as(name)
+                except Exception:  # 狀態檔讀不到就交給 open_role.py 自己擋
+                    taken = []
+                if taken:  # open_role.py 也會擋（exit 3），在這裡先講清楚撞到誰、怎麼辦；視窗裡沒有 --force，要第二個只能到終端機開
+                    return {'error': f'{name} is already online as {", ".join(taken)} (session name, nameplate or office title). '
+                                     f'Message it instead (SendMessage, or switch to its window). To open a second one anyway, '
+                                     f'run in a terminal: python <pixel-office>/scripts/open_role.py --role {name} --force'}
                 if open_role_main(['--role', name, '--dir', cwd, '--card', card_file] + (['--team', team] if team else [])) != 0:
                     return {'error': f'Could not open {name} ({cwd})'}
                 return {'opened': True, 'name': name, 'cwd': cwd}

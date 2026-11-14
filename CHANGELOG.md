@@ -20,7 +20,7 @@
   - 自己抄過「開角色」流程到 CLAUDE.md 或其他設定的：改成「照 pixel-office team skill `roles.md` §5」，或補上「先 roster → `roles.py` 找卡」
   - 呼叫 `open_role.py` 的腳本：同名或同職稱已在線時會 exit 3，要開第二個就加 `--force`
   - Codex、agy 沒改，不用重裝
-- **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到
+- **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到。code review（`claude -p` Sonnet，0.38 美元）確認 8 條都修：沒有 version.json（從 0.60 以前升上來）也提醒、版號含非數字也比得出來、版號檢查出錯不再跳過同一輪的收信與檢查點、撞名比對不分大小寫並加比名牌與卡上的 office_name、`--dry-run` 撞名時照印指令、用 office_name 叫的登記成卡名、團隊視窗訊息改成「到終端機加 --force」；另修開場句「。。」
 - **commit**：9a7db2e、5d551a8、812fa21，加上本版這筆
 
 ## 0.59.0 — 2026-11-09

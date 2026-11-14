@@ -2960,10 +2960,14 @@ test('version compare is numeric per part', () => {
   expect(cmpVersion('0.60.0', '0.59.9') > 0).toBe(true)
   expect(cmpVersion('0.9.0', '0.10.0') < 0).toBe(true)
   expect(cmpVersion('1.2.3', '1.2.3')).toBe(0)
+  expect(cmpVersion('abc', '0.0.0')).toBe(0)
 })
 
-test('version note: first install silent, upgrade notes once and records, older window asks for restart without writing', () => {
-  expect(versionNote(undefined, '0.60.0')).toEqual({ write: true })
+test('version note: no file or upgrade notes once and records, older window asks for restart without writing', () => {
+  const none = versionNote(undefined, '0.60.0') // 沒有 version.json：0.60.0 以前升上來的也要提醒
+  expect(none.write).toBe(true)
+  expect(none.note).toContain('before 0.60.0')
+  expect(versionNote('0.61.0-beta', '0.61.1').note).toContain('0.61.0-beta -> 0.61.1')
   const up = versionNote('0.55.1', '0.60.0')
   expect(up.write).toBe(true)
   expect(up.note).toContain('0.55.1 -> 0.60.0')

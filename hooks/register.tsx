@@ -925,20 +925,20 @@ function clashNotes(list: Coworker[]): string[] {
 
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
-/** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（測試比對；升版兩處一起改） */
+/** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
 export const VERSION = '0.60.0'
 const CHANGELOG_URL = 'https://github.com/Q00jkf/pixel-office/blob/main/CHANGELOG.md'
 export const cmpVersion = (a: string, b: string) => {
-  const x = a.split('.').map(Number), y = b.split('.').map(Number)
+  const x = a.split('.').map(n => parseInt(n, 10) || 0), y = b.split('.').map(n => parseInt(n, 10) || 0) // 0.61.0-beta、壞字串也比得出來
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0)
   return 0
 }
-/** ~/.claude/pixel-office/version.json 記整台電腦見過的最新版。第一次裝不提醒；升版後第一則指令提醒一次（寫回新版號，別的視窗就不再提）；
+/** ~/.claude/pixel-office/version.json 記整台電腦見過的最新版。沒有這個檔＝從 0.60.0 以前的版本升上來（或第一次裝），也提醒；升版後第一則指令提醒一次（寫回新版號，別的視窗就不再提）；
  *  這個視窗跑的版本比記的舊＝開著的舊視窗，提醒重開（不改檔） */
 export function versionNote(seen: string | undefined, mine = VERSION): { note?: string; write: boolean } {
-  if (!seen) return { write: true }
-  const d = cmpVersion(mine, seen)
-  if (d > 0) return { write: true, note: `Pixel office was updated ${seen} -> ${mine}. Tell the user in one line, and read the 升級要做的 lines of the versions after ${seen} in CHANGELOG.md (in this plugin's folder, or ${CHANGELOG_URL}); if a step applies to this computer, ask the user before doing it. Other open windows still run the old version until restarted.` }
+  const from = seen ?? 'a version before 0.60.0 (or a fresh install)'
+  const d = seen ? cmpVersion(mine, seen) : 1
+  if (d > 0) return { write: true, note: `Pixel office was updated ${from} -> ${mine}. Tell the user in one line, and read the 升級要做的 lines of the versions after ${seen ?? 'theirs'} in CHANGELOG.md (in this plugin's folder, or ${CHANGELOG_URL}); if a step applies to this computer, ask the user before doing it. Other open windows still run the old version until restarted.` }
   if (d < 0) return { write: false, note: `Pixel office: this window runs ${mine} but ${seen} is installed. Tell the user once that this window should be restarted to use it.` }
   return { write: false }
 }
@@ -2120,14 +2120,16 @@ export const register: Register = on => {
           e = { ...e, context: [...(e.context ?? []), PROMOTE_NOTE] }
         }
         if (!versionChecked) {
-          versionChecked = true
-          const f = `${officeRoot(await sharedDir($))}/version.json`
-          const raw = await $.fs.read(f).catch(() => undefined)
-          let seen: string | undefined
-          try { seen = raw ? JSON.parse(raw).seen : undefined } catch {}
-          const v = versionNote(typeof seen === 'string' ? seen : undefined)
-          if (v.write) await $.fs.write(f, JSON.stringify({ seen: VERSION })).catch(() => undefined)
-          if (v.note) e = { ...e, context: [...(e.context ?? []), v.note] }
+          versionChecked = true // 出錯也不重試：這個提醒不值得每則指令重讀
+          try {
+            const f = `${officeRoot(await sharedDir($))}/version.json`
+            const raw = await $.fs.read(f).catch(() => undefined)
+            let seen: string | undefined
+            try { seen = raw ? JSON.parse(raw).seen : undefined } catch {}
+            const v = versionNote(typeof seen === 'string' ? seen : undefined)
+            if (v.write) await $.fs.write(f, JSON.stringify({ seen: VERSION })).catch(() => undefined)
+            if (v.note) e = { ...e, context: [...(e.context ?? []), v.note] }
+          } catch {} // 不能讓它吞掉後面的收信、檢查點
         }
         if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
           demoteNoted = true

@@ -106,15 +106,21 @@ def card_dir(role):
     return hits[0]['start'] if len(hits) == 1 else None
 
 
-def online_as(role):
-    """在線、session 名稱或辦公室職稱＝這個角色的人（撞角色：兩個 session 頂同一角色，檢查點會交錯）"""
+def online_as(*names):
+    """在線、session 名稱、名牌或辦公室職稱（不分大小寫）是其中一個名字的人（撞角色：兩個 session 頂同一角色，檢查點會交錯）。
+    職稱會隨工作改掉，主要靠 session 名稱（open_role.py 用 --name <角色> 開）；剛開還沒寫狀態檔的視窗擋不到"""
     from takeover import live
-    return sorted({(s.get('agent') or '').split(' [')[0] or s.get('id', '')[:8] for s in live()
-                   if role in ((s.get('agent') or '').split(' [')[0], s.get('title'))})
+    want = {n.lower() for n in names if n}
+    out = set()
+    for s in live():
+        agent = (s.get('agent') or '').split(' [')[0]
+        if want & {(agent or '').lower(), (s.get('name') or '').lower(), (s.get('title') or '').lower()}:
+            out.add(agent or s.get('id', '')[:8])
+    return sorted(out)
 
 
 def card_notes(role, folder):
-    """開之前對角色卡：(卡路徑或 None, 提醒)。名字沒卡但有相近的卡、--dir 跟卡的啟動位置不同 → 提醒（只提醒不擋）"""
+    """開之前對角色卡：(卡的資料列或 None, 提醒)。名字沒卡但有相近的卡、--dir 跟卡的啟動位置不同 → 提醒（只提醒不擋）"""
     from roles import all_roles, norm
     rows, k = all_roles(), role.lower()
     exact = [r for r in rows if k in (r['role'].lower(), r['name'].lower())]
@@ -126,9 +132,9 @@ def card_notes(role, folder):
     if len(exact) > 1:
         return None, [f'{len(exact)} role cards named {role}: ' + ', '.join(r['card'] for r in exact)]
     r = exact[0]
-    if folder and r['start'] and norm(r['start']) != norm(os.path.abspath(folder)):
-        return r['card'], [f"--dir {folder} differs from the card's start folder {r['start']} ({r['card']})"]
-    return r['card'], []
+    if folder and r['start'] and norm(os.path.abspath(os.path.expanduser(r['start']))) != norm(os.path.abspath(folder)):
+        return r, [f"--dir {folder} differs from the card's start folder {r['start']} ({r['card']})"]
+    return r, []
 
 
 def encoded(script):
@@ -151,14 +157,15 @@ def main(argv=None):
     ap.add_argument('--dry-run', action='store_true', help='print the command and preset only; open nothing, write nothing')
     a = ap.parse_args(argv)
 
-    taken = online_as(a.role)
-    if taken and not a.force:
-        print(f'STOP: {", ".join(taken)} already online as {a.role} -> message it instead (SendMessage), or ask the user; --force opens a second one', file=sys.stderr)
-        return 3
     card, notes = card_notes(a.role, a.dir)
     for n in notes:
         print('Note: ' + n, file=sys.stderr)
-    a.card = a.card or card
+    a.card = a.card or (card and card['card'])
+    taken = online_as(a.role, *((card['role'], card['name']) if card else ()))
+    if taken and not a.force:  # --dry-run 照樣印指令，最後才 exit 3
+        print(f'STOP: {", ".join(taken)} already online as {a.role} -> message it instead (SendMessage), or ask the user; --force opens a second one', file=sys.stderr)
+        if not a.dry_run:
+            return 3
     a.dir = a.dir or card_dir(a.role)
     if not a.dir:
         print(f'No --dir and no single role card with a start folder for {a.role} (python roles.py {a.role})', file=sys.stderr)
@@ -167,19 +174,19 @@ def main(argv=None):
     if missing:
         print('Not found: ' + ', '.join(missing), file=sys.stderr)
         return 1
-    title = (a.title or a.role)[:16]
+    title = (a.title or (card and (card['title'] or card['role'])) or a.role)[:16]  # 用 office_name 叫的也登記成卡名，takeover 才認得持有者
     sid = str(uuid.uuid4())
     preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
     prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做' + (f'（你的角色卡：{a.card}）' if a.card else '') + '。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
     if a.team:  # 卡上寫的主管是正式流程的那位；實際開你的人以這句與名單上的 team 為準（jacky 2026-11-08）
-        prompt += f'。開你的是 {a.team}，它是你的主管，有事向它回報'
+        prompt = prompt.rstrip('。') + f'。開你的是 {a.team}，它是你的主管，有事向它回報'
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
                        os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
     if a.dry_run:
         print(f'env drop: {", ".join(DROP_ENV)}')
         print(f'preset {preset_file(sid)}: {json.dumps(preset, ensure_ascii=False)}')
         print(f'powershell -NoExit -EncodedCommand <{script}>')
-        return 0
+        return 3 if taken and not a.force else 0
     if sys.platform != 'win32':
         print('Opening a window is Windows-only; use --dry-run to see the command.', file=sys.stderr)
         return 2
