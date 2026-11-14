@@ -2952,3 +2952,24 @@ test('fmtTokens and the roster: new tok column, /office who style sort puts the 
   expect(rows(roster2(crew, 0, [], 'tokens'))).toEqual(['A', 'M', 'C']) // 沒有值的排最後
   expect(plain).toContain('882k')
 })
+
+// ---------- 0.60.0：升版後提醒一次、舊視窗提醒重開 ----------
+import { cmpVersion, versionNote } from './register'
+
+test('version compare is numeric per part', () => {
+  expect(cmpVersion('0.60.0', '0.59.9') > 0).toBe(true)
+  expect(cmpVersion('0.9.0', '0.10.0') < 0).toBe(true)
+  expect(cmpVersion('1.2.3', '1.2.3')).toBe(0)
+})
+
+test('version note: first install silent, upgrade notes once and records, older window asks for restart without writing', () => {
+  expect(versionNote(undefined, '0.60.0')).toEqual({ write: true })
+  const up = versionNote('0.55.1', '0.60.0')
+  expect(up.write).toBe(true)
+  expect(up.note).toContain('0.55.1 -> 0.60.0')
+  expect(up.note).toContain('升級要做的')
+  expect(versionNote('0.60.0', '0.60.0')).toEqual({ write: false })
+  const old = versionNote('0.61.0', '0.60.0')
+  expect(old.write).toBe(false)
+  expect(old.note).toContain('restarted')
+})

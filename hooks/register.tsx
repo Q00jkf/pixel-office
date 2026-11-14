@@ -925,6 +925,24 @@ function clashNotes(list: Coworker[]): string[] {
 
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
+/** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（測試比對；升版兩處一起改） */
+export const VERSION = '0.60.0'
+const CHANGELOG_URL = 'https://github.com/Q00jkf/pixel-office/blob/main/CHANGELOG.md'
+export const cmpVersion = (a: string, b: string) => {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0)
+  return 0
+}
+/** ~/.claude/pixel-office/version.json 記整台電腦見過的最新版。第一次裝不提醒；升版後第一則指令提醒一次（寫回新版號，別的視窗就不再提）；
+ *  這個視窗跑的版本比記的舊＝開著的舊視窗，提醒重開（不改檔） */
+export function versionNote(seen: string | undefined, mine = VERSION): { note?: string; write: boolean } {
+  if (!seen) return { write: true }
+  const d = cmpVersion(mine, seen)
+  if (d > 0) return { write: true, note: `Pixel office was updated ${seen} -> ${mine}. Tell the user in one line, and read the 升級要做的 lines of the versions after ${seen} in CHANGELOG.md (in this plugin's folder, or ${CHANGELOG_URL}); if a step applies to this computer, ask the user before doing it. Other open windows still run the old version until restarted.` }
+  if (d < 0) return { write: false, note: `Pixel office: this window runs ${mine} but ${seen} is installed. Tell the user once that this window should be restarted to use it.` }
+  return { write: false }
+}
+
 export const DEMOTE_MS = 20 * 60000 // 主管底下沒有在線員工滿這麼久 → 下一則使用者指令附降層提醒（jacky 2026-10-29）
 export const DUP_NOTE =
   'Pixel office: another window is running this same conversation (same session id, usually a second claude --resume). Stop and tell the user to close one window; both copies write the same checkpoint and office record, and messages reach either one.'
@@ -935,6 +953,7 @@ export const PROMOTE_NOTE =
 let promoteNoted = false // 這次有人掛到我底下已經提醒過升部門主管
 let reportsSeenAt: number | undefined // 最後一次看到有人掛在我底下（或我還不是主管）的時間
 let demoteNoted = false // 這段沒人的期間已經提醒過
+let versionChecked = false // 這個視窗已比對過版號（versionNote）
 let dupNoted = false // 撞號只提醒模型一次
 
 /** 有沒有在線的人掛在 self 底下（team 對到 ListAgents 名稱或名牌） */
@@ -2035,11 +2054,12 @@ export const register: Register = on => {
       $.ui.invalidate('ui.render')
       return { text: showHits ? 'Calibration on: red box = real position, ▒ = clickable area, yellow line every 10 units. /office hits again to turn off' : 'Calibration off' }
     }
+    if (sub === 'version') return { text: `pixel-office ${VERSION}` }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
       return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots), 'tokens') } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
     }
-    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration)' }
+    if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration) | /office version' }
 
     await refresh($).catch(() => undefined)
     await loadButtons($).catch(() => undefined)
@@ -2098,6 +2118,16 @@ export const register: Register = on => {
         if (shouldRemindPromote(me, others, promoteNoted)) {
           promoteNoted = true
           e = { ...e, context: [...(e.context ?? []), PROMOTE_NOTE] }
+        }
+        if (!versionChecked) {
+          versionChecked = true
+          const f = `${officeRoot(await sharedDir($))}/version.json`
+          const raw = await $.fs.read(f).catch(() => undefined)
+          let seen: string | undefined
+          try { seen = raw ? JSON.parse(raw).seen : undefined } catch {}
+          const v = versionNote(typeof seen === 'string' ? seen : undefined)
+          if (v.write) await $.fs.write(f, JSON.stringify({ seen: VERSION })).catch(() => undefined)
+          if (v.note) e = { ...e, context: [...(e.context ?? []), v.note] }
         }
         if (shouldRemindDemote(me.role, reportsSeenAt, now, demoteNoted)) {
           demoteNoted = true

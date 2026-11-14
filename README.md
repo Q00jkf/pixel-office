@@ -59,6 +59,17 @@ Restart Claude Code and type `/office`.
 
 Previously installed `pixel-office@llm-wiki`? Run `/plugin uninstall pixel-office@llm-wiki` first, then install as above. Nameplates and buttons are kept.
 
+### Update
+
+```
+claude plugin marketplace update pixel-office
+claude plugin update pixel-office@pixel-office
+```
+
+Restart Claude Code to apply; windows already open keep the old version. `/office version` shows what a window runs. After an update, the first prompt gets a one-time note pointing to that version's "升級要做的" (upgrade steps) in the [CHANGELOG](CHANGELOG.md).
+- **Codex side**: `codex plugin add` does not update an installed plugin; run `codex plugin remove pixel-office@pixel-office-codex`, then `add` again, and pick **2. Trust all and continue** when Codex says hooks are new or changed. Untrusted hooks silently do not run, so Codex disappears from the office
+- **Antigravity side**: close every agy window, then run `python <plugin>/agy/agy_office.py install`
+
 ## Everyday commands
 
 | Command | What it does |

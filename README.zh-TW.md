@@ -59,6 +59,17 @@ Claude（主管）◀── 回信：整理好的規格表 ───────
 
 原本裝的是 `pixel-office@llm-wiki`：先 `/plugin uninstall pixel-office@llm-wiki` 再照上面裝。名牌、按鈕設定都保留。
 
+### 更新
+
+```
+claude plugin marketplace update pixel-office
+claude plugin update pixel-office@pixel-office
+```
+
+重開 Claude Code 才生效；開著的舊視窗照舊用舊版。`/office version` 看這個視窗是哪一版。升版後第一則指令，外掛會提醒一次並指到 [CHANGELOG](CHANGELOG.md) 該版的「升級要做的」。
+- **Codex 那一半**：`codex plugin add` 不會更新已裝的，要先 `codex plugin remove pixel-office@pixel-office-codex` 再 `add`；開 Codex 跳「hooks are new or changed」選 **2. Trust all and continue**。沒信任的 hook 不跑也不報錯，Codex 會從辦公室消失
+- **Antigravity 那一半**：關掉所有 agy 視窗，再跑 `python <外掛>/agy/agy_office.py install`
+
 ## 常用
 
 | 指令 | 作用 |

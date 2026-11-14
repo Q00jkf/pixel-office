@@ -30,9 +30,10 @@
 ## 改完要做的
 
 1. 只跑相關測試：`claude plugin test .`（bun；不是 python）；動到 `remote/` 加 `bun test remote`
-2. 改了行為就 bump `.claude-plugin/plugin.json`，**同一個 commit** 寫 `CHANGELOG.md`
+2. 改了行為就 bump：`.claude-plugin/plugin.json` 的 `version` 與 `hooks/register.tsx` 的 `VERSION` **兩處一起改**（升版提醒、`/office version` 靠後者；測試讀不到 json，沒有自動比對），**同一個 commit** 寫 `CHANGELOG.md`，含「升級要做的」（沒有寫「無」）
 3. commit 用自己的 session 名當 author：`git -c user.name="<短代號>" commit ...`
-4. 本機生效：`claude plugin marketplace update pixel-office`、`claude plugin update pixel-office@pixel-office`；agy 那一半要關掉所有 agy 視窗再跑 `agy_office.py install`
+4. 發行（push 前先請示）：`git push`，再 `claude plugin tag . --push`（打 `pixel-office--v<版號>` 並推上去，順便驗 plugin.json 與 marketplace 一致；先 `--dry-run`）
+5. **push 完立刻**讓本機生效，不要留到下次：`claude plugin marketplace update pixel-office`、`claude plugin update pixel-office@pixel-office`，再用 `claude plugin list` 確認版號＝plugin.json。動到 `codex/`、`agy/` 的照 CHANGELOG 重裝。請使用者重開在用 team skill 的視窗（開著的照舊是舊版）。2026-11-14 查到本機停在 0.55.1、repo 已到 0.59.0：這步漏了四版
 
 ## 踩坑
 

@@ -1,11 +1,27 @@
 # CHANGELOG
 
-> **「某一版出了什麼」的正本。** 一版一段、最新在上。每段四件事：**改了什麼／為什麼／commit／issue**。
+> **「某一版出了什麼」的正本。** 一版一段、最新在上。每段四件事：**改了什麼／為什麼／commit／issue**；0.60.0 起加第五件 **升級要做的**：已裝的人更新後要自己動手的（舊角色卡要改的欄位、要重裝的 Codex／agy、抄出去的設定），沒有寫「無」。外掛升版後第一則指令會叫模型讀這一欄。
 > 🔴 **bump `.claude-plugin/plugin.json` 的那個 commit 要同時寫這裡**，不要事後補。
 > 「為什麼」只寫 commit 內文或使用者裁示裡有的；查不到寫「待補」，不推測。
 > 0.1.0～0.30.4 在 [llm-wiki-plugin](https://github.com/Q00jkf/llm-wiki-plugin) 開發（當時路徑 `plugins/pixel-office/`），2026-10-29 連同歷史搬來；那段的 commit 欄寫的是舊 repo 的 hash。
 
 ---
+
+## 0.60.0 — 2026-11-14
+
+- **改了什麼**：
+  - 叫人流程寫成一段：skill `roles.md` §5（在線就傳話 → `roles.py` 找卡 → 有卡用卡上的角色名開 → 沒卡問使用者），`SKILL.md` 路由表加一列、description 加叫人、開、關、收到回報類觸發詞，`lead.md` §1 第 3 步指過去；系統提示補「roster 找不到人、或要開角色 → roles.md §5」
+  - `open_role.py` 開之前檢查：同名或同職稱已在線 → STOP、exit 3（`--force` 照開）；名字沒卡但有相近的卡、`--dir` 跟卡的啟動位置不同、同名多張卡 → 印 Note；唯一一張卡的路徑寫進開場句（含 `--kickoff`）。團隊視窗 Relations 叫人撞到時，畫面說清楚撞到誰、改傳話或 `--force`
+  - 升版提醒：`~/.claude/pixel-office/version.json` 記這台電腦見過的最新版；升版後第一則指令提醒一次、指到本檔「升級要做的」；開著的舊版視窗提醒重開。`/office version` 顯示這個視窗的版號
+  - README 加「更新」段（Claude、Codex、agy 三種）
+  - `lead.md` §7 主管可以關底下 peer 的 session（9a7db2e、5d551a8，使用者 2026-11-11 授權）
+- **為什麼**：2026-11-14 主管被叫「開出 office 員工」時，沒載入 team skill，另開了一個沒職責的角色；其實已經有 office設計 的卡。調查發現流程分散在三份檔、平常的說法對不到觸發詞，維護者本機也停在 0.55.1 沒更新。使用者：「盡量不要把功能寫在 claude.md 的 ops 裡面，因為這樣其他人無法使用，所以去完善 pixel office 反而是更好的」
+- **升級要做的**：
+  - 自己抄過「開角色」流程到 CLAUDE.md 或其他設定的：改成「照 pixel-office team skill `roles.md` §5」，或補上「先 roster → `roles.py` 找卡」
+  - 呼叫 `open_role.py` 的腳本：同名或同職稱已在線時會 exit 3，要開第二個就加 `--force`
+  - Codex、agy 沒改，不用重裝
+- **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到
+- **commit**：9a7db2e、5d551a8、812fa21，加上本版這筆
 
 ## 0.59.0 — 2026-11-09
 

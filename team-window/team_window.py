@@ -61,6 +61,11 @@ except ImportError:
     def live_sessions(session_id):
         return []
 try:
+    from open_role import online_as  # 外掛 0.60.0 起：名稱或職稱撞到在線的人
+except ImportError:
+    def online_as(role):
+        return []
+try:
     from open_role import sessions_named  # 外掛 0.47.0 起
 except ImportError:
     def sessions_named(name, cwd, since_ms=0):
@@ -509,6 +514,11 @@ class Api:
             if RELATIONS:  # 沒有分頁：開在自己的 PowerShell 視窗，已在線就不重開
                 if sessions_named(name, cwd):
                     return {'error': f'{name} is already open ({cwd})'}
+                taken = online_as(name)
+                if taken:  # open_role.py 也會擋（exit 3），在這裡先講清楚撞到誰、怎麼辦
+                    return {'error': f'{name} is already online as {", ".join(taken)} (name or office title). '
+                                     f'Message it instead (SendMessage, or switch to its window); to open a second one anyway, '
+                                     f'run: python open_role.py --role {name} --force'}
                 if open_role_main(['--role', name, '--dir', cwd, '--card', card_file] + (['--team', team] if team else [])) != 0:
                     return {'error': f'Could not open {name} ({cwd})'}
                 return {'opened': True, 'name': name, 'cwd': cwd}
