@@ -18,6 +18,7 @@
   - Codex 外掛版號從 0.59.0 對齊到 0.61.0
   - Codex：使用者那句話符合「你是 X，接手」或「you are X, take over」時，UserPromptSubmit hook 提示先叫 `office_takeover(role=X)`。原因：同一句話實測兩次，一次叫了工具，一次直接說「已接手」就等指示，只靠工具說明不穩。使用者打的字只拿來比對、不存
   - `takeover.py` 給 Codex／agy 的登記行：主管在線時直接印 `team=<主管的 ListAgents 名稱>`。原因：讓 Codex 自己去名單上找，它填了名牌 `office`，不是 `office設計`，掛不上去。第 5 步寫明存檢查點是接手流程的一部分，卡上寫「不改檔」也要存；原因：卡的邊界寫「不做：改任何檔」時，Codex 就不存檢查點
+  - `takeover.py` 給 Codex／agy 的登記行加建議名牌 `name=`：卡上 `office_name` 或角色名的英數字，不到 2 個字就用 `codex`／`agy`，撞到在線的人就接 2、3…（例：`codex`、`codex2`）。原因：預設名牌取自資料夾名，撞名時接 session id 尾碼，像 `pixeloff2c03`，看不出是誰（使用者 2026-11-14「接手時建議英文名牌」）
   - 系統提示那段 pixel-office 指引（找人、開角色 → `roles.md` §5）沒進系統提示時，第一則指令改塞進 context 一次。
     - 原因：2026-11-14 實測，Claude Desktop 代管的 session 裡，pixel-office 的 `prompt.compose` 被 `cc-plugin-sec-default` 跳過；這個 mod 來源不明，2026-11-11 起就有。同時被跳過的還有 `classic.*` 與 `session.compact`
     - 判斷依據是「這個 session 的 compose 沒跑」，不是寫死 Desktop。compose 在 submit 之前跑（D1 的通知時間：compose 04:31:22.045，UserPromptSubmit 22.419），有跑就不塞，不會重複

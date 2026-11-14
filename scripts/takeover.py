@@ -262,7 +262,7 @@ def main(argv=None):
         rt = (meta.get('reports_to') or '').strip()
         hit = next((s for s in live() if rt and rt.lower() in {str(s.get(k) or '').lower() for k in ('agent', 'name', 'title')}), None)
         team = (hit.get('agent') or hit.get('name')) if hit else None
-        print(f'登記：office_profile(title={cut(meta.get("office_title") or a.role, 16)}, '
+        print(f'登記：office_profile(name={suggest_plate(meta, a.role, a.kind, a.id)}, title={cut(meta.get("office_title") or a.role, 16)}, '
               + (f'team={team})' if team else f'team=<開場句寫的「開你的是 X」的 X；沒寫就找 office_roster 上名稱或職稱＝{rt or "（卡上沒寫 reports_to）"} 的人，填它的 Send to 欄（不是名牌）；找不到就不帶>)'))
     else:
         print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
@@ -289,6 +289,18 @@ def main(argv=None):
     if other:
         print(after_steps(a.role, name, cp_file, cp))
     return 0
+
+
+def suggest_plate(meta, role, kind, my_id=None):
+    """agy、Codex 的名牌（1～12 個英數字、不能跟在線的人重複）：卡上 office_name 或角色名的英數字，不到 2 字用 codex／agy；撞名接 2、3…
+    預設名牌取自資料夾名，撞名時接 session id 尾碼（pixeloff2c03），看不出是誰（jacky 2026-11-14）"""
+    base = next((b for b in (re.sub(r'[^A-Za-z0-9]', '', s or '')[:12] for s in (meta.get('office_name'), role)) if len(b) >= 2), kind)
+    taken = {str(s.get('name') or '').lower() for s in live() if s.get('id') != my_id}
+    for i in range(1, 100):
+        c = base if i == 1 else base[:12 - len(str(i))] + str(i)
+        if c.lower() not in taken:
+            return c
+    return base
 
 
 def after_steps(role, who, cp_file, cp=None):
