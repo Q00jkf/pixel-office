@@ -263,8 +263,14 @@ def hook(event: str) -> None:
             SESSIONS.mkdir(parents=True, exist_ok=True)
             p = status_file(cid)
             s = load(p)
+            if event == "PreInvocation":
+                note = cp_note(s)
+                if note:
+                    out = {"injectSteps": [*out.get("injectSteps", []), {"userMessage": note}]}
             now = now_ms()
             mode, tool = state(event, d)
+            if event == "PostToolUse" and s.get("cpFile") and "office_" not in tool:  # 接手、登記、報到不算做事
+                s["cpWorked"] = True
             ws = d.get("workspacePaths") or []
             s.update({
                 "id": f"agy-{cid}", "kind": "agy", "role": s.get("role", "staff"),
@@ -272,6 +278,7 @@ def hook(event: str) -> None:
                 "title": s.get("title") or (Path(str(ws[0])).name[:16] if ws else "Antigravity"),
                 "titleAuto": s.get("titleAuto", True),
                 "mode": mode, "tool": tool, "updatedAt": now, "left": False,
+                **({"cwd": str(ws[0])} if ws else {}),  # office_takeover 沒給 cwd 時用
             })
             if s.get("modeWas") != mode:
                 s["since"] = now
@@ -289,11 +296,88 @@ def hook(event: str) -> None:
 
 # ---------------------------------------------------------------- MCP server（stdio，每行一則 JSON-RPC）
 
+# 接手角色：說明寫明什麼時候用，不靠 skill 觸發（2026-11-14 實測：只說「接手」時 Codex 不讀也不存檢查點）。codex_office.py 有同一段
+TAKEOVER_TOOL = {
+    "name": "office_takeover",
+    "description": "Use FIRST when the user says \"你是 <role>，接手\" / \"you are <role>, take over\" (a pixel-office role card). "
+                   "Returns the role card, the previous holder's last checkpoint, the team status, and the steps to follow "
+                   "(register with office_profile, report to the manager with office_send, append a checkpoint). "
+                   "role: the role name the user said. cwd: your working folder (absolute).",
+    "inputSchema": {"type": "object", "properties": {"role": {"type": "string"}, "cwd": {"type": "string"}}, "required": ["role"]}}
+
+
+def find_script(name: str):
+    """Claude 那半的 scripts/<name>：Codex／agy 外掛只複製自己的資料夾。先找同一個 repo，再找 Claude 外掛快取裡版號最大的"""
+    here = Path(__file__).resolve().parent.parent / "scripts" / name
+    if here.is_file():
+        return here
+
+    def ver(p):
+        try:
+            return tuple(int(x) for x in p.parent.parent.name.split("."))
+        except ValueError:
+            return ()
+    hits = sorted((HOME / ".claude" / "plugins" / "cache" / "pixel-office" / "pixel-office").glob(f"*/scripts/{name}"), key=ver)
+    return hits[-1] if hits else None
+
+
+def run_takeover(kind: str, office_id: str, me: str, a: dict) -> str:
+    role = str(a.get("role") or "").strip()
+    if not role:
+        raise ValueError("role is required: the role name the user said")
+    script = find_script("takeover.py")
+    if not script:
+        raise ValueError("Claude Code's pixel-office plugin (scripts/takeover.py) is not on this computer: install it to use role cards")
+    r = subprocess.run([sys.executable, str(script), role, "--kind", kind, "--as", me, "--id", office_id, "--cwd", str(a.get("cwd") or os.getcwd())],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    if "--kind" in r.stderr and "unrecognized" in r.stderr:
+        raise ValueError(f"{script} is too old for {kind} (needs pixel-office 0.61.0+): ask the user to update the Claude Code plugin")
+    return (r.stdout + ("\n" + r.stderr if r.stderr.strip() else "")).strip() or f"takeover.py exited {r.returncode} with no output"
+
+
+CP_REMIND_MS = 60 * 60000  # 跟 register.tsx 一樣：持有角色、做了事、一小時沒存 → 下一輪提醒一次
+
+
+def hold_role(p: Path, out: str) -> None:
+    """office_takeover 接成了：記下檢查點檔與起算時間，hook 照這個提醒（第 2 層卡沒有第 5 步＝不提醒；有 STOP＝沒接）"""
+    m = re.search(r"^5\. .*?在 (.+?\.md) 檔尾", out.split("# 接手後要做的")[-1], re.M)  # 只看最後那段：卡與檢查點內文不算
+    s = load(p)
+    if m and not re.search("^STOP：", out, re.M):
+        s.update({"cpFile": m.group(1), "cpBase": now_ms(), "cpWorked": False, "cpNoted": False})
+    else:  # 沒接成、第 2 層卡：先前接的角色也不再提醒
+        for k in ("cpFile", "cpBase", "cpWorked", "cpNoted"):
+            s.pop(k, None)
+    save(p, s)
+
+
+def cp_note(s: dict) -> str:
+    """每則指令前：檔案比起算時間新＝剛存過，重新起算；做過事、滿一小時、這段沒提醒過 → 回提醒（會改 s，呼叫的人負責存）"""
+    try:  # 出錯不能連累同一輪的收信
+        f = s.get("cpFile")
+        if not f:
+            return ""
+        try:
+            m = int(os.path.getmtime(f) * 1000)
+        except OSError:
+            m = 0
+        if m > int(s.get("cpBase") or 0):
+            s.update({"cpBase": m, "cpWorked": False, "cpNoted": False})
+        if s.get("cpWorked") and not s.get("cpNoted") and now_ms() - int(s.get("cpBase") or 0) >= CP_REMIND_MS:
+            s["cpNoted"] = True
+            return (f"Pixel office: you hold a role and have not saved a checkpoint for an hour. At a good stopping point append one entry "
+                    f"to {f} (## YYYY-MM-DD HH:mm <you> / - 做完： / - 卡在： / - 下一步：).")
+    except Exception:
+        pass
+    return ""
+
+
 TOOLS = [
     {"name": "office_profile",
-     "description": "Set your nameplate and/or job title in the pixel office (shown to every Claude/agy session). "
-                    "name: 1-12 ASCII letters/digits. title: what you are working on, max 16 chars, Chinese OK.",
-     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}}}},
+     "description": "Set your nameplate, job title and/or manager in the pixel office (shown to every Claude/agy session). "
+                    "name: 1-12 ASCII letters/digits. title: what you are working on, max 16 chars, Chinese OK. "
+                    "team: your manager's name from office_roster (you sit in its team); off to leave.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}, "team": {"type": "string"}}}},
+    TAKEOVER_TOOL,
     {"name": "office_roster",
      "description": "List everyone online in the pixel office: nameplate, title, kind (Claude/agy), what they are doing. Use it to find who to message.",
      "inputSchema": {"type": "object", "properties": {}}},
@@ -319,8 +403,22 @@ def tool_profile(cid: str, a: dict) -> str:
         s["name"] = name
     if title is not None:
         s.update(title=str(title).strip()[:16], titleAuto=False, titleAt=now_ms())
+    team = a.get("team")
+    if team is not None:  # 掛到主管底下（Claude 的 office_profile 同一欄）；off 或空字串拿掉
+        team = str(team).strip()
+        if team.lower() in ("", "off"):
+            s.pop("team", None)
+        else:
+            s["team"] = team[:64]
     save(p, s)
-    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}"
+    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}, team {s.get('team') or '—'}"
+
+
+def tool_takeover(cid: str, a: dict) -> str:
+    s = load(status_file(cid))
+    out = run_takeover("agy", f"agy-{cid}", s.get("name") or "agy", {**a, "cwd": a.get("cwd") or s.get("cwd")})
+    hold_role(status_file(cid), out)
+    return out
 
 
 def tool_roster() -> str:
@@ -368,7 +466,7 @@ def mcp() -> None:
                 if not cid:
                     raise ValueError("No conversation id (_meta has no antigravity.google/conversation_id)")
                 text = {"office_profile": lambda: tool_profile(cid, args), "office_roster": tool_roster,
-                        "office_send": lambda: tool_send(cid, args)}[name]()
+                        "office_send": lambda: tool_send(cid, args), "office_takeover": lambda: tool_takeover(cid, args)}[name]()
                 reply(mid, {"content": [{"type": "text", "text": text}]})
             except KeyError:
                 reply(mid, error={"code": -32602, "message": f"No such tool: {name}"})

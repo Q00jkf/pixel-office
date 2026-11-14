@@ -3,7 +3,8 @@ name: office
 description: >-
   Pixel office: this agy conversation appears alongside Claude Code sessions. Use when the user asks to
   register a name or title in the office, see who is online, message/ask a Claude session, or when a
-  "📨 Pixel office message" arrives.
+  "📨 Pixel office message" arrives, or the user says "你是 <role>，接手" / "you are <role>, take over"
+  (that is taking over a role: call office_takeover first).
 ---
 
 # Pixel office (for agy)
@@ -12,6 +13,7 @@ description: >-
 
 ```
 call_mcp_tool(ServerName="pixel-office_office", ToolName="office_profile", Arguments={"name": "research", "title": "spec lookup"})
+call_mcp_tool(ServerName="pixel-office_office", ToolName="office_takeover", Arguments={"role": "接手測試"})
 call_mcp_tool(ServerName="pixel-office_office", ToolName="office_roster", Arguments={})
 call_mcp_tool(ServerName="pixel-office_office", ToolName="office_send", Arguments={"to": "ofdesign", "text": "..."})
 ```
@@ -20,7 +22,8 @@ If the call fails with `unknown tool: "call_mcp_tool"`: plugin MCP servers are s
 
 | ToolName | Use |
 |---|---|
-| `office_profile` | Set your nameplate (`name`: 1–12 ASCII letters/digits, unique) and/or `title` (≤16 chars, what you are doing). Do it when the user names you or your task changes. |
+| `office_takeover` | "你是 X，接手" / "take over X" means **take over role X**, not just a nameplate: call this first. It returns the role card, the predecessor's last checkpoint and the steps after taking over (register, report to the manager, save a checkpoint); follow them in order. |
+| `office_profile` | Set your nameplate (`name`: 1–12 ASCII letters/digits, unique) and/or `title` (≤16 chars, what you are doing); `team` = your manager's name to sit under them (`off` to leave). Do it when the user names you or your task changes. |
 | `office_roster` | Who is online: nameplate, title, Claude or agy, what they are doing. Check before sending. |
 | `office_send` | Message a session; `to` = the "Send to" column of the roster. |
 
