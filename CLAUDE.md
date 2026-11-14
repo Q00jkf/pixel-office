@@ -35,6 +35,17 @@
 4. 發行（push 前先請示）：`git push`，再 `claude plugin tag . --push`（打 `pixel-office--v<版號>` 並推上去，順便驗 plugin.json 與 marketplace 一致；先 `--dry-run`）
 5. **push 完立刻**讓本機生效，不要留到下次：`claude plugin marketplace update pixel-office`、`claude plugin update pixel-office@pixel-office --scope user`（不帶 `--scope` 可能只更新到某個資料夾的 local 安裝），再看 `~/.claude/plugins/installed_plugins.json` 裡 user scope 的 `version`＝plugin.json。🔴 不要用 `claude plugin list` 確認：來源是本機資料夾時它顯示 repo 的版號，不是裝上的（2026-11-14：它顯示 0.61.0，實際 user scope 還是 0.55.1）。動到 `codex/`、`agy/` 的照 CHANGELOG 重裝。請使用者重開在用 team skill 的視窗（開著的照舊是舊版）。2026-11-14 查到本機停在 0.55.1、repo 已到 0.59.0：這步漏了四版
 
+## 實測用的視窗：用團隊視窗開（使用者 2026-10-31 裁示；2026-11-14 從全域 ops 搬來）
+
+實測用的一次性 Claude 視窗（例如信箱、撞角色）在團隊視窗裡開成分頁，不用 `open_role.py`：關掉團隊視窗時每個分頁的 claude 都會結束（`_close` 會 `stop` 每個分頁），不會漏關。2026-10-31 用 `open_role.py` 開了 4 個信箱測試視窗，使用者以為都關了，其實又開了 2～4 小時：Claude Code 會蓋掉視窗標題，工作列上認不出是哪個角色。
+
+1. 抄測試資料夾（repo 旁的 `../pixel-office-測試/`，不進 git）`團隊視窗/team-叫人測試.json` 成 `team-<測試名>.json`：每個 agent 填 `name`、新的 `id`（uuid）、`cwd`，開場句放 `prompt`
+2. 在那個資料夾跑 `python <repo>/team-window/team_window.py team-<測試名>.json`；「對方晚點才上線」這類情況用分頁的 `add_tab` 中途加人
+3. 測完請使用者關那個團隊視窗；說關好了，先 `office_roster` 確認測試名稱不在名單上，再回報
+4. 例外，照舊用 `open_role.py`：測 `open_role.py` 本身（預先登記名牌、職稱）；測「不同開法同時存在」（同一份對話一邊在團隊視窗、一邊在 PowerShell 視窗）
+
+Codex、agy 的實測：非互動用 `codex exec -C <測試資料夾> -s workspace-write --skip-git-repo-check "<指令>"`；agy 的權限詢問非互動沒人答，要使用者開互動視窗按允許。重裝 Codex 外掛會重置 hook 信任，要使用者重到 `/hooks` 按 Trust all（2026-11-14）
+
 ## 踩坑
 
 - **2026-10-08 Python 印中文炸掉**：stdout 預設 cp950，腳本開頭加 `sys.stdout.reconfigure(encoding='utf-8')`
