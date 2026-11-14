@@ -1846,7 +1846,7 @@ export const register: Register = on => {
     const section = {
       id: 'pixel-office:role',
       text:
-        'Pixel office (a pane drawing every session): ListAgents registers you. Keep your title (max 16 chars) = current task with mcp__pixel-office__office_profile; auto mode -> auto=true; dispatched by a manager -> team=<its ListAgents name>, done -> team=off. Find people: mcp__pixel-office__office_roster. Multi-session work: skill pixel-office:team.',
+        'Pixel office (a pane drawing every session): ListAgents registers you. Keep your title (max 16 chars) = current task with mcp__pixel-office__office_profile; auto mode -> auto=true; dispatched by a manager -> team=<its ListAgents name>, done -> team=off. Find people: mcp__pixel-office__office_roster; not online, or asked to open/call a role -> skill pixel-office:team roles.md §5 (find the role card first). Multi-session work: skill pixel-office:team.',
       scope: 'session' as const,
     }
     return { sections: [...composed.sections, section] }

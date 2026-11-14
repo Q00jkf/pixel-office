@@ -1,6 +1,6 @@
 ---
 name: team
-description: "Multi-session collaboration: manager/staff layers, role cards from a rule set, squads, takeover, checkpoints, dispatch, reports, meetings. Triggers: 當主管, 升層, 降層, 小隊, 角色卡, 接手, 派工, 開會, 請裁示, 存檢查點, collab.md."
+description: "Multi-session collaboration: calling or opening a role's session, manager/staff layers, role cards from a rule set, squads, takeover, checkpoints, dispatch, peer reports, closing sessions, meetings. Use before opening any new Claude window for a person/role, or when a peer session messages you. Triggers: 叫 X 來, 開 X, 找做 Y 的人, 幫我開一個…的人, 把 X 關掉, 收到回報, 當主管, 升層, 降層, 小隊, 角色卡, 接手, 派工, 開會, 請裁示, 存檢查點, collab.md; call/open/close someone, bring X in."
 ---
 
 # team：一人多 session 協作
@@ -10,6 +10,7 @@ description: "Multi-session collaboration: manager/staff layers, role cards from
 
 | 你現在的情境 | 讀 |
 |---|---|
+| 「叫 X 來」「開 X」「找做 Y 的人」：叫人或開某角色的視窗 | `roles.md` §5 |
 | 「照 <規則> 設角色」、建角色卡、「你是 <角色>，接手」、存檢查點 | `roles.md` |
 | 要不要多開人（升層）、當主管、收到 peer 回報／佔用申請／BLOCKED、派工、關 peer 的 session、降層提醒、「大家在幹嘛」 | `lead.md` |
 | 開會、收到 `📋 開會`、主持人送來「請裁示：」 | `meet.md` |

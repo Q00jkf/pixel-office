@@ -1,7 +1,10 @@
 """開一個角色視窗：一個角色一個 PowerShell 視窗跑 claude（skill pixel-office:team 的「開角色」）。
 
   python open_role.py --role <角色> [--dir <工作位置>] [--kickoff <開場檔>] [--team <主管的 ListAgents 名稱>]
-                      [--title <職稱>] [--plate <名牌>] [--plugin-dir <外掛資料夾>] [--dry-run]
+                      [--title <職稱>] [--plate <名牌>] [--plugin-dir <外掛資料夾>] [--force] [--dry-run]
+
+- 開之前：已有在線的 session 名稱或職稱＝這個角色 → STOP、exit 3（--force 照開）；對角色卡（roles.py）：名字沒卡但有相近的、
+  --dir 跟卡的啟動位置不同、同名多張 → 印 Note 不擋；找到唯一一張卡就把路徑寫進開場句（含 --kickoff）
 
 - 子程序的環境拿掉 DROP_ENV（理由見下）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
 - 先產生 session id 帶 --session-id，並寫 ~/.claude/pixel-office/presets/<id>.json（title／team／名牌／role=staff）：
@@ -103,6 +106,31 @@ def card_dir(role):
     return hits[0]['start'] if len(hits) == 1 else None
 
 
+def online_as(role):
+    """在線、session 名稱或辦公室職稱＝這個角色的人（撞角色：兩個 session 頂同一角色，檢查點會交錯）"""
+    from takeover import live
+    return sorted({(s.get('agent') or '').split(' [')[0] or s.get('id', '')[:8] for s in live()
+                   if role in ((s.get('agent') or '').split(' [')[0], s.get('title'))})
+
+
+def card_notes(role, folder):
+    """開之前對角色卡：(卡路徑或 None, 提醒)。名字沒卡但有相近的卡、--dir 跟卡的啟動位置不同 → 提醒（只提醒不擋）"""
+    from roles import all_roles, norm
+    rows, k = all_roles(), role.lower()
+    exact = [r for r in rows if k in (r['role'].lower(), r['name'].lower())]
+    if not exact:
+        near = [r for r in rows if len(os.path.commonprefix([k, r['role'].lower()])) >= 2 or k in r['role'].lower() or r['role'].lower() in k]
+        return None, [f'No role card named {role}; similar cards: ' + ', '.join(f"{r['role']} ({r['card']})" for r in near)
+                      + ' -> use that name instead? (skill pixel-office:team roles.md §5)'] if near else [
+            f'No role card named {role} on this computer: ask the user to create one (roles.md §1) or open it as a one-off session']
+    if len(exact) > 1:
+        return None, [f'{len(exact)} role cards named {role}: ' + ', '.join(r['card'] for r in exact)]
+    r = exact[0]
+    if folder and r['start'] and norm(r['start']) != norm(os.path.abspath(folder)):
+        return r['card'], [f"--dir {folder} differs from the card's start folder {r['start']} ({r['card']})"]
+    return r['card'], []
+
+
 def encoded(script):
     return base64.b64encode(script.encode('utf-16-le')).decode('ascii')
 
@@ -114,14 +142,23 @@ def main(argv=None):
     ap.add_argument('--role', required=True, help='role name: --name, window title, default title')
     ap.add_argument('--dir', help="working folder (must exist; default: the role card's start folder)")
     ap.add_argument('--kickoff', help='kickoff file the role reads first (must exist; default: say "你是 <role>，接手")')
-    ap.add_argument('--card', help='role card path, added to the default opening line (no --kickoff)')
+    ap.add_argument('--card', help='role card path, added to the opening line (default: the single card named --role)')
     ap.add_argument('--team', help="manager's ListAgents name (office team)")
     ap.add_argument('--title', help='office title, max 16 chars (default: role)')
     ap.add_argument('--plate', help='nameplate, 1-12 letters/digits (default: from --name if ASCII)')
     ap.add_argument('--plugin-dir', help='extra --plugin-dir for claude (must exist)')
+    ap.add_argument('--force', action='store_true', help='open even if a session with this name or title is already online')
     ap.add_argument('--dry-run', action='store_true', help='print the command and preset only; open nothing, write nothing')
     a = ap.parse_args(argv)
 
+    taken = online_as(a.role)
+    if taken and not a.force:
+        print(f'STOP: {", ".join(taken)} already online as {a.role} -> message it instead (SendMessage), or ask the user; --force opens a second one', file=sys.stderr)
+        return 3
+    card, notes = card_notes(a.role, a.dir)
+    for n in notes:
+        print('Note: ' + n, file=sys.stderr)
+    a.card = a.card or card
     a.dir = a.dir or card_dir(a.role)
     if not a.dir:
         print(f'No --dir and no single role card with a start folder for {a.role} (python roles.py {a.role})', file=sys.stderr)
@@ -133,7 +170,7 @@ def main(argv=None):
     title = (a.title or a.role)[:16]
     sid = str(uuid.uuid4())
     preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
-    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
+    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做' + (f'（你的角色卡：{a.card}）' if a.card else '') + '。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
     if a.team:  # 卡上寫的主管是正式流程的那位；實際開你的人以這句與名單上的 team 為準（jacky 2026-11-08）
         prompt += f'。開你的是 {a.team}，它是你的主管，有事向它回報'
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
