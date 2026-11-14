@@ -26,7 +26,7 @@
   - 在背景跑的 Desktop session 要重開才會載入新版，載入後 5 秒內出現在名單上
 - **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到。code review（`claude -p` Sonnet，0.38 美元）確認 8 條都修：沒有 version.json（從 0.60 以前升上來）也提醒、版號含非數字也比得出來、版號檢查出錯不再跳過同一輪的收信與檢查點、撞名比對不分大小寫並加比名牌與卡上的 office_name、`--dry-run` 撞名時照印指令、用 office_name 叫的登記成卡名、團隊視窗訊息改成「到終端機加 --force」；另修開場句「。。」。
   Desktop 三項：測試 211 過（加 2 個模擬：Desktop 代管的 session 5 秒內變回員工；`claude -p` 繼承了 HOST_SESSION_ID 仍是一次性對話）。實測真的 `claude -p` 繼承那個變數時，CLI 紀錄沒有 `hostSessionId`（0.005 美元）。環境變數：從 Desktop 代管的 session 用 `open_role.py` 實開一個視窗，CLI 紀錄 entrypoint＝`cli`、ListAgents 列得到、SendMessage 送達、辦公室職稱與 team 正確，Bash 裡看不到 HOST_SESSION_ID、DESKTOP_APP_VERSION、ANTHROPIC_BASE_URL（看得到的 MESSAGING_SOCKET／TOKEN 是它自己的，跟來信位址一致）。code review（Sonnet，0.25 美元）指出原本的寫法會連使用者在 .bat 設的變數一起拿掉，改成兩層。
-  **沒實測**：Desktop 代管的 session 實際載入新版後有沒有出現在名單上（要先更新本機外掛）；start_session 能不能指定工作資料夾；封存時外掛會不會補檢查點；每輪自動回摘要讓主管的 context 長多快（後三項寫在 `roles.md` §5）
+  **沒實測**：Desktop 代管的 session 實際載入新版後有沒有出現在名單上（要先更新本機外掛）；start_session 能不能指定工作資料夾；封存時外掛會不會補檢查點（後兩項寫在 `roles.md` §5）。每輪自動回摘要：主管量了 1 個 session、4 輪，每則約 400 字，ctx 9%→15% 大部分是對話本身，影響小
 - **commit**：9a7db2e、5d551a8、812fa21、1f40bfb、d848a0e、3e6d913、72a32fd、012d9b5、160e4fe、74e02a5
 
 ## 0.59.0 — 2026-11-09
