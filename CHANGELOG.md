@@ -10,7 +10,7 @@
 ## 0.60.0 — 2026-11-14
 
 - **改了什麼**：
-  - 叫人流程寫成一段：skill `roles.md` §5（在線就傳話 → `roles.py` 找卡 → 有卡用卡上的角色名開 → 沒卡問使用者），`SKILL.md` 路由表加一列、description 加叫人、開、關、收到回報類觸發詞，`lead.md` §1 第 3 步指過去；系統提示補「roster 找不到人、或要開角色 → roles.md §5」
+  - 叫人流程寫成一段：skill `roles.md` §5（在線就傳話 → `roles.py` 找卡 → 有卡用卡上的角色名開 → 沒卡問使用者），`SKILL.md` 路由表加一列、description 加叫人、開、關、收到回報類觸發詞，`lead.md` §1 第 3 步指過去；§5 也寫了開場檔怎麼寫、開好之後提醒使用者什麼（不必另有本機範本）；系統提示補「roster 找不到人、或要開角色 → roles.md §5」
   - `open_role.py` 開之前檢查：同名或同職稱已在線 → STOP、exit 3（`--force` 照開）；名字沒卡但有相近的卡、`--dir` 跟卡的啟動位置不同、同名多張卡 → 印 Note；唯一一張卡的路徑寫進開場句（含 `--kickoff`）。團隊視窗 Relations 叫人撞到時，畫面說清楚撞到誰、改傳話或 `--force`
   - 升版提醒：`~/.claude/pixel-office/version.json` 記這台電腦見過的最新版；升版後第一則指令提醒一次、指到本檔「升級要做的」；開著的舊版視窗提醒重開。`/office version` 顯示這個視窗的版號
   - README 加「更新」段（Claude、Codex、agy 三種）
@@ -21,7 +21,7 @@
   - 呼叫 `open_role.py` 的腳本：同名或同職稱已在線時會 exit 3，要開第二個就加 `--force`
   - Codex、agy 沒改，不用重裝
 - **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到。code review（`claude -p` Sonnet，0.38 美元）確認 8 條都修：沒有 version.json（從 0.60 以前升上來）也提醒、版號含非數字也比得出來、版號檢查出錯不再跳過同一輪的收信與檢查點、撞名比對不分大小寫並加比名牌與卡上的 office_name、`--dry-run` 撞名時照印指令、用 office_name 叫的登記成卡名、團隊視窗訊息改成「到終端機加 --force」；另修開場句「。。」
-- **commit**：9a7db2e、5d551a8、812fa21、1f40bfb、d848a0e
+- **commit**：9a7db2e、5d551a8、812fa21、1f40bfb、d848a0e、3e6d913
 
 ## 0.59.0 — 2026-11-09
 
