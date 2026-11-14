@@ -353,7 +353,15 @@ test('the system prompt gets one short pixel-office section', async ($, on) => {
   const out: any = await ($ as any).prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] })
   const ids = out.sections.map((s: any) => s.id)
   expect(ids).toEqual(['intro', 'pixel-office:role'])
-  expect(out.sections[1].text).toContain('office_profile')
+  expect(out.sections[1].text).toBe(ROLE_SECTION)
+  expect(ROLE_SECTION).toContain('roles.md §5')
+})
+
+import { ROLE_SECTION, roleNoteDue } from './register'
+test('compose skipped by another mod (Desktop-hosted, 2026-11-14): the first prompt carries the section once; never when compose ran', () => {
+  expect(roleNoteDue(false, false)).toBe(true)
+  expect(roleNoteDue(false, true)).toBe(false) // 已塞過
+  expect(roleNoteDue(true, false)).toBe(false) // 系統提示已有，不重複
 })
 
 // ---------- 紙飛機、等待核准 ----------

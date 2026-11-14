@@ -930,6 +930,15 @@ const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新�
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
 export const VERSION = '0.61.0'
+
+// 系統提示那段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
+export const ROLE_SECTION =
+  'Pixel office (a pane drawing every session): ListAgents registers you. Keep your title (max 16 chars) = current task with mcp__pixel-office__office_profile; auto mode -> auto=true; dispatched by a manager -> team=<its ListAgents name>, done -> team=off. Find people: mcp__pixel-office__office_roster; not online, or asked to open/call a role -> skill pixel-office:team roles.md §5 (find the role card first). Multi-session work: skill pixel-office:team.'
+// prompt.compose 被別的 mod 跳過時（2026-11-14 實測：Desktop 代管的 session 被 cc-plugin-sec-default 跳過，系統提示沒有這段），
+// 第一則指令改塞進 context 一次。compose 在 submit 之前跑（D1 的通知時間 compose 04:31:22.045、UserPromptSubmit 22.419），有跑過就不塞，不會重複
+let composeSeen = false
+let roleNoted = false
+export const roleNoteDue = (composeSeen: boolean, noted: boolean) => !composeSeen && !noted
 const CHANGELOG_URL = 'https://github.com/Q00jkf/pixel-office/blob/main/CHANGELOG.md'
 export const cmpVersion = (a: string, b: string) => {
   const x = a.split('.').map(n => parseInt(n, 10) || 0), y = b.split('.').map(n => parseInt(n, 10) || 0) // 0.61.0-beta、壞字串也比得出來
@@ -1862,16 +1871,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 系統提示加一段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
+  // 系統提示加一段（ROLE_SECTION）
   on('prompt.compose', async ($, e, next) => {
+    composeSeen = true
     const composed = await next(e)
-    const section = {
-      id: 'pixel-office:role',
-      text:
-        'Pixel office (a pane drawing every session): ListAgents registers you. Keep your title (max 16 chars) = current task with mcp__pixel-office__office_profile; auto mode -> auto=true; dispatched by a manager -> team=<its ListAgents name>, done -> team=off. Find people: mcp__pixel-office__office_roster; not online, or asked to open/call a role -> skill pixel-office:team roles.md §5 (find the role card first). Multi-session work: skill pixel-office:team.',
-      scope: 'session' as const,
-    }
-    return { sections: [...composed.sections, section] }
+    return { sections: [...composed.sections, { id: 'pixel-office:role', text: ROLE_SECTION, scope: 'session' as const }] }
   })
 
   // 用到 ListAgents 時，從輸出抓「This session is X」自動登記（不用模型配合）
@@ -2114,6 +2118,10 @@ export const register: Register = on => {
         const head = promptHead(e.text)
         if (head) me = { ...me, prompt: { text: head, at: now } }
         await autoTitle($, head, now)
+        if (roleNoteDue(composeSeen, roleNoted)) {
+          roleNoted = true
+          e = { ...e, context: [...(e.context ?? []), ROLE_SECTION] }
+        }
         if (me.dup && !dupNoted) {
           dupNoted = true
           e = { ...e, context: [...(e.context ?? []), DUP_NOTE] }

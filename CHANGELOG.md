@@ -16,6 +16,9 @@
   - agy 的 office skill：「你是 X，接手」是接手角色，先叫 `office_takeover`，不是只登記名牌
   - 檢查點提醒，照 Claude 的規則：接手成功後做過事（`office_*` 工具不算）、一小時沒存 → Codex 下一則指令、agy 下一次呼叫時提醒一次。沒接成或第 2 層卡不提醒。Codex、agy 沒有 `/compact` 前提醒，也沒有下線補寫
   - Codex 外掛版號從 0.59.0 對齊到 0.61.0
+  - 系統提示那段 pixel-office 指引（找人、開角色 → `roles.md` §5）沒進系統提示時，第一則指令改塞進 context 一次。
+    - 原因：2026-11-14 實測，Claude Desktop 代管的 session 裡，pixel-office 的 `prompt.compose` 被 `cc-plugin-sec-default` 跳過；這個 mod 來源不明，2026-11-11 起就有。同時被跳過的還有 `classic.*` 與 `session.compact`
+    - 判斷依據是「這個 session 的 compose 沒跑」，不是寫死 Desktop。compose 在 submit 之前跑（D1 的通知時間：compose 04:31:22.045，UserPromptSubmit 22.419），有跑就不塞，不會重複
 - **為什麼**：使用者要測「agy 或 codex 接手角色可不可以」。2026-11-14 實測結果（測試資料夾 `agy-codex接手實測.md`）：
   - Codex 只聽到一句「接手」：會讀卡、做事、回報，但不讀上一筆檢查點、也不存新的
   - agy 的 office skill 把「接手」當成登記名牌，卡都沒去找
@@ -31,6 +34,7 @@
   - `claude plugin test .` 211 過（TypeScript 只改了版號）
   - code review（`claude -p` Sonnet，0.36 美元）7 條修 5 條：office 工具不算做事、Codex 沒給 cwd 用 hook 記的工作夾、提醒出錯不吞信、沒接成清掉舊記錄、只在「接手後要做的」那段找檢查點路徑。不修的 2 條：還沒寫 CHANGELOG（就是這段）；舊版腳本的偵測只認 argparse 英文訊息（argparse 沒附翻譯）
   - **沒實測**：真的 Codex、agy 對話裡說「你是 X，接手」會不會叫 `office_takeover`。要先重裝兩邊的外掛
+  - 補塞指引：`claude plugin test .` 212 過。`claude -p --plugin-dir`（一般 session）問模型那段出現幾次：只在系統提示一次，沒有重複（0.18 美元）。Desktop 代管的 session 裡補上了沒，等新開 session 驗
 - **commit**：e0606bb、3c74706
 
 ## 0.60.0 — 2026-11-14
