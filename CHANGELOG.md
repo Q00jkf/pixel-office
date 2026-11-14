@@ -45,7 +45,7 @@
     - 第 5 次：全過，登記到 office設計 底下、報到、加了檢查點（7,008 tokens）
     - 坑：重裝 Codex 外掛會重置 hook 信任，要重新到 `/hooks` 按 Trust all
   - 補塞指引：`claude plugin test .` 212 過。`claude -p --plugin-dir`（一般 session）問模型那段出現幾次：只在系統提示一次，沒有重複（0.18 美元）。Desktop 代管的 session 裡補上了沒，等新開 session 驗
-- **commit**：e0606bb、3c74706、31f0b80、2dd080b、ca09de5、a674224
+- **commit**：e0606bb、3c74706、31f0b80、2dd080b、ca09de5、a674224、209f222
 
 ## 0.60.0 — 2026-11-14
 
