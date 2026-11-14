@@ -16,6 +16,8 @@
   - agy 的 office skill：「你是 X，接手」是接手角色，先叫 `office_takeover`，不是只登記名牌
   - 檢查點提醒，照 Claude 的規則：接手成功後做過事（`office_*` 工具不算）、一小時沒存 → Codex 下一則指令、agy 下一次呼叫時提醒一次。沒接成或第 2 層卡不提醒。Codex、agy 沒有 `/compact` 前提醒，也沒有下線補寫
   - Codex 外掛版號從 0.59.0 對齊到 0.61.0
+  - Codex：使用者那句話符合「你是 X，接手」或「you are X, take over」時，UserPromptSubmit hook 提示先叫 `office_takeover(role=X)`。原因：同一句話實測兩次，一次叫了工具，一次直接說「已接手」就等指示，只靠工具說明不穩。使用者打的字只拿來比對、不存
+  - `takeover.py` 給 Codex／agy 的登記行：主管在線時直接印 `team=<主管的 ListAgents 名稱>`。原因：讓 Codex 自己去名單上找，它填了名牌 `office`，不是 `office設計`，掛不上去。第 5 步寫明存檢查點是接手流程的一部分，卡上寫「不改檔」也要存；原因：卡的邊界寫「不做：改任何檔」時，Codex 就不存檢查點
   - 系統提示那段 pixel-office 指引（找人、開角色 → `roles.md` §5）沒進系統提示時，第一則指令改塞進 context 一次。
     - 原因：2026-11-14 實測，Claude Desktop 代管的 session 裡，pixel-office 的 `prompt.compose` 被 `cc-plugin-sec-default` 跳過；這個 mod 來源不明，2026-11-11 起就有。同時被跳過的還有 `classic.*` 與 `session.compact`
     - 判斷依據是「這個 session 的 compose 沒跑」，不是寫死 Desktop。compose 在 submit 之前跑（D1 的通知時間：compose 04:31:22.045，UserPromptSubmit 22.419），有跑就不塞，不會重複
@@ -33,9 +35,16 @@
   - 模擬 hook：接手後記下檢查點檔；做過事、撥回兩小時 → 下一則提醒一次，第二次不提醒；`office_send` 不算做事；別人已持有同一角色 → STOP，舊記錄清掉
   - `claude plugin test .` 211 過（TypeScript 只改了版號）
   - code review（`claude -p` Sonnet，0.36 美元）7 條修 5 條：office 工具不算做事、Codex 沒給 cwd 用 hook 記的工作夾、提醒出錯不吞信、沒接成清掉舊記錄、只在「接手後要做的」那段找檢查點路徑。不修的 2 條：還沒寫 CHANGELOG（就是這段）；舊版腳本的偵測只認 argparse 英文訊息（argparse 沒附翻譯）
-  - **沒實測**：真的 Codex、agy 對話裡說「你是 X，接手」會不會叫 `office_takeover`。要先重裝兩邊的外掛
+  - 真的 Codex、agy 對話實測（測試資料夾，卡上不寫接手步驟，只說「你是 X，接手」）：
+    - agy（互動視窗，使用者按允許）：叫了 `office_takeover`；職稱「接手測試」、team＝office設計；報到帶出上次檢查點的暗號 BLUE-42；收工時加了一筆檢查點
+    - Codex（`codex exec`）第 1 次：hook 還沒信任，工具拒絕
+    - 第 2 次：信任了，卻沒叫工具，只說「已接手」→ 加 hook 提示
+    - 第 3 次：重裝 Codex 外掛把信任重置，hook 全失敗
+    - 第 4 次：接手、登記、報到都做了，但 team 填成名牌，也以「不改檔」為由不存檢查點 → 改 `takeover.py`
+    - 第 5 次：全過，登記到 office設計 底下、報到、加了檢查點（7,008 tokens）
+    - 坑：重裝 Codex 外掛會重置 hook 信任，要重新到 `/hooks` 按 Trust all
   - 補塞指引：`claude plugin test .` 212 過。`claude -p --plugin-dir`（一般 session）問模型那段出現幾次：只在系統提示一次，沒有重複（0.18 美元）。Desktop 代管的 session 裡補上了沒，等新開 session 驗
-- **commit**：e0606bb、3c74706、31f0b80、2dd080b
+- **commit**：e0606bb、3c74706、31f0b80、2dd080b、ca09de5、a674224
 
 ## 0.60.0 — 2026-11-14
 
