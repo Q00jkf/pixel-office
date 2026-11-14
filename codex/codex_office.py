@@ -351,6 +351,18 @@ def run_takeover(kind: str, office_id: str, me: str, a: dict) -> str:
     return (r.stdout + ("\n" + r.stderr if r.stderr.strip() else "")).strip() or f"takeover.py exited {r.returncode} with no output"
 
 
+# 「你是 X，接手」：只靠工具說明不穩（2026-11-14 同一句實測，一次叫了 office_takeover、一次直接說「已接手」），hook 直接提示
+TAKEOVER_ASK = re.compile(r"你是\s*[「『]?\s*([^\s，,。「」『』]+?)\s*[」』]?\s*[，,、]?\s*(?:來)?接手|you are\s+(.+?)\s*,?\s*take over", re.I)
+
+
+def takeover_hint(prompt: str) -> str:
+    m = TAKEOVER_ASK.search(prompt or "")
+    if not m:
+        return ""
+    role = (m.group(1) or m.group(2) or "").strip()
+    return (f"Pixel office: the user asked you to take over the role \"{role}\". Call the MCP tool office_takeover(role=\"{role}\") FIRST, "
+            "before anything else, then follow the steps it returns. Do not just say you took over.")
+
 CP_REMIND_MS = 60 * 60000  # 跟 register.tsx 一樣：持有角色、做了事、一小時沒存 → 下一輪提醒一次
 
 
@@ -561,7 +573,7 @@ def hook(event: str) -> None:
             mode, tool = state(event, d)
             cwd = str(d.get("cwd") or "")
             if event == "UserPromptSubmit":
-                out = "\n\n".join(x for x in (take_mail(sid), cp_note(s)) if x)  # 純文字 stdout 會當成這一輪的額外上下文
+                out = "\n\n".join(x for x in (takeover_hint(str(d.get("prompt") or "")), take_mail(sid), cp_note(s)) if x)  # 純文字 stdout 會當成這一輪的額外上下文；prompt 只比對、不存
             if event == "PostToolUse" and s.get("cpFile") and "office_" not in tool:  # 接手、登記、報到不算做事
                 s["cpWorked"] = True
             if event == "Stop":
