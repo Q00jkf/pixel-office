@@ -6,7 +6,7 @@
 - 開之前：已有在線的 session 名稱或職稱＝這個角色 → STOP、exit 3（--force 照開）；對角色卡（roles.py）：名字沒卡但有相近的、
   --dir 跟卡的啟動位置不同、同名多張 → 印 Note 不擋；找到唯一一張卡就把路徑寫進開場句（含 --kickoff）
 
-- 子程序的環境拿掉 DROP_ENV（理由見下）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
+- 子程序的環境拿掉 DROP_ENV 與宿主塞進來的 Claude 變數（child_env，理由見下；使用者在登錄檔設的、CLAUDE_CONFIG_DIR 照留）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
 - 先產生 session id 帶 --session-id，並寫 ~/.claude/pixel-office/presets/<id>.json（title／team／名牌／role=staff）：
   外掛在那個 session 第一次啟動時套用，開場檔不必再寫「開工先登記辦公室」；agent 與 ref 外掛本來就會自己讀 ListAgents 填
 - --dir 省略 → 用角色卡的啟動位置（roles.py；卡上沒寫用卡所在專案根目錄）；--kickoff 省略 → 開場句「你是 <角色>，接手」
@@ -22,14 +22,55 @@ import subprocess
 import sys
 import uuid
 
+# 一律拿掉：
 # CLAUDE_CODE_CHILD_SESSION：從 Claude session 開出來會繼承，CLI 就不寫 ~/.claude/sessions/<pid>.json →
 #   ListAgents 列不出、SendMessage 送不到、transcript 不存檔（2026-10-26 實測）
 # ANTHROPIC_API_KEY：繼承下去會停用 claude.ai 連接器、改走 API key 計費（jacky 2026-10-26 裁示用 claude.ai 登入）
 DROP_ENV = ('CLAUDE_CODE_CHILD_SESSION', 'ANTHROPIC_API_KEY')
+# 宿主塞進來的也拿掉，開出來的要像從開始選單開的 PowerShell：從桌面版主管開出的視窗原本帶著主管的
+#   CLAUDE_CODE_HOST_SESSION_ID、MESSAGING_SOCKET／TOKEN（傳訊用的權杖）、ENTRYPOINT=claude-desktop、ANTHROPIC_BASE_URL…（2026-11-14 實測）。
+#   使用者在登錄檔（使用者層、系統層）自己設的照留；CLAUDE_CONFIG_DIR 照留（多公司：開出的視窗沿用同一套設定）
+HOST_PREFIXES = ('CLAUDE_CODE_', 'CLAUDE_AGENT_SDK_', 'CLAUDE_PREVIEW_')
+HOST_NAMES = ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'ANTHROPIC_BASE_URL')
+KEEP_ENV = ('CLAUDE_CONFIG_DIR',)
 
 
-def child_env(env=None):
-    return {k: v for k, v in (os.environ if env is None else env).items() if k not in DROP_ENV}
+def persistent_env_names():
+    """登錄檔裡使用者層與系統層的環境變數名稱（大寫）；不是 Windows 回 None"""
+    if sys.platform != 'win32':
+        return None
+    import winreg
+    out = set()
+    for root, path in ((winreg.HKEY_CURRENT_USER, 'Environment'),
+                       (winreg.HKEY_LOCAL_MACHINE, r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment')):
+        try:
+            with winreg.OpenKey(root, path) as k:
+                i = 0
+                while True:
+                    try:
+                        out.add(winreg.EnumValue(k, i)[0].upper())
+                    except OSError:
+                        break
+                    i += 1
+        except OSError:
+            pass
+    return out
+
+
+def dropped(name, persistent):
+    """這個變數要不要從子行程拿掉；persistent＝persistent_env_names()（None：沒有登錄檔可對，宿主類的一律拿掉）"""
+    u = name.upper()
+    if u in DROP_ENV:
+        return True
+    if u in KEEP_ENV or not (u.startswith(HOST_PREFIXES) or u in HOST_NAMES):
+        return False
+    return persistent is None or u not in persistent
+
+
+def child_env(env=None, persistent=...):
+    env = os.environ if env is None else env
+    persistent = persistent_env_names() if persistent is ... else persistent
+    return {k: v for k, v in env.items() if not dropped(k, persistent)}
 
 
 def pid_alive(pid):
@@ -183,7 +224,7 @@ def main(argv=None):
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
                        os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
     if a.dry_run:
-        print(f'env drop: {", ".join(DROP_ENV)}')
+        print(f'env drop: {", ".join(sorted(k for k in os.environ if k not in child_env())) or "(none)"}')
         print(f'preset {preset_file(sid)}: {json.dumps(preset, ensure_ascii=False)}')
         print(f'powershell -NoExit -EncodedCommand <{script}>')
         return 3 if taken and not a.force else 0
