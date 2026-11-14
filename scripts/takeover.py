@@ -257,9 +257,13 @@ def main(argv=None):
         print(f'STOP：這份對話同時開在 {len(twins)} 個視窗（pid {", ".join(str(p) for p, _ in twins)}）→ 請使用者關掉一個再接')
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
             'role=主管' if meta.get('layer', '1') == '1' and is_lead(a.role) else None]
-    boss = f'主管：開場句寫的「開你的是 X」；沒寫就找 office_roster 上職稱或名稱＝卡上 reports_to（{meta.get("reports_to") or "沒寫"}）的人，找不到就不帶'
     if other:  # agy、Codex 的 office_profile 只有 name、title、team
-        print(f'登記：office_profile(title={cut(meta.get("office_title") or a.role, 16)}, team=<{boss}>)')
+        # 在線就直接給主管的 ListAgents 名稱：叫模型自己找，Codex 會填名牌（2026-11-14 實測填了 office，不是 office設計），掛不上去
+        rt = (meta.get('reports_to') or '').strip()
+        hit = next((s for s in live() if rt and rt.lower() in {str(s.get(k) or '').lower() for k in ('agent', 'name', 'title')}), None)
+        team = (hit.get('agent') or hit.get('name')) if hit else None
+        print(f'登記：office_profile(title={cut(meta.get("office_title") or a.role, 16)}, '
+              + (f'team={team})' if team else f'team=<開場句寫的「開你的是 X」的 X；沒寫就找 office_roster 上名稱或職稱＝{rt or "（卡上沒寫 reports_to）"} 的人，填它的 Send to 欄（不是名牌）；找不到就不帶>)'))
     else:
         print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
     cp_file = os.path.join(office, 'checkpoints', f'{a.role}.md')
@@ -297,7 +301,7 @@ def after_steps(role, who, cp_file, cp=None):
            + '。沒有主管就跳過',
            '4. 照卡上的職責、邊界、必讀做事；卡上沒寫的不做，碰到邊界就回報主管']
     if cp_file:
-        out.append(f'5. 做到一個段落、要收工時，在 {cp_file} 檔尾**加**一筆檢查點（只往後加，不改前面的；檔案不在就建）：\n'
+        out.append(f'5. 做到一個段落、要收工時，在 {cp_file} 檔尾**加**一筆檢查點（只往後加，不改前面的；檔案不在就建。這是接手流程的一部分，卡上寫「不改檔」也要存）：\n'
                    f'   ## YYYY-MM-DD HH:mm {who}      ← 當地時間\n'
                    '   - 做完：一兩行（指檔案或 commit，不抄內容）\n'
                    '   - 卡在：沒有寫「無」\n'
