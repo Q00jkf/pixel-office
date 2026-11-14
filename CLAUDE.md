@@ -33,7 +33,7 @@
 2. 改了行為就 bump：`.claude-plugin/plugin.json` 的 `version` 與 `hooks/register.tsx` 的 `VERSION` **兩處一起改**（升版提醒、`/office version` 靠後者；測試讀不到 json，沒有自動比對），**同一個 commit** 寫 `CHANGELOG.md`，含「升級要做的」（沒有寫「無」）
 3. commit 用自己的 session 名當 author：`git -c user.name="<短代號>" commit ...`
 4. 發行（push 前先請示）：`git push`，再 `claude plugin tag . --push`（打 `pixel-office--v<版號>` 並推上去，順便驗 plugin.json 與 marketplace 一致；先 `--dry-run`）
-5. **push 完立刻**讓本機生效，不要留到下次：`claude plugin marketplace update pixel-office`、`claude plugin update pixel-office@pixel-office`，再用 `claude plugin list` 確認版號＝plugin.json。動到 `codex/`、`agy/` 的照 CHANGELOG 重裝。請使用者重開在用 team skill 的視窗（開著的照舊是舊版）。2026-11-14 查到本機停在 0.55.1、repo 已到 0.59.0：這步漏了四版
+5. **push 完立刻**讓本機生效，不要留到下次：`claude plugin marketplace update pixel-office`、`claude plugin update pixel-office@pixel-office --scope user`（不帶 `--scope` 可能只更新到某個資料夾的 local 安裝），再看 `~/.claude/plugins/installed_plugins.json` 裡 user scope 的 `version`＝plugin.json。🔴 不要用 `claude plugin list` 確認：來源是本機資料夾時它顯示 repo 的版號，不是裝上的（2026-11-14：它顯示 0.61.0，實際 user scope 還是 0.55.1）。動到 `codex/`、`agy/` 的照 CHANGELOG 重裝。請使用者重開在用 team skill 的視窗（開著的照舊是舊版）。2026-11-14 查到本機停在 0.55.1、repo 已到 0.59.0：這步漏了四版
 
 ## 踩坑
 
