@@ -2687,6 +2687,8 @@ test('Claude session file → current name and former names; junk is dropped', (
   expect(parseCliSession({ sessionId: 's1', name: 'GUANGUAN', formerNames: [{ name: 'claim-supervisor', until: 1, sessionId: 's1' }, { until: 2 }, 'x'] })).toEqual({ sessionId: 's1', name: 'GUANGUAN', formerNames: ['claim-supervisor'] })
   expect(parseCliSession({ sessionId: 's2' })).toEqual({ sessionId: 's2', name: undefined, formerNames: [] })
   expect(parseCliSession({ name: 'no id' })).toBeUndefined()
+  expect(parseCliSession({ sessionId: 's3', hostSessionId: 'local_abc' })?.hosted).toBe(true) // Desktop 代管：不當一次性對話
+  expect(parseCliSession({ sessionId: 's4', hostSessionId: '' })?.hosted).toBeUndefined()
 })
 
 test('rename fixes: own agent follows /rename; a team pointing at a renamed manager follows to the new name', () => {
@@ -2976,4 +2978,39 @@ test('version note: no file or upgrade notes once and records, older window asks
   const old = versionNote('0.61.0', '0.60.0')
   expect(old.write).toBe(false)
   expect(old.note).toContain('restarted')
+})
+
+// ---------- 0.60.0：Desktop 代管的 session 沒被點開也是員工（CLI 紀錄有 hostSessionId） ----------
+const HOSTED_MOCKS = (on: any, files: Record<string, string>, env: Record<string, string> = {}) => {
+  on('env.get', (_$: any, e: any) => ({ value: env[e.name] ?? 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: Object.keys(files).filter(k => k.startsWith('sessions/')).map(k => ({ name: k.slice(9), kind: 'file', size: 1, mtimeMs: 1_000_000, isLink: false })) }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).slice(-2).join('/')] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.split(/[\\/]/).slice(-2).join('/')] = e.text
+    return { value: undefined }
+  })
+  on('classic.SessionStart', () => ({}) as any)
+}
+
+test('a Desktop-hosted session nobody opened (no attach) becomes an employee once its CLI record shows hostSessionId', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const files: Record<string, string> = { 'sessions/4242.json': JSON.stringify({ pid: 4242, sessionId: 'h1', name: '評估', hostSessionId: 'local_abc' }) }
+  HOSTED_MOCKS(on, files)
+  G4_START(on, files, 'h1')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
+  expect(JSON.parse(files['sessions/h1.json']).oneshot).toBe(true)
+  await clock.advance(5000)
+  const mine = JSON.parse(files['sessions/h1.json'])
+  expect(mine.oneshot).toBeUndefined()
+  expect(mine.left).toBe(false)
+})
+
+test('claude -p (no hostSessionId in its CLI record) stays a one-shot, even with an inherited CLAUDE_CODE_HOST_SESSION_ID', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const files: Record<string, string> = { 'sessions/4343.json': JSON.stringify({ pid: 4343, sessionId: 'p9', name: 'api' }) }
+  HOSTED_MOCKS(on, files, { CLAUDE_CODE_HOST_SESSION_ID: 'local_inherited' })
+  G4_START(on, files, 'p9')
+  await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
+  await clock.advance(5000)
+  expect(JSON.parse(files['sessions/p9.json']).oneshot).toBe(true)
 })

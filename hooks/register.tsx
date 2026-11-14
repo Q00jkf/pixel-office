@@ -519,14 +519,14 @@ async function applyPreset($: EngineInterface) {
   if (input) await applyProfile($, input)
 }
 
-/** Claude Code 自己的 ~/.claude/sessions/<pid>.json：在線 session 的現名與 /rename 前的舊名 */
-export type CliSession = { sessionId: string; name?: string; formerNames: string[] }
+/** Claude Code 自己的 ~/.claude/sessions/<pid>.json：在線 session 的現名與 /rename 前的舊名；hosted＝有 hostSessionId（Claude Desktop 代管的 session） */
+export type CliSession = { sessionId: string; name?: string; formerNames: string[]; hosted?: true }
 export function parseCliSession(raw: unknown): CliSession | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Record<string, unknown>
   if (typeof r.sessionId !== 'string') return undefined
   const former = Array.isArray(r.formerNames) ? r.formerNames.map(f => (f && typeof f === 'object' ? (f as { name?: unknown }).name : undefined)).filter((n): n is string => typeof n === 'string' && n !== '') : []
-  return { sessionId: r.sessionId, name: typeof r.name === 'string' && r.name !== '' ? r.name : undefined, formerNames: former }
+  return { sessionId: r.sessionId, name: typeof r.name === 'string' && r.name !== '' ? r.name : undefined, formerNames: former, ...(typeof r.hostSessionId === 'string' && r.hostSessionId !== '' ? { hosted: true as const } : {}) }
 }
 
 /** /rename 之後要改的：自己的 agent 換成現名；team 指的名字已沒人用、卻是某個 session 的舊名 → 換成它的現名 */
@@ -559,6 +559,9 @@ async function cliSessions($: EngineInterface): Promise<CliSession[]> {
 let lastCli: CliSession[] = [] // 最近一次讀到的 ~/.claude/sessions：信箱判斷收件名認不認得
 async function followRename($: EngineInterface) {
   lastCli = await cliSessions($)
+  // Desktop 代管的 session（start_session 開的、App 重開後在背景恢復的）沒被點開就收不到 session.attach，會一直被當成一次性對話、名單看不到。
+  // CLI 自己的紀錄有 hostSessionId 才算：環境變數 CLAUDE_CODE_HOST_SESSION_ID 會被子行程（claude -p、open_role.py 舊版開的視窗）繼承，不能用（2026-11-14 實測）
+  if (me.oneshot && me.id !== 'me' && lastCli.some(c => c.sessionId === me.id && c.hosted)) await attend($)
   if (me.id === 'me' || me.oneshot) return
   const fix = renameFixes(me, lastCli)
   if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
