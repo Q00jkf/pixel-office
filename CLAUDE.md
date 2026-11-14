@@ -40,3 +40,4 @@
 - **2026-10-08 Python 印中文炸掉**：stdout 預設 cp950，腳本開頭加 `sys.stdout.reconfigure(encoding='utf-8')`
 - **2026-10-29 `build_sheet.py` 沒有 `__main__` 守衛**：被 import 就會重產素材表
 - **2026-10-29 agy 外掛裝不上**：任何 agy 視窗開著時，外掛資料夾被它的 MCP 程序佔住，`agy plugin install` 失敗
+- **2026-11-14 同版號 `claude plugin update` 不會重新複製**：還沒發行、版號沒動又改了程式，要 `claude plugin uninstall pixel-office@pixel-office --scope user` 再 `install`，cache 才會是新的
