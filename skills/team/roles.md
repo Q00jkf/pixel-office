@@ -103,3 +103,9 @@ reports_to: <範圍>主管        # 例 willy主管，不能只寫「主管」�
 
 開人多花的 token 是使用者的成本：使用者說了「叫／開」才開，只是「找」就先問。
 `open_role.py` 會擋一層：同名或同職稱已在線 → STOP（exit 3；真要第二個加 `--force`）；名字沒卡但有相近的卡、`--dir` 跟卡的啟動位置不同 → 印 Note。看到 Note 先回第 2 步。
+
+**開場檔**（`--kickoff`，要交代這次做什麼才寫；只是叫回來接手就不用）：內容＝`lead.md` §4 派工單，前後各加一段：
+- 前：「開工先 `ToolSearch("select:SendMessage")`；`ListAgents` 沒列出自己就先傳一句『已報到』給 <你的 session 名稱>」
+- 後：「做完、卡住用 SendMessage 回報，第一行一句結論；送不出去寫 `<repo 根>/peer-reply-<自己名稱>.md`、跟使用者說一聲；回報後等下一件，不自己找事做」
+
+開好之後：告訴使用者開了誰、做什麼，提醒第一次可能卡在信任資料夾或讀 repo 外檔案的詢問，要在那個視窗按（不加 `--dangerously-skip-permissions`）。對方卡在詢問時 `ListAgents` 看不到它；回報前不催、不輪詢。
