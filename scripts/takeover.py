@@ -189,7 +189,12 @@ def main(argv=None):
     ap.add_argument('role')
     ap.add_argument('--office', help='collab dir (default: same rule as skill pixel-office:team)')
     ap.add_argument('--cwd', default=os.getcwd(), help='project folder (default: current)')
+    ap.add_argument('--kind', choices=('claude', 'codex', 'agy'), default='claude',
+                    help='who takes over; codex/agy skip the Claude session file and /rename, and print the steps after takeover')
+    ap.add_argument('--as', dest='who', help='codex/agy: your office nameplate (default: the kind)')
+    ap.add_argument('--id', help="codex/agy: your office status id (codex-<session>, agy-<conversation>), so you don't count as another holder")
     a = ap.parse_args(argv)
+    other = a.kind != 'claude'  # agy、Codex：沒有 Claude 的 session 紀錄、沒有 /rename、沒有 skill（2026-11-14 實測被認成開它的 Claude）
 
     from roles import find, start_of  # roles.py 反過來 import 本檔，放這裡免得循環
     office = a.office or office_dir(a.cwd)
@@ -214,6 +219,10 @@ def main(argv=None):
     body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()
     start = start_of(body) or start
     if start and os.path.isabs(start) and os.path.isdir(start) and not here(a.cwd, start):
+        if other:  # open_role.py 只會開 Claude
+            print(f'MOVE：{a.role} 的啟動位置是 {os.path.normpath(start)}，這裡是 {a.cwd} → 不要在這裡接。'
+                  f'請使用者在 {os.path.normpath(start)} 開一個新的 {a.kind}，再說「你是 {a.role}，接手」（卡 {card}）')
+            return 3
         name = meta.get('office_name') or a.role
         cmd = (f'python "{os.path.join(os.path.dirname(os.path.abspath(__file__)), "open_role.py")}" --role "{name}" '
                f'--dir "{os.path.normpath(start)}" --title "{cut(meta.get("office_title") or a.role, 16)}"')
@@ -222,35 +231,45 @@ def main(argv=None):
         print(f'  {cmd}')
         print(f'開好後這個 session 不接這個角色（卡 {card}）')
         return 3
-    me = my_session()
+    me = {'name': a.who or a.kind, 'sessionId': a.id} if other else my_session()
     name = me.get('name') or '(unnamed)'
     want = meta.get('office_name')
-    rename_to = want or a.role  # session 名稱一律＝角色名：下屬的 team 記的是這個名字，換人接手也接得上（jacky 2026-11-08）
+    rename_to = name if other else want or a.role  # session 名稱一律＝角色名：下屬的 team 記的是這個名字，換人接手也接得上（jacky 2026-11-08）
     others = holders(meta.get('office_title') or a.role, me.get('sessionId')) + holders(a.role, me.get('sessionId'))
 
     print(f'# 接手 {a.role}（卡 {card}）')
     print(body)
     print('\n# 你')
-    print(f'名稱 {name}（session {me.get("sessionId", "?")[:8]}）'
-          + (f'；session 名稱要＝角色名 → 請使用者 /rename {rename_to}（只有使用者能改；改好後，team 記這個名字的下屬自動接上）' if rename_to != name else ''))
-    taken = sorted({s.get('agent') for s in live() if s.get('agent') == rename_to and s.get('id') != me.get('sessionId')})
+    if other:
+        print(f'{a.kind}，名牌 {name}' + (f'（辦公室 id {a.id}）' if a.id else '') + '：session 名稱不用改，辦公室靠職稱認你是這個角色')
+    else:
+        print(f'名稱 {name}（session {me.get("sessionId", "?")[:8]}）'
+              + (f'；session 名稱要＝角色名 → 請使用者 /rename {rename_to}（只有使用者能改；改好後，team 記這個名字的下屬自動接上）' if rename_to != name else ''))
+    taken = [] if other else sorted({s.get('agent') for s in live() if s.get('agent') == rename_to and s.get('id') != me.get('sessionId')})
     if a.role == '主管' or meta.get('reports_to') == '主管':
         print('提醒：角色名或 reports_to 只叫「主管」，會跟別的專案撞名 → 請使用者把卡改成 <範圍>主管（例 willy主管；skill roles.md §1）')
     if taken and rename_to != name:
         print(f'STOP：已有在線的 session 叫 {rename_to}（舊的持有者還開著？）→ 先問使用者關掉或改名，不要改成同名')
     if others:
         print(f'STOP：{", ".join(sorted(set(others)))} 也登記這個角色且在線 → 先問使用者，不要接')
-    twins = live_sessions(me.get('sessionId')) if me.get('sessionId') else []
+    twins = live_sessions(me.get('sessionId')) if me.get('sessionId') and not other else []
     if len(twins) > 1:
         print(f'STOP：這份對話同時開在 {len(twins)} 個視窗（pid {", ".join(str(p) for p, _ in twins)}）→ 請使用者關掉一個再接')
     args = [f'name={want}' if want else None, f'title={cut(meta.get("office_title") or a.role, 16)}',
             'role=主管' if meta.get('layer', '1') == '1' and is_lead(a.role) else None]
-    print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
+    boss = f'主管：開場句寫的「開你的是 X」；沒寫就找 office_roster 上職稱或名稱＝卡上 reports_to（{meta.get("reports_to") or "沒寫"}）的人，找不到就不帶'
+    if other:  # agy、Codex 的 office_profile 只有 name、title、team
+        print(f'登記：office_profile(title={cut(meta.get("office_title") or a.role, 16)}, team=<{boss}>)')
+    else:
+        print('登記：office_profile(' + ', '.join(x for x in args if x) + ', team=<主管的 session 名稱（＝它的角色名；卡上有 office_name 就是 office_name），沒有就不帶>, auto=<auto 模式就 true>)')
+    cp_file = os.path.join(office, 'checkpoints', f'{a.role}.md')
     if meta.get('layer') == '2':  # 小隊卡只放怎麼做：不讀檢查點、不讀 collab（jacky 2026-11-08）
         print('\n# 第 2 層')
         print('不讀檢查點、不讀 collab.md：照派工單做，做完交付、回報開你的人（名單上的 team）就收工')
+        if other:
+            print(after_steps(a.role, name, None))
         return 0
-    cp = last_checkpoint(os.path.join(office, 'checkpoints', f'{a.role}.md'))
+    cp = last_checkpoint(cp_file)
     print('\n# 上次檢查點')
     print(cut(cp, 1500) if cp else '（沒有）')
     if cp and '（自動：下線前沒存）' in cp.splitlines()[0]:
@@ -263,7 +282,27 @@ def main(argv=None):
         if todo:
             print('\n# 待處理（只有主管改 collab）')
             print('\n'.join(todo))
+    if other:
+        print(after_steps(a.role, name, cp_file, cp))
     return 0
+
+
+def after_steps(role, who, cp_file, cp=None):
+    """agy、Codex 沒有 skill：接手後要做的直接印給它（Claude 照 skill roles.md §3～§4 做）"""
+    nxt = re.search(r'下一步：(.*)', cp or '')
+    out = ['\n# 接手後要做的（照順序）',
+           '1. 上面有 STOP → 先停下來問使用者，不要接',
+           '2. office_profile 照上面「登記」那行（title＝角色名；team＝主管）',
+           f'3. office_send 給主管報到一則：「接手：{role}（{who}）」' + ('；上次檢查點：' + nxt.group(1).strip().rstrip('。') if nxt else '')
+           + '。沒有主管就跳過',
+           '4. 照卡上的職責、邊界、必讀做事；卡上沒寫的不做，碰到邊界就回報主管']
+    if cp_file:
+        out.append(f'5. 做到一個段落、要收工時，在 {cp_file} 檔尾**加**一筆檢查點（只往後加，不改前面的；檔案不在就建）：\n'
+                   f'   ## YYYY-MM-DD HH:mm {who}      ← 當地時間\n'
+                   '   - 做完：一兩行（指檔案或 commit，不抄內容）\n'
+                   '   - 卡在：沒有寫「無」\n'
+                   '   - 下一步：接手的人第一件要做的事')
+    return '\n'.join(out)
 
 
 if __name__ == '__main__':
