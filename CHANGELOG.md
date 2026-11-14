@@ -35,7 +35,7 @@
   - code review（`claude -p` Sonnet，0.36 美元）7 條修 5 條：office 工具不算做事、Codex 沒給 cwd 用 hook 記的工作夾、提醒出錯不吞信、沒接成清掉舊記錄、只在「接手後要做的」那段找檢查點路徑。不修的 2 條：還沒寫 CHANGELOG（就是這段）；舊版腳本的偵測只認 argparse 英文訊息（argparse 沒附翻譯）
   - **沒實測**：真的 Codex、agy 對話裡說「你是 X，接手」會不會叫 `office_takeover`。要先重裝兩邊的外掛
   - 補塞指引：`claude plugin test .` 212 過。`claude -p --plugin-dir`（一般 session）問模型那段出現幾次：只在系統提示一次，沒有重複（0.18 美元）。Desktop 代管的 session 裡補上了沒，等新開 session 驗
-- **commit**：e0606bb、3c74706
+- **commit**：e0606bb、3c74706、31f0b80、2dd080b
 
 ## 0.60.0 — 2026-11-14
 
