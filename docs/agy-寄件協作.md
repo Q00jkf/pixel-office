@@ -36,7 +36,7 @@ python "$HOME\.claude\plugins\cache\pixel-office\pixel-office\<版本>\agy\agy_o
 ```
 
 它會用 `agy plugin install` 裝一個叫 `pixel-office` 的 agy 外掛，裡面有：
-- **三個工具**給 agy 用：`office_profile`（登記名牌、職稱）、`office_roster`（看誰在線）、`office_send`（寄信）
+- **四個工具**給 agy 用：`office_profile`（登記名牌、職稱、主管）、`office_roster`（看誰在線）、`office_send`（寄信）、`office_takeover`（接手角色卡，0.61.0）
 - **hook**：把 agy 的狀態畫進辦公室、收信、寄完信等回覆
 - **skill**：教 agy 這套怎麼用
 

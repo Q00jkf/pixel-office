@@ -7,6 +7,32 @@
 
 ---
 
+## 0.61.0 — 2026-11-14
+
+- **改了什麼**：
+  - Codex、agy 能接手 Claude 的角色卡：兩邊的 MCP 各加 `office_takeover(role, cwd)`。工具說明寫明「使用者說『你是 X，接手』時先用」，不靠 skill 觸發。它跑 Claude 外掛的 `scripts/takeover.py`：repo 的 `scripts/` 優先，再找 Claude 外掛 cache 的最高版。回傳卡、上次檢查點、collab 摘要，以及「接手後要做的」：登記、向主管報到並帶上次檢查點的下一步、照卡做事、檢查點的格式與檔案路徑
+  - `takeover.py` 加 `--kind codex|agy --as <名牌> --id <辦公室 id>`：不讀 Claude 的 session 紀錄、不叫 `/rename`、不查同一對話開兩個視窗；撞角色照查
+  - 兩邊的 `office_profile` 加 `team`，掛到主管底下
+  - agy 的 office skill：「你是 X，接手」是接手角色，先叫 `office_takeover`，不是只登記名牌
+  - 檢查點提醒，照 Claude 的規則：接手成功後做過事（`office_*` 工具不算）、一小時沒存 → Codex 下一則指令、agy 下一次呼叫時提醒一次。沒接成或第 2 層卡不提醒。Codex、agy 沒有 `/compact` 前提醒，也沒有下線補寫
+  - Codex 外掛版號從 0.59.0 對齊到 0.61.0
+- **為什麼**：使用者要測「agy 或 codex 接手角色可不可以」。2026-11-14 實測結果（測試資料夾 `agy-codex接手實測.md`）：
+  - Codex 只聽到一句「接手」：會讀卡、做事、回報，但不讀上一筆檢查點、也不存新的
+  - agy 的 office skill 把「接手」當成登記名牌，卡都沒去找
+  - 兩邊的 `office_profile` 都沒有 team；從 Claude 開出的 Codex 被 `takeover.py` 認成開它的 Claude
+  - 提案 T1～T5，使用者裁示「照提案 T1 到 T5 都做」
+- **升級要做的**：
+  - Claude Code 外掛要更新到 0.61.0：`office_takeover` 跑的是它的 `takeover.py`，舊版沒有 `--kind`，會回「too old」
+  - Codex 重裝：`codex plugin remove pixel-office@pixel-office-codex`、`codex plugin add pixel-office@pixel-office-codex`，開 Codex 跳「hooks are new or changed」選 **Trust all**
+  - agy 重裝：關掉所有 agy 視窗，`python <plugin>/agy/agy_office.py install`
+- **實測**：
+  - JSON-RPC 直接打兩邊的 MCP 程序：`tools/list` 有 `office_takeover`；呼叫後回卡與「接手後要做的」，「你」那段是 codex／agy 的名牌與辦公室 id
+  - 模擬 hook：接手後記下檢查點檔；做過事、撥回兩小時 → 下一則提醒一次，第二次不提醒；`office_send` 不算做事；別人已持有同一角色 → STOP，舊記錄清掉
+  - `claude plugin test .` 211 過（TypeScript 只改了版號）
+  - code review（`claude -p` Sonnet，0.36 美元）7 條修 5 條：office 工具不算做事、Codex 沒給 cwd 用 hook 記的工作夾、提醒出錯不吞信、沒接成清掉舊記錄、只在「接手後要做的」那段找檢查點路徑。不修的 2 條：還沒寫 CHANGELOG（就是這段）；舊版腳本的偵測只認 argparse 英文訊息（argparse 沒附翻譯）
+  - **沒實測**：真的 Codex、agy 對話裡說「你是 X，接手」會不會叫 `office_takeover`。要先重裝兩邊的外掛
+- **commit**：e0606bb、3c74706
+
 ## 0.60.0 — 2026-11-14
 
 - **改了什麼**：

@@ -929,7 +929,7 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
-export const VERSION = '0.60.0'
+export const VERSION = '0.61.0'
 const CHANGELOG_URL = 'https://github.com/Q00jkf/pixel-office/blob/main/CHANGELOG.md'
 export const cmpVersion = (a: string, b: string) => {
   const x = a.split('.').map(n => parseInt(n, 10) || 0), y = b.split('.').map(n => parseInt(n, 10) || 0) // 0.61.0-beta、壞字串也比得出來
