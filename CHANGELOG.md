@@ -14,14 +14,20 @@
   - `open_role.py` 開之前檢查：同名或同職稱已在線 → STOP、exit 3（`--force` 照開）；名字沒卡但有相近的卡、`--dir` 跟卡的啟動位置不同、同名多張卡 → 印 Note；唯一一張卡的路徑寫進開場句（含 `--kickoff`）。團隊視窗 Relations 叫人撞到時，畫面說清楚撞到誰、改傳話或 `--force`
   - 升版提醒：`~/.claude/pixel-office/version.json` 記這台電腦見過的最新版；升版後第一則指令提醒一次、指到本檔「升級要做的」；開著的舊版視窗提醒重開。`/office version` 顯示這個視窗的版號
   - README 加「更新」段（Claude、Codex、agy 三種）
+  - Claude Desktop 代管的 session 沒被點開也算員工：start_session 開的、App 重開後在背景恢復的 session 收不到 `session.attach`，原本一直被標成一次性對話，名單看不到。改成每 5 秒讀 CLI 自己的 `~/.claude/sessions/<pid>.json`，有 `hostSessionId` 就拿掉標記（不用環境變數 `CLAUDE_CODE_HOST_SESSION_ID`：子行程會繼承）
+  - `open_role.py`（團隊視窗分頁也用）不再把上層的身分帶進新視窗：claude 替子行程設的傳訊權杖、session 編號等 9 個一律拿掉；上層是 Desktop 代管時，再拿掉 Desktop 塞的 `CLAUDE_CODE_*`、`CLAUDE_AGENT_SDK_*`、`ANTHROPIC_BASE_URL` 等（登錄檔有的照留）。原本從 Desktop 的主管開出的視窗帶著主管的 `CLAUDE_CODE_HOST_SESSION_ID`、`MESSAGING_SOCKET`／`TOKEN`，CLI 紀錄的 entrypoint 也被寫成 `claude-desktop`
+  - skill `roles.md` §5 加 Claude Desktop 的開法：手上有 `start_session` 時，標題＝角色名、brief 帶卡路徑與主管，新 session 自己 `office_profile`
   - `lead.md` §7 主管可以關底下 peer 的 session（9a7db2e、5d551a8，使用者 2026-11-11 授權）
-- **為什麼**：2026-11-14 主管被叫「開出 office 員工」時，沒載入 team skill，另開了一個沒職責的角色；其實已經有 office設計 的卡。調查發現流程分散在三份檔、平常的說法對不到觸發詞，維護者本機也停在 0.55.1 沒更新。使用者：「盡量不要把功能寫在 claude.md 的 ops 裡面，因為這樣其他人無法使用，所以去完善 pixel office 反而是更好的」
+- **為什麼**：2026-11-14 主管被叫「開出 office 員工」時，沒載入 team skill，另開了一個沒職責的角色；其實已經有 office設計 的卡。調查發現流程分散在三份檔、平常的說法對不到觸發詞，維護者本機也停在 0.55.1 沒更新。使用者：「盡量不要把功能寫在 claude.md 的 ops 裡面，因為這樣其他人無法使用，所以去完善 pixel office 反而是更好的」。Desktop 這三項：主管用 start_session 開的評估 session 在名單上看不到，查的時候順便發現環境變數外洩；使用者裁示「全部完成一起發」
 - **升級要做的**：
   - 自己抄過「開角色」流程到 CLAUDE.md 或其他設定的：改成「照 pixel-office team skill `roles.md` §5」，或補上「先 roster → `roles.py` 找卡」
   - 呼叫 `open_role.py` 的腳本：同名或同職稱已在線時會 exit 3，要開第二個就加 `--force`
   - Codex、agy 沒改，不用重裝
-- **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到。code review（`claude -p` Sonnet，0.38 美元）確認 8 條都修：沒有 version.json（從 0.60 以前升上來）也提醒、版號含非數字也比得出來、版號檢查出錯不再跳過同一輪的收信與檢查點、撞名比對不分大小寫並加比名牌與卡上的 office_name、`--dry-run` 撞名時照印指令、用 office_name 叫的登記成卡名、團隊視窗訊息改成「到終端機加 --force」；另修開場句「。。」
-- **commit**：9a7db2e、5d551a8、812fa21、1f40bfb、d848a0e、3e6d913
+  - 在背景跑的 Desktop session 要重開才會載入新版，載入後 5 秒內出現在名單上
+- **實測**：`claude plugin test .` 209 過。`open_role.py --dry-run` 用本機真實資料驗過：撞角色、相近的卡、`--dir` 不符、沒有卡四種情況。團隊視窗的撞名訊息只驗過程式能解析、`online_as` 有回值，沒開視窗點過。`claude -p` 觸發實測同樣 4 句平常說法（「幫我開出 office 員工」等）：改前 0/4 載入 team skill，改後 4/4 載入並先看 roster（各 1.10、1.14 美元，Opus）；測試的工作資料夾不在 repo 裡，讀 `roles.md` 被權限擋，§5 後半段沒驗到。code review（`claude -p` Sonnet，0.38 美元）確認 8 條都修：沒有 version.json（從 0.60 以前升上來）也提醒、版號含非數字也比得出來、版號檢查出錯不再跳過同一輪的收信與檢查點、撞名比對不分大小寫並加比名牌與卡上的 office_name、`--dry-run` 撞名時照印指令、用 office_name 叫的登記成卡名、團隊視窗訊息改成「到終端機加 --force」；另修開場句「。。」。
+  Desktop 三項：測試 211 過（加 2 個模擬：Desktop 代管的 session 5 秒內變回員工；`claude -p` 繼承了 HOST_SESSION_ID 仍是一次性對話）。實測真的 `claude -p` 繼承那個變數時，CLI 紀錄沒有 `hostSessionId`（0.005 美元）。環境變數：從 Desktop 代管的 session 用 `open_role.py` 實開一個視窗，CLI 紀錄 entrypoint＝`cli`、ListAgents 列得到、SendMessage 送達、辦公室職稱與 team 正確，Bash 裡看不到 HOST_SESSION_ID、DESKTOP_APP_VERSION、ANTHROPIC_BASE_URL（看得到的 MESSAGING_SOCKET／TOKEN 是它自己的，跟來信位址一致）。code review（Sonnet，0.25 美元）指出原本的寫法會連使用者在 .bat 設的變數一起拿掉，改成兩層。
+  **沒實測**：Desktop 代管的 session 實際載入新版後有沒有出現在名單上（要先更新本機外掛）；start_session 能不能指定工作資料夾；封存時外掛會不會補檢查點；每輪自動回摘要讓主管的 context 長多快（後三項寫在 `roles.md` §5）
+- **commit**：9a7db2e、5d551a8、812fa21、1f40bfb、d848a0e、3e6d913、72a32fd、012d9b5、160e4fe、74e02a5
 
 ## 0.59.0 — 2026-11-09
 
