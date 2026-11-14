@@ -6,7 +6,7 @@
 - 開之前：已有在線的 session 名稱或職稱＝這個角色 → STOP、exit 3（--force 照開）；對角色卡（roles.py）：名字沒卡但有相近的、
   --dir 跟卡的啟動位置不同、同名多張 → 印 Note 不擋；找到唯一一張卡就把路徑寫進開場句（含 --kickoff）
 
-- 子程序的環境拿掉 DROP_ENV 與宿主塞進來的 Claude 變數（child_env，理由見下；使用者在登錄檔設的、CLAUDE_CONFIG_DIR 照留）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
+- 子程序的環境拿掉 DROP_ENV、claude 自己的子行程變數，上層是 Claude Desktop 時再拿掉它塞的（child_env，理由見下）；指令用 -EncodedCommand 傳，不經 -Command 的引號剖析，路徑有空白、單雙引號都照原樣
 - 先產生 session id 帶 --session-id，並寫 ~/.claude/pixel-office/presets/<id>.json（title／team／名牌／role=staff）：
   外掛在那個 session 第一次啟動時套用，開場檔不必再寫「開工先登記辦公室」；agent 與 ref 外掛本來就會自己讀 ListAgents 填
 - --dir 省略 → 用角色卡的啟動位置（roles.py；卡上沒寫用卡所在專案根目錄）；--kickoff 省略 → 開場句「你是 <角色>，接手」
@@ -27,12 +27,18 @@ import uuid
 #   ListAgents 列不出、SendMessage 送不到、transcript 不存檔（2026-10-26 實測）
 # ANTHROPIC_API_KEY：繼承下去會停用 claude.ai 連接器、改走 API key 計費（jacky 2026-10-26 裁示用 claude.ai 登入）
 DROP_ENV = ('CLAUDE_CODE_CHILD_SESSION', 'ANTHROPIC_API_KEY')
-# 宿主塞進來的也拿掉，開出來的要像從開始選單開的 PowerShell：從桌面版主管開出的視窗原本帶著主管的
-#   CLAUDE_CODE_HOST_SESSION_ID、MESSAGING_SOCKET／TOKEN（傳訊用的權杖）、ENTRYPOINT=claude-desktop、ANTHROPIC_BASE_URL…（2026-11-14 實測）。
-#   使用者在登錄檔（使用者層、系統層）自己設的照留；CLAUDE_CONFIG_DIR 照留（多公司：開出的視窗沿用同一套設定）
+# claude 替自己的工具子行程設的（2026-11-14 從 open_role.py 開的視窗的 Bash 裡看到的就是這些）：
+#   傳訊權杖、session 編號都是上層的，帶下去新視窗會頂著上層的身分
+CLAUDE_OWN = ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_CODE_SESSION_ID',
+              'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN')
+# 上層是 Claude Desktop 代管的（有下面兩個之一）：Desktop 另外塞了 HOST_SESSION_ID、ANTHROPIC_BASE_URL、OAUTH_SCOPES…約 25 個（2026-11-14 實測），
+#   這時 CLAUDE_CODE_*、CLAUDE_AGENT_SDK_*、CLAUDE_PREVIEW_*、ANTHROPIC_BASE_URL 除了登錄檔（使用者層、系統層）有的都拿掉。
+#   Desktop 從開始選單啟動，沒有使用者在 .bat、shell profile 設的變數，所以不在登錄檔的就是 Desktop 塞的。
+#   上層是終端機時只拿掉 CLAUDE_OWN：使用者可能在 .bat 設了 CLAUDE_CODE_GIT_BASH_PATH、ANTHROPIC_BASE_URL 等，要照留
+DESKTOP_MARKERS = ('CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_DESKTOP_APP_VERSION')
 HOST_PREFIXES = ('CLAUDE_CODE_', 'CLAUDE_AGENT_SDK_', 'CLAUDE_PREVIEW_')
-HOST_NAMES = ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'ANTHROPIC_BASE_URL')
-KEEP_ENV = ('CLAUDE_CONFIG_DIR',)
+HOST_NAMES = ('ANTHROPIC_BASE_URL',)
+KEEP_ENV = ('CLAUDE_CONFIG_DIR',)  # 多公司：開出的視窗沿用同一套設定
 
 
 def persistent_env_names():
@@ -57,20 +63,21 @@ def persistent_env_names():
     return out
 
 
-def dropped(name, persistent):
-    """這個變數要不要從子行程拿掉；persistent＝persistent_env_names()（None：沒有登錄檔可對，宿主類的一律拿掉）"""
+def dropped(name, persistent, desktop):
+    """這個變數要不要從子行程拿掉。persistent＝persistent_env_names()（None：沒有登錄檔可對）；desktop＝上層是 Desktop 代管"""
     u = name.upper()
-    if u in DROP_ENV:
+    if u in DROP_ENV or u in CLAUDE_OWN:
         return True
-    if u in KEEP_ENV or not (u.startswith(HOST_PREFIXES) or u in HOST_NAMES):
+    if not desktop or u in KEEP_ENV or not (u.startswith(HOST_PREFIXES) or u in HOST_NAMES):
         return False
     return persistent is None or u not in persistent
 
 
 def child_env(env=None, persistent=...):
     env = os.environ if env is None else env
-    persistent = persistent_env_names() if persistent is ... else persistent
-    return {k: v for k, v in env.items() if not dropped(k, persistent)}
+    desktop = any(env.get(m) for m in DESKTOP_MARKERS)
+    persistent = (persistent_env_names() if desktop else None) if persistent is ... else persistent
+    return {k: v for k, v in env.items() if not dropped(k, persistent, desktop)}
 
 
 def pid_alive(pid):
