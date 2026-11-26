@@ -1320,8 +1320,10 @@
     PO().sheet(title,
       `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}</div>` +
       (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
-      ([...groups].map(([g, list]) => `<h3 class="sec line">${esc(g)}</h3>` + list.map(c =>
-        `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}${c.managers && c.managers.length ? `<small>在線：${c.managers.map(esc).join('、')}</small>` : ''}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('')).join('')
+      // 在線主管是「這個專案」的，不是某張卡的人：放在專案分組標題那一行（測試 #7）
+      ([...groups].map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
+        return `<h3 class="sec line">${esc(g)}${on.length ? `・在線主管：${on.map(esc).join('、')}` : ''}</h3>` + list.map(c =>
+        `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('') }).join('')
         || '<div class="note">沒有找到角色卡</div>'), true)
     document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
       const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
@@ -1837,7 +1839,7 @@
           <button class="hr-ent" data-l2="staff"><span class="hr-ei" aria-hidden="true">👥</span><span class="hr-txt"><b>員工</b><small id="hrn-staff"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="tables"><img class="hr-ic" src="${src('hr_ic_tables')}" alt=""><span class="hr-txt"><b>協作桌</b><small id="hrn-tables"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-l2="away" id="hrent-away"><span class="hr-ei" aria-hidden="true">📱</span><span class="hr-txt"><b>在 App 裡的 Codex</b><small id="hrn-away"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
-          <button class="hr-ent" data-q="project"><span class="hr-ei" aria-hidden="true">🗂</span><span class="hr-txt"><b>開專案</b><small>從專案的主管卡開人</small></span><span class="hr-go" aria-hidden="true">›</span></button>
+          <button class="hr-ent" data-q="project"><span class="hr-ei" aria-hidden="true"><i class="ico notes"></i></span><span class="hr-txt"><b>開專案</b><small>從專案的主管卡開人</small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="shift"><img class="hr-ic" src="${src('hr_ic_shift')}" alt=""><span class="hr-txt"><b>排班</b><small id="hrn-shift"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="pay"><img class="hr-ic" src="${src('hr_ic_pay')}" alt=""><span class="hr-txt"><b>薪水單</b><small id="hrn-pay"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
         </nav>

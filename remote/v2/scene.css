@@ -682,6 +682,7 @@ html body #chat #chbtns .chip::after { content: ''; position: absolute; inset: -
 #hrroom .hr-ent { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 12px 6px 10px; border: 2px solid #5f9a90; border-radius: 14px; background: #fff; color: #3b2412; text-align: left; cursor: pointer; }
 #hrroom .hr-ent:active { background: #e9f3f1; }
 #hrroom .hr-ent .hr-ei, #hrroom .hr-ent img.hr-ic { flex: none; width: 36px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 24px; line-height: 1; object-fit: contain; background: none; image-rendering: auto; }
+#hrroom .hr-ent .hr-ei .ico { width: 28px; height: 28px; margin: 0; } /* 素材表的像素圖示（開專案＝筆記本），不用 emoji（測試 #6） */
 #hrroom .hr-ent .hr-txt b { font-size: 17px; }
 #hrroom .hr-ent .hr-txt small { color: #386d66; }
 #hrroom .hr-l2bar { position: sticky; top: -14px; z-index: 2; display: flex; align-items: center; gap: 10px; margin: -14px -14px 10px; padding: 10px 14px; background: #fbf4e8; border-bottom: 1px solid #e3d3b8; }
@@ -727,6 +728,7 @@ html body #chat #chask .askwhy { width: 100%; box-sizing: border-box; margin: 6p
   #hrroom .hr-ents { gap: 2px; }
   #hrroom .hr-ent { min-height: 44px; gap: 8px; padding: 2px 10px 2px 8px; }
   #hrroom .hr-ent .hr-ei, #hrroom .hr-ent img.hr-ic { width: 28px; height: 26px; font-size: 20px; }
+  #hrroom .hr-ent .hr-ei .ico { width: 22px; height: 22px; }
   #hrroom .hr-ent .hr-txt { flex-direction: row; align-items: baseline; gap: 8px; }
   #hrroom .hr-ent .hr-txt b { flex: none; font-size: 15px; }
   #hrroom .hr-ent .hr-txt small { flex: 1; min-width: 0; text-align: right; }

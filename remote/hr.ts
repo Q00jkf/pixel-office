@@ -216,6 +216,17 @@ export function hrOf(id: string, now = Date.now()) {
 
 // 外部指令一律限時（0.62.16）：一個卡住的指令不能卡死整台伺服器；逾時 exitCode 不是 0，照失敗的退路走
 export const EXT_TIMEOUT_MS = 3000
+/**
+ * Bun 在 Windows 閒置一分鐘以上後，第一次 spawnSync 的 timeout 會立刻觸發：6 毫秒就 SIGKILL，exitedDueToTimeout 也是 true；
+ * 同一秒再叫一次就正常（2026-11-27 重現，像是用了閒置前的舊時間算逾時）。Windows 上實際沒到時間、也還沒有任何輸出 → 重試一次
+ */
+type SyncOpts = NonNullable<Parameters<typeof Bun.spawnSync>[1]>
+export function spawnSyncW(argv: string[], opts: SyncOpts & { timeout?: number }, win = process.platform === 'win32', run: typeof Bun.spawnSync = Bun.spawnSync) {
+  const t0 = Date.now()
+  const r = run(argv, opts)
+  if (!win || r.exitCode !== null || !opts.timeout || Date.now() - t0 >= opts.timeout - 500 || r.stdout?.length || r.stderr?.length) return r
+  return run(argv, opts)
+}
 const tmuxRaw = (args: string[], stdin?: string) => Bun.spawnSync([TMUX ?? 'tmux', ...args], { stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
 /**
  * tmux 3.8：伺服器上只要有一個唯讀的 client（tmux attach -r）連著，從外面下的 send-keys 一律回「client is read-only」
@@ -301,7 +312,7 @@ export const OPEN_ROLE_MS = 20000
 let openRoleRun: OpenRoleRun = (args, env) => {
   const t0 = Date.now()
   try {
-    const r = Bun.spawnSync(openRoleArgv(args), { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: OPEN_ROLE_MS, killSignal: 'SIGKILL' })
+    const r = spawnSyncW(openRoleArgv(args), { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: OPEN_ROLE_MS, killSignal: 'SIGKILL' })
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString(), sig: r.signalCode ?? undefined, ms: Date.now() - t0 }
   } catch (e: any) { return { code: null, out: '', err: `叫不起 python：${e?.message ?? e}`, ms: Date.now() - t0 } }
 }
@@ -399,7 +410,7 @@ export function winLaunchSet(sid: string, pid: number, now = Date.now()) {
 /** 程序的父程序 pid（Windows：Get-CimInstance；查不到回 undefined） */
 export type ParentOf = (pid: number) => number | undefined
 export const parentPidWin: ParentOf = pid => {
-  const r = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${Math.floor(pid)}").ParentProcessId`], { stdout: 'pipe', stderr: 'ignore', timeout: 8000, killSignal: 'SIGKILL' })
+  const r = spawnSyncW(['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${Math.floor(pid)}").ParentProcessId`], { stdout: 'pipe', stderr: 'ignore', timeout: 8000, killSignal: 'SIGKILL' })
   const n = Number(r.stdout.toString().trim())
   return r.exitCode === 0 && n > 0 ? n : undefined
 }
@@ -1660,7 +1671,7 @@ let winTable: { at: number; m: Map<number, { ppid: string; start: string }> } | 
 function winProc(pid: number) {
   if (!winTable || Date.now() - winTable.at > 10e3) {
     const m = new Map<number, { ppid: string; start: string }>()
-    const r = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CreationDate.ToString(\'o\'))" }'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
+    const r = spawnSyncW(['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CreationDate.ToString(\'o\'))" }'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
     if (r.exitCode === 0) for (const l of r.stdout.toString().split(/\r?\n/)) { const [a, b, c] = l.trim().split(' '); if (a && b && c) m.set(Number(a), { ppid: b, start: c }) }
     winTable = { at: Date.now(), m }
   }
@@ -1702,7 +1713,7 @@ const CODEX_OFFICE_PY = join(import.meta.dir, '..', 'codex', 'codex_office.py')
 export function codexLocked(thread: string, home?: string, timeoutMs = EXT_TIMEOUT_MS): boolean | undefined {
   const py = Bun.which('python3') ?? '/usr/bin/python3'
   if (timeoutMs < 200) return undefined
-  const r = Bun.spawnSync([py, CODEX_OFFICE_PY, 'locked', thread, home ?? ''], { stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs, killSignal: 'SIGKILL' })
+  const r = spawnSyncW([py, CODEX_OFFICE_PY, 'locked', thread, home ?? ''], { stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs, killSignal: 'SIGKILL' })
   const v = r.stdout.toString().trim()
   return v === 'true' ? true : v === 'false' ? false : undefined
 }

@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _setOpenRoleRun, _stuck, CODEX_WIN_TEXT, folderTrusted, hireWindows, initHr, openRoleArgv, runOpenRole, stuckView, watchWinHire, winLaunches, winLaunchSet, winWindowOf, type Person } from './hr'
+import { _setOpenRoleRun, _stuck, CODEX_WIN_TEXT, folderTrusted, hireWindows, initHr, openRoleArgv, runOpenRole, spawnSyncW, stuckView, watchWinHire, winLaunches, winLaunchSet, winWindowOf, type Person } from './hr'
 
 const base = mkdtempSync(join(tmpdir(), 'po-winhire-'))
 const cfg = join(base, 'cfg'), work = join(base, 'work'), fresh = join(base, 'fresh')
@@ -237,4 +237,16 @@ test('核准被擋：對話紀錄有「pixel-office 的 classic.PermissionReques
   writeFileSync(f, info('PreToolUse') + '\n' + info('PermissionRequest') + '\n')
   expect(hookSkipOf(id)).toBe('sec-plugin')
   expect(hookSkipOf('nobody')).toBeUndefined()
+})
+
+test('spawnSyncW：Windows 閒置後第一次被假逾時砍掉（沒到時間、沒輸出）→ 重試一次；其他情況不重試', () => {
+  const mk = (seq: any[]) => { let n = 0; const run: any = () => seq[Math.min(n++, seq.length - 1)]; return { run, n: () => n } }
+  const killed = { exitCode: null, signalCode: 'SIGKILL', stdout: Buffer.from(''), stderr: Buffer.from('') }
+  const ok = { exitCode: 0, stdout: Buffer.from('ok'), stderr: Buffer.from('') }
+  const o = { stdout: 'pipe', stderr: 'pipe', timeout: 20000 } as const
+  let f = mk([killed, ok]); expect(spawnSyncW(['x'], o, true, f.run).exitCode).toBe(0); expect(f.n()).toBe(2)
+  f = mk([killed, ok]); expect(spawnSyncW(['x'], o, false, f.run).exitCode).toBe(null); expect(f.n()).toBe(1) // Mac／Linux 不動
+  f = mk([{ ...killed, stdout: Buffer.from('{"sid":"s"}') }, ok]); expect(spawnSyncW(['x'], o, true, f.run).exitCode).toBe(null); expect(f.n()).toBe(1) // 已有輸出＝真的跑了，不重跑
+  f = mk([{ exitCode: 1, stdout: Buffer.from(''), stderr: Buffer.from('') }, ok]); expect(spawnSyncW(['x'], o, true, f.run).exitCode).toBe(1); expect(f.n()).toBe(1)
+  f = mk([killed, ok]); expect(spawnSyncW(['x'], { stdout: 'pipe' }, true, f.run).exitCode).toBe(null); expect(f.n()).toBe(1) // 沒設 timeout
 })

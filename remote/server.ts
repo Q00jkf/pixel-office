@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -880,7 +880,7 @@ export function officeOfDir(dir: string): string {
   if (hit && Date.now() - hit.at < 10 * 60e3) main = hit.top
   else {
     try {
-      const r = Bun.spawnSync(['git', '-C', dir, 'rev-parse', '--show-toplevel'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
+      const r = spawnSyncW(['git', '-C', dir, 'rev-parse', '--show-toplevel'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
       if (r.exitCode === 0) main = r.stdout.toString().trim() || dir
     } catch {}
     gitTop.set(dir, { top: main, at: Date.now() })
@@ -1735,7 +1735,7 @@ const SAFE_PERMS = new Set(['default', 'plan', 'read-only'])
 const CARDS_PY = join(import.meta.dir, '..', 'scripts', 'cards.py')
 export type CardsRun = (args: string[], stdin?: string) => any
 let cardsRun: CardsRun = (args, stdin) => {
-  const r = Bun.spawnSync([Bun.which('python') ?? Bun.which('py') ?? 'python', '-X', 'utf8', '-I', CARDS_PY, ...args], { stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe', timeout: 20000, killSignal: 'SIGKILL' })
+  const r = spawnSyncW([Bun.which('python') ?? Bun.which('py') ?? 'python', '-X', 'utf8', '-I', CARDS_PY, ...args], { stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe', timeout: 20000, killSignal: 'SIGKILL' })
   if (r.exitCode !== 0) return
   try { return JSON.parse(r.stdout.toString().trim().split('\n').pop() ?? '') } catch { return }
 }
