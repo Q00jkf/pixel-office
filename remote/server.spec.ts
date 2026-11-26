@@ -1410,7 +1410,7 @@ test('key visual splash: page links get ?v= only for delivered webp files (looke
   expect(real.headers.get('content-type')).toBe('image/webp')
 })
 
-import { newBossHandle } from './server'
+import { newBossHandle, swapOrders } from './server'
 test('0.63.57: after a handover the table records the new manager by his roster agent (ListAgents name), the hire name only as fallback', () => {
   const h = { newSid: 'n', newName: '招聘名' }
   expect(newBossHandle([{ id: 'n', agent: '示範團隊主管' }], h)).toBe('示範團隊主管')
@@ -1628,4 +1628,12 @@ homeTest('0.63.60: /state.json shares one roster within the cache window; any wr
     rmSync(p, { force: true })
     if (added !== undefined) await handle(new Request('http://127.0.0.1/tables', { method: 'POST', headers: { 'x-po-key': TK, 'content-type': 'application/json' }, body: JSON.stringify({ op: 'delete', id: added, force: true }) }))
   }
+})
+
+test('handover 換主管（測試 #9）：舊主管沒有上層 → 新主管 team 清空（off），不會跟舊主管互相掛；有上層 → 接舊主管的上層', () => {
+  const h = { newSid: 'n', oldId: 'o', oldTeam: undefined as string | undefined }
+  const none = Object.fromEntries(swapOrders(h, ['n', 'o', 'x'], '新主管'))
+  expect(none).toEqual({ n: { role: 'manager', team: 'off' }, o: { role: 'staff', team: '新主管' }, x: { team: '新主管' } })
+  expect(Object.fromEntries(swapOrders({ ...h, oldTeam: '' }, ['n', 'o'], '新主管')).n).toEqual({ role: 'manager', team: 'off' })
+  expect(Object.fromEntries(swapOrders({ ...h, oldTeam: '大老闆' }, ['n', 'o'], '新主管')).n).toEqual({ role: 'manager', team: '大老闆' })
 })

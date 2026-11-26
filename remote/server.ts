@@ -1195,20 +1195,25 @@ export function hireAt(b: any, now = Date.now(), hireFn: (b: any, opts?: { addDi
 export const newBossHandle = (people: { id: string; agent?: string }[], h: { newSid: string; newName: string }) =>
   people.find(p => p.id === h.newSid)?.agent || h.newName
 
+/** 換主管要下的令（純函式，給測試）：新主管升主管、team 接舊主管的上層（舊主管沒有上層＝off 清空，測試 #9）；舊主管降員工掛新主管；同桌其他人掛新主管 */
+export const swapOrders = (h: { newSid: string; oldId: string; oldTeam?: string }, atIds: string[], handle: string): [string, { role?: 'manager' | 'staff'; team?: string }][] => [
+  [h.newSid, { role: 'manager', team: h.oldTeam || 'off' }],
+  [h.oldId, { role: 'staff', team: handle }],
+  ...atIds.filter(id => id !== h.newSid && id !== h.oldId).map(id => [id, { team: handle }] as [string, { team: string }]),
+]
+
 export function swapBoss(h: Handover, now = Date.now()): string {
   const j = roster(now), S = office()
   const map = new Map(j.people.filter(p => p.seat).map(p => [p.id, p.seat as string]))
   const at = atTable(h.table, j.people, map)
   const order = (id: string, o: { role?: 'manager' | 'staff'; team?: string }) => {
     const p = j.people.find(x => x.id === id)
-    if (!takesOrders(p ?? { id })) sendCommand(id, `（人事命令，來自手機像素辦公室）請用 office_profile 工具${o.role ? `把 role 設成 ${o.role}` : ''}${o.role && o.team ? '、' : ''}${o.team ? `把 team 設成「${o.team}」` : ''}，設好回一句就好`, now)
+    if (!takesOrders(p ?? { id })) sendCommand(id, `（人事命令，來自手機像素辦公室）請用 office_profile 工具${o.role ? `把 role 設成 ${o.role}` : ''}${o.role && o.team ? '、' : ''}${o.team === 'off' ? '把 team 設成 off（清空，你上面沒有主管）' : o.team ? `把 team 設成「${o.team}」` : ''}，設好回一句就好`, now)
     else writeOrder(id, o, now)
   }
   // 桌子歸屬與組員的 team 用新主管在名冊上的 agent（ListAgents 名；0.63.57）：排座位用 agent 找桌，寫招聘時的名字會對不到
   const handle = newBossHandle(j.people, h)
-  order(h.newSid, { role: 'manager', ...(h.oldTeam ? { team: h.oldTeam } : {}) })
-  order(h.oldId, { role: 'staff', team: handle })
-  for (const p of at) if (p.id !== h.newSid && p.id !== h.oldId) order(p.id, { team: handle })
+  for (const [id, o] of swapOrders(h, at.map(p => p.id), handle)) order(id, o)
   const t = S.tables.find(x => x.id === h.table)
   if (t) { retarget(t, handle); t.auto = false }
   if (map.get(h.newSid) || S.pins[h.newSid]) {
