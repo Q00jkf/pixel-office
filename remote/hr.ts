@@ -354,11 +354,41 @@ export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | un
     } finally { if (taskFile) rmSync(taskFile, { force: true }) }
   })()
   if ('error' in r) return { ok: false, text: `開不起來：${r.error}` }
+  if (r.pid) winLaunchSet(r.sid, r.pid)
   watchWinHire(r.sid, name, r.pid)
   ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
   return { ok: true, text: `🧑‍💼 招聘了 ${name}（${MODELS[model]}${b.chrome === true ? '，可以操作瀏覽器' : ''}），電腦上開了一個標題「${name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
 }
-export const CODEX_WIN_TEXT = 'Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
+/**
+ * 這間辦公室在 Windows 開的視窗（sid → 外層 PowerShell 的 pid）：解雇時 claude 結束了，-NoExit 的視窗還留著，
+ * 要一起關。存檔是因為伺服器重開後還要認得；留 7 天
+ */
+const winLaunchFile = () => join(hrDir(), 'win-launch.json')
+export function winLaunches(): Record<string, { pid: number; at: number }> { try { return JSON.parse(readFileSync(winLaunchFile(), 'utf8')) ?? {} } catch { return {} } }
+export function winLaunchSet(sid: string, pid: number, now = Date.now()) {
+  try {
+    const all = Object.fromEntries(Object.entries(winLaunches()).filter(([, v]) => now - v.at < 7 * 86400e3))
+    all[sid] = { pid, at: now }
+    mkdirSync(hrDir(), { recursive: true }); writeFileSync(winLaunchFile(), JSON.stringify(all))
+  } catch {}
+}
+/** 程序的父程序 pid（Windows：Get-CimInstance；查不到回 undefined） */
+export type ParentOf = (pid: number) => number | undefined
+export const parentPidWin: ParentOf = pid => {
+  const r = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${Math.floor(pid)}").ParentProcessId`], { stdout: 'pipe', stderr: 'ignore', timeout: 8000, killSignal: 'SIGKILL' })
+  const n = Number(r.stdout.toString().trim())
+  return r.exitCode === 0 && n > 0 ? n : undefined
+}
+/**
+ * 解雇前呼叫：這位是這間辦公室在 Windows 開的、而且記下的 PowerShell 現在還是他的父程序 → 回那個 pid（claude 結束後一起關掉視窗）。
+ * 對不上（pid 被別的程序重用、/clear 換了編號、不是我們開的）回 undefined，只結束 claude
+ */
+export function winWindowOf(sid: string, claudePid: number, parentOf: ParentOf = parentPidWin): number | undefined {
+  const rec = winLaunches()[sid]
+  if (!rec) return
+  return parentOf(claudePid) === rec.pid ? rec.pid : undefined
+}
+export const CODEX_WIN_TEXT ='Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
 
 export async function setModel(id: string, model: string): Promise<{ ok: boolean; text: string }> {
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
@@ -470,8 +500,10 @@ export async function fire(id: string): Promise<{ ok: boolean; text: string }> {
     }
     notes.push(done?.ok ? 'Claude app 裡的對話已封存' : helpers.length ? `Claude app 裡的對話沒封存成功（${done?.msg || '沒有回應'}），要自己到 app 刪` : 'Claude app 裡的對話沒封存（沒有可代辦的同事），要自己到 app 刪')
   }
+  const win = process.platform === 'win32' ? winWindowOf(p.sessionId, p.pid) : undefined // 先查：claude 結束後就查不到父程序了
   try { process.kill(p.pid, 'SIGTERM') } catch { return { ok: false, text: `${who} 關不掉` } }
   if (p.tmuxSession?.startsWith('po-')) setTimeout(() => tmux('kill-session', '-t', p.tmuxSession!), 4000)
+  if (win) { try { process.kill(win) } catch {} notes.push('電腦上那個視窗也關了') }
   await Bun.sleep(1500)
   const f = transcripts.get(p.sessionId) ?? (() => { scan(p); return transcripts.get(p.sessionId) })()
   if (f) {

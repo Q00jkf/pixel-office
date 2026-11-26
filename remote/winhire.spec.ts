@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _setOpenRoleRun, _stuck, CODEX_WIN_TEXT, folderTrusted, hireWindows, initHr, openRoleArgv, runOpenRole, stuckView, watchWinHire, type Person } from './hr'
+import { _setOpenRoleRun, _stuck, CODEX_WIN_TEXT, folderTrusted, hireWindows, initHr, openRoleArgv, runOpenRole, stuckView, watchWinHire, winLaunches, winLaunchSet, winWindowOf, type Person } from './hr'
 
 const base = mkdtempSync(join(tmpdir(), 'po-winhire-'))
 const cfg = join(base, 'cfg'), work = join(base, 'work'), fresh = join(base, 'fresh')
@@ -137,4 +137,20 @@ test('90 秒內進辦公室不出卡；視窗程序結束了也不出卡', async
   watchWinHire('s3', 'F', 99, Date.now() - 91e3, () => false, 10)
   await Bun.sleep(40)
   expect(stuckView().length).toBe(0)
+})
+
+test('招聘記下 sid → PowerShell pid；解雇時父程序對得上才一起關視窗', () => {
+  const r = hireWindows({ name: 'G', dir: work })
+  expect(winLaunches()[r.sid!].pid).toBe(4242)
+  expect(winWindowOf(r.sid!, 777, () => 4242)).toBe(4242)
+  expect(winWindowOf(r.sid!, 777, () => 5555)).toBeUndefined() // pid 被別的程序重用
+  expect(winWindowOf(r.sid!, 777, () => undefined)).toBeUndefined()
+  expect(winWindowOf('not-ours', 777, () => 4242)).toBeUndefined()
+})
+
+test('啟動紀錄超過 7 天的會清掉', () => {
+  winLaunchSet('old', 1, Date.now() - 8 * 86400e3)
+  winLaunchSet('new', 2)
+  expect(winLaunches().old).toBeUndefined()
+  expect(winLaunches().new.pid).toBe(2)
 })
