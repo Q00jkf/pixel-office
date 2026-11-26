@@ -2,10 +2,16 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Coworker, CustomButton, ErrandKind, OfficeMode, Pet, Role } from '../types'
-import { GEOM, isAttendee, isDeptLead, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, route, desktopRows, sceneRows, sceneWidth, setSpread, rejoin, walkerPos } from './scene'
+import { GEOM, MIN_ROWS, isAttendee, isDeptLead, NOTICE_FRAMES, PLANE_FRAMES, SVG_MAX, TREAT_FRAMES, assignSeats, corridorRoute, queueSpot, raidFrames, raidPath, drawScene, encode, errandRoute, plateName, isCommandName, shortCode, shownName, route, desktopRows, sceneRows, sceneWidth, setSpread, rejoin, walkerPos } from './scene'
 import type { CatRaid, Notice, Placement, Plane, SceneOptions, Seat, Walker } from './scene'
 import { STALE_MS, parseStatus } from './status'
-import { cellAt, drawVector, menuPlace, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
+import { cellAt, drawVector, menuPlace, sameNameNumbers, vectorSvg, type Furniture, type Hit, type Rect } from './vector'
+import { CHAT_KEEP_MS, CHAT_TEXT_MAX, PART_ZH, TASK_KEEP_MS, parseTask, type PartState, type TaskDef, type TaskPart, assign, atTable, chatDir, chatFile, chatTables, chinesePlates, firstLine, needsBoss, parseChat, parseStore, species, tablesOut, type ChatEntry } from './officeV2'
+import { v2PanelSvg, type V2MenuHit, type V2Opts } from './v2panel'
+import { hrSessionStart, hrTurnDone, registerHr, reloadIfIdle, setBusyOf } from './hr'
+import { shouldReload, type ReloadTry } from './selfreload'
+import { APPROVE_LOG_PY, PHONE_LIVE_PY, WAITER_PY } from './waiter'
+export { WAITER_PY }
 
 const PANE = 'pixel-office'
 const DEAD_RECHECK_MS = 60000 // 已關的 session 檔，每分鐘才再讀一次
@@ -288,11 +294,17 @@ const terminalScene = (v: { hits: Hit[]; fixed: Rect[] }) => {
 export const menuOthers = (open: Hit, hits: Hit[], fixed: Rect[]): Rect[] => [...hits.filter(h => h !== open && h.what !== 'pet'), ...fixed]
 
 let openMenu: Furniture | null = null // 同時只開一個選單
+let menuOpenedAt = 0 // 剛打開的那次重畫放滑入動畫（0.62.17）
+let menuPressed: number | undefined // 剛按下的選單按鈕：先畫按下去的樣子，0.15 秒後才關選單、執行
+export const MENU_PRESS_MS = 150
 // 看不見的按鈕字：Desktop 會把只有空白的標籤壓掉（jacky 2026-10-27：/office hits 點得到、平常點不到），改用盲文空白 U+2800（不算空白字元、畫出來是空的）
 export const BLANK = '⠀'
 let showHits = false // /office hits：Desktop 校準用，Svg 畫紅框＝東西真正的位置，按鈕填 ▒＝點得到的地方
 let corgiFed: number | undefined
 let lastHits: Hit[] = []
+/** 選單美術第三批 P1：v2 面板的家具選單畫在 SVG 裡，這裡記每顆按鈕的位置（SVG 單位；最後一顆是取消），overlay 疊透明按鈕 */
+let lastMenuHits: V2MenuHit[] = []
+const FURNITURE_ZH: Record<Furniture, string> = { printer: '影印機', cabinet: '書櫃', mailbox: '郵筒', calendar: '月曆', vending: '販賣機', clock: '時鐘', meeting: '會議桌' }
 let lastFixed: Rect[] = []
 let petNote: { text: string; until: number } | undefined // 終端機看不到 toast：點寵物的結果在按鈕列留一行，約 5 秒
 let petCell = '' // 終端機：寵物按鈕上次畫在哪一格；換格才重畫整個面板（Raster 平時只 blit）
@@ -333,10 +345,33 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
   const { Box, Button, Text } = els
   const toggle = (what: Furniture) => () => {
     openMenu = openMenu === what ? null : what
+    menuOpenedAt = openMenu ? Date.now() : 0
+    menuPressed = undefined
     $.ui.invalidate('ui.render')
   }
   let win = 0
   const out = hits.map(hit => { // 不能叫 h：JSX 編譯成 h(...)
+    if (hit.what === 'table') {
+      // 桌牌：點了開這桌的聊天室（第 12 項），再點一次關
+      const id = `table-${hit.table}`
+      const z = reach(hit, hits)
+      const a = cellAt(z.x, z.y, surface, k)
+      const b = cellAt(z.x + z.w, z.y + z.h, surface, k)
+      const cols = Math.max(1, b.left - a.left)
+      const press = () => {
+        openMenu = null
+        if (tableChat?.id === hit.table) tableChat = null
+        else void loadTableChat($, hit.table!).then(() => $.ui.invalidate('ui.render'))
+        $.ui.invalidate('ui.render')
+      }
+      return (
+        <Box key={`at-${id}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
+          {Array.from({ length: Math.max(1, b.top - a.top + 1) }, (_, r) => (
+            <Button key={r === 0 ? id : `${id}-r${r}`} plain label={(showHits ? '▒' : BLANK).repeat(cols)} onPress={press} />
+          ))}
+        </Box>
+      )
+    }
     if (hit.what === 'window') {
       // Desktop 的夜間模式：點牆上任何一扇窗切換（第一扇的 key 沿用舊的 night 按鈕）
       const id = win++ === 0 ? 'night' : `night-${win - 1}`
@@ -386,6 +421,34 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
       </Box>
     )
   })
+  if (tableChat && surface === 'desktop') {
+    const tc = tableChat
+    const hit = hits.find(h => h.what === 'table' && h.table === tc.id)
+    if (hit) {
+      const close = () => { tableChat = null; $.ui.invalidate('ui.render') }
+      const at = cellAt(Math.max(4, hit.x - 20), hit.y + hit.h + 1, surface, k)
+      const hhmm = (t: number) => { const d = new Date(t); return `${String(d.getMonth() + 1)}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+      out.push(
+        <Box key="tchat" position="absolute" top={at.top} left={Math.max(0, at.left)} flexDirection="column" backgroundColor={MENU_BG} borderStyle="round" borderColor={MENU_EDGE} paddingX={1}>
+          {(tc.notes ?? []).map((l, i) => <Text key={`tnote-${i}`} color={l.startsWith('🔴') ? 'red' : MENU_TEXT} bold={i === 0}>{l}</Text>)}
+          <Text key="tchat-title" bold color={MENU_TEXT}>{`💬 聊天室（${tc.items.length} 則，最近 30 天）`}</Text>
+          {tc.items.length === 0 ? <Text key="tchat-none" color={MENU_DIM}>還沒有同桌互傳的話</Text> : null}
+          {tc.items.map((c, i) => {
+            const f = firstLine(c.text), open = tc.open.has(i)
+            const head = `${hhmm(c.at)} ${c.from.name} → ${c.to.name}：`
+            return (
+              <Button key={`tchat-${i}`} label={`${head}${f.head}`} onPress={() => { if (!f.more) return; open ? tc.open.delete(i) : tc.open.add(i); $.ui.invalidate('ui.render') }}>
+                <Text color={MENU_TEXT}>{open ? `${head}\n${c.text}` : `${head}${f.head}${f.more ? ' ▸' : ''}`}</Text>
+              </Button>
+            )
+          })}
+          <Button key="tchat-close" label="Close" onPress={close}>
+            <Text color={MENU_DIM}>關閉</Text>
+          </Button>
+        </Box>,
+      )
+    }
+  }
   const open = openMenu ? hits.find(h => h.what === openMenu) : undefined
   if (open && openMenu) {
     const items = menuFor(openMenu, mine)
@@ -393,6 +456,34 @@ function overlay($: EngineInterface, els: Record<string, any>, hits: Hit[], surf
     const close = () => {
       openMenu = null
       $.ui.invalidate('ui.render')
+    }
+    // 按下立刻重畫成「按下去」，0.15 秒後才做事（不然選單當場消失，看不到有按到）；連按只算一次
+    const pressThen = (i: number, act: () => void) => {
+      if (menuPressed !== undefined) return
+      menuPressed = i
+      $.ui.invalidate('ui.render')
+      $.clock.after(MENU_PRESS_MS, () => { menuPressed = undefined; act() })
+    }
+    if (surface === 'desktop' && lastMenuHits.length === items.length + 1) {
+      // 選單美術第三批 P1：外觀畫在 v2 的 SVG 裡（v2panel.ts menuSvg），這裡每顆按鈕疊一塊看不見的按鈕（照格子對齊）
+      const cell = (r: V2MenuHit, key: string, onPress: () => void) => {
+        const a = cellAt(r.x, r.y, surface, k), b = cellAt(r.x + r.w, r.y + r.h, surface, k)
+        const cols = Math.max(1, b.left - a.left), rowsN = Math.max(1, b.top - a.top)
+        return (
+          <Box key={`at-${key}`} position="absolute" top={a.top} left={a.left} flexDirection="column">
+            {Array.from({ length: rowsN }, (_, r2) => (
+              <Button key={r2 === 0 ? key : `${key}-r${r2}`} plain label={(showHits ? '▒' : BLANK).repeat(cols)} onPress={onPress} />
+            ))}
+          </Box>
+        )
+      }
+      out.push(
+        <Box key="menu" position="absolute" top={0} left={0}>
+          {items.map((it, i) => cell(lastMenuHits[i], `menu-${i}`, () => pressThen(i, () => { close(); void runButton($, { label: it.label, prompt: it.prompt }) })))}
+          {cell(lastMenuHits[items.length], 'menu-cancel', () => pressThen(items.length, close))}
+        </Box>,
+      )
+      return out
     }
     if (surface === 'desktop') {
       // 淺色不透明底＋金色圓角框＋標題列：一眼看得出是選單、跟場景分開
@@ -541,8 +632,17 @@ export function renameFixes(me: { id: string; agent?: string; team?: string }, c
   return out
 }
 
+/**
+ * Claude Code 自己的 sessions 資料夾：在這個 session 的設定資料夾（CLAUDE_CONFIG_DIR）裡，沒設才是 ~/.claude。
+ * 2026-11-23 修：原本固定讀 ~/.claude/sessions，設了 CLAUDE_CONFIG_DIR 的對話（例：~/.claude-work）讀不到自己，
+ * 跟不上改名；Remote Control 重開時開場登記到的暫時名稱（某個對話-d7）就一直留著，組員的 team 對不上
+ */
+export function cliSessionsDir(shared: string, configDir?: string): string {
+  return configDir ? `${configDir.replace(/\\/g, '/').replace(/\/+$/, '')}/sessions` : `${officeRoot(shared).replace(/\/pixel-office$/, '')}/sessions`
+}
+
 async function cliSessions($: EngineInterface): Promise<CliSession[]> {
-  const d = `${officeRoot(await sharedDir($)).replace(/\/pixel-office$/, '')}/sessions`
+  const d = cliSessionsDir(await sharedDir($), configDir)
   const out: CliSession[] = []
   for (const entry of await $.fs.list(d).catch(() => [])) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
@@ -567,18 +667,8 @@ async function followRename($: EngineInterface) {
   if (fix.agent !== undefined || fix.team !== undefined) await applyProfile($, fix)
 }
 
-/** <office> 位置，跟 takeover.py office_dir() 與 skill SKILL.md 同規則：projects.json 有這個主 repo 用它（可相對或絕對），否則 <主 repo>/.claude/office */
-export function officeFor(main: string, projects: unknown): string {
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
-  const key = norm(main).toLowerCase()
-  if (projects && typeof projects === 'object') {
-    for (const [k, v] of Object.entries(projects as Record<string, unknown>)) {
-      if (typeof v !== 'string' || norm(k).toLowerCase() !== key) continue
-      return /^([a-zA-Z]:)?[\\/]/.test(v) ? norm(v) : `${norm(main)}/${norm(v)}`
-    }
-  }
-  return `${norm(main)}/.claude/office`
-}
+export { officeFor } from './officeV2' // 2026-11-23 搬到 officeV2.ts（手機版伺服器也要用：協作桌的協作資料夾）
+import { officeFor } from './officeV2'
 
 /** collab.md 骨架（skills/team/lead.md §2 的六段），主管列先填自己 */
 export function collabSkeleton(manager: string, upper: string | undefined, at: string): string {
@@ -604,6 +694,121 @@ export function collabSkeleton(manager: string, upper: string | undefined, at: s
     '|---|---|---|',
     '',
   ].join('\n')
+}
+
+// ---------- v2 辦公室（2026-11-22）：Desktop 面板跟手機版同一套版面與座位 ----------
+// 座位表 office-<port>.json 由手機版伺服器（remote/server.ts）寫，這裡只讀（3 秒讀一次）：手機上拖人、改協作桌，面板跟著變。
+// 沒開手機版伺服器時沒有這個檔：在記憶體裡照同一套規則排（團隊同桌、其餘坐辦公區），不寫檔
+let v2Cache: { at: number; text?: string; port: number; base: string; handing?: number[]; meets?: { table: number; topic: string; ids: string[] }[] } = { at: -1e9, port: 8767, base: '' }
+async function v2Seating($: EngineInterface, shown: Coworker[]) {
+  const now = await $.clock.now()
+  if (now - v2Cache.at > 3000) {
+    const base = (await sharedDir($)).replace(/\/sessions$/, '')
+    let port = 8767
+    try { port = Number(JSON.parse(String(await $.fs.read(`${base}/remote.json`))).port) || 8767 } catch {}
+    v2Cache = { at: now, text: await $.fs.read(`${base}/office-${port}.json`).then(String).catch(() => undefined), port, base, handing: handingTables(await $.fs.read(`${base}/handovers-${port}.json`).then(String).catch(() => undefined)), meets: tableMeetings(await $.fs.read(`${base}/meetings-${port}.json`).then(String).catch(() => undefined)) }
+  }
+  const S = parseStore(v2Cache.text)
+  const list = v2List(shown)
+  const { map } = assign(S, list, now)
+  return { S, list, map, port: v2Cache.port, base: v2Cache.base }
+}
+
+/** 整桌開會中的桌（手機版伺服器 remote/meeting.ts 寫的 meetings-<port>.json）：面板桌牌「開會中」、參與的人頭上泡泡 */
+export function tableMeetings(text: string | undefined): { table: number; topic: string; ids: string[] }[] {
+  try {
+    const j = JSON.parse(String(text))
+    return (Array.isArray(j.meetings) ? j.meetings : []).filter((m: any) => m && m.state === 'on' && typeof m.table === 'number' && typeof m.topic === 'string').map((m: any) => ({ table: m.table, topic: m.topic, ids: Array.isArray(m.ids) ? m.ids.filter((x: unknown) => typeof x === 'string') : [] }))
+  } catch {
+    return []
+  }
+}
+
+/** 換主管交接中的桌（手機版伺服器 remote/handover.ts 寫的 handovers-<port>.json）：面板桌牌寫「交接中」 */
+export function handingTables(text: string | undefined): number[] {
+  try {
+    const j = JSON.parse(String(text))
+    return (Array.isArray(j.handovers) ? j.handovers : []).filter((h: any) => h && typeof h.table === 'number' && h.state !== 'done' && h.state !== 'cancelled').map((h: any) => h.table)
+  } catch {
+    return []
+  }
+}
+
+/** 桌子聊天室（第 12 項）：送達的傳話記到寄件人、收件人坐的協作桌（chat/<port>/t<桌號>/，一則一檔） */
+async function logTableChat($: EngineInterface, to: string, text: string, now: number) {
+  if (me.id === 'me' || me.oneshot || !text) return
+  const all = everyone()
+  const { list, map, port, base } = await v2Seating($, all)
+  const target = findRecipient(all, to)
+  const tables = chatTables(map, me.id, target?.id)
+  if (!tables.length) return
+  const plate = (id?: string) => list.find(p => p.id === id)?.plate
+  const entry: ChatEntry = { at: now, from: { id: me.id, name: plate(me.id) ?? me.agent ?? me.name }, to: { ...(target ? { id: target.id } : {}), name: (target && plate(target.id)) ?? to.replace(/\s*\[[0-9a-f]+\]$/i, '') }, text: text.slice(0, CHAT_TEXT_MAX) }
+  const name = chatFile(now, crypto.randomUUID().slice(0, 8))
+  for (const t of tables) await $.fs.write(`${chatDir(base, port, t)}/${name}`, JSON.stringify(entry)).catch(() => undefined)
+}
+
+/** 共用筆記快照 → 面板的幾行字（唯讀）：待你決定在最上面，其次分工與進度、各人做到哪、交代、主管寫的、行政 */
+export function notesLines(raw: unknown): string[] {
+  let j: any
+  try { j = JSON.parse(String(raw)) } catch { return [] }
+  if (!j || !j.ok) return []
+  const cut = (t: unknown, n = 60) => { const l = String(t ?? '').split('\n').find(x => x.trim())?.trim() ?? ''; return [...l].length > n ? [...l].slice(0, n).join('') + '…' : l }
+  const out: string[] = [`📒 共用筆記${j.decide?.length ? `（🔴 待你決定 ${j.decide.length}）` : ''}`]
+  for (const d of j.decide ?? []) out.push(`🔴 ${cut(d.text)}`)
+  for (const t of j.tasks?.active ?? []) out.push(`📋 ${t.title}（${t.progress}）：${(t.parts ?? []).map((p: any) => `${p.who} ${p.stateZh}`).join('、')}`)
+  for (const p of j.auto ?? []) out.push(`・${p.plate}：${p.doing}`)
+  for (const p of j.progress ?? []) if (p.head) out.push(`✎ ${p.plate}：${cut(p.text)}`)
+  for (const a of (j.asks ?? []).slice(-3)) out.push(`📝 ${cut(a)}`)
+  if (!j.hasBoss) out.push('主管：這桌還沒有主管')
+  else for (const p of j.bossPart?.parts ?? []) out.push(`${p.title}：${cut(p.text)}`)
+  if (j.admin?.text) out.push(`行政：${cut(j.admin.text)}`)
+  return out
+}
+
+/** 面板點桌牌看聊天室：讀那桌的紀錄（過期的跳過；外掛不能刪檔，清檔由手機版伺服器做） */
+let tableChat: { id: number; at: number; items: ChatEntry[]; open: Set<number>; notes?: string[] } | null = null
+async function loadTableChat($: EngineInterface, id: number) {
+  const now = await $.clock.now()
+  const { port, base, S } = await v2Seating($, everyone())
+  if (!S.tables.some(t => t.id === id)) { tableChat = null; return }
+  const d = chatDir(base, port, id), items: ChatEntry[] = []
+  for (const entry of await $.fs.list(d).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    if (typeof entry.mtimeMs === 'number' && entry.mtimeMs > 0 && now - entry.mtimeMs > CHAT_KEEP_MS) continue
+    const c = parseChat(await $.fs.read(`${d}/${entry.name}`).catch(() => undefined), now)
+    if (c) items.push(c)
+  }
+  items.sort((a, b) => a.at - b.at)
+  // 共用筆記（第 11 項，唯讀）：手機版伺服器寫的快照 notes/<port>-t<id>.view.json；沒開伺服器就沒有
+  const notes = notesLines(await $.fs.read(`${base}/notes/${port}-t${id}.view.json`).catch(() => undefined))
+  tableChat = { id, at: now, items: items.slice(-30), open: tableChat?.id === id ? tableChat.open : new Set(), notes }
+}
+
+/** Desktop v2 面板的名冊：座位、團隊照原名（name、agent、team）；名牌（plate）才套指令名→短代號（美術 A #14 複驗） */
+export function v2List(shown: Coworker[]) {
+  const people = chinesePlates(shown)
+  const no = sameNameNumbers(people)
+  return people.map(c => ({ id: c.id, plate: shownName(c) + (no.get(c.id) ?? ''), name: c.name, mode: c.mode, role: c.role, kind: c.kind, agent: c.agent, team: c.team, approval: c.approval?.tool, species: species(c) }))
+}
+
+async function v2Svg($: EngineInterface, shown: Coworker[], pxWidth: number, pxHeight: number, oneshots: { label: string; n: number }[], menu?: V2Opts['menu']) {
+  const { S, list, map } = await v2Seating($, shown)
+  const handing = v2Cache.handing ?? [], meets = v2Cache.meets ?? []
+  const inMeet = new Set(meets.flatMap(m => m.ids))
+  return v2PanelSvg(list.map(p => ({ ...p, seat: map.get(p.id), ...(inMeet.has(p.id) ? { meeting: true } : {}) })), tablesOut(S, list, map).map(t => { const m = meets.find(x => x.table === t.id); return { ...t, ...(handing.includes(t.id) ? { handover: true } : {}), ...(m ? { meeting: m.topic } : {}) } }), { frame, night: nightMode, pxWidth, pxHeight, planes, planeFrames: PLANE_FRAMES, notices, oneshots, menu })
+}
+
+/** 同桌（roadmap 第 1 項）：session id → 坐的協作桌（桌牌字），名單的「同桌」欄用；讀不到座位表就照同一套規則在記憶體排 */
+async function tableSeating($: EngineInterface, list: Coworker[]): Promise<Map<string, string>> {
+  const { S, list: seated, map } = await v2Seating($, list)
+  const out = new Map<string, string>()
+  // 缺主管的桌（第 5 項）：桌名後面標出來，名單上一眼看得到
+  for (const t of tablesOut(S, seated)) {
+    const sit = atTable(t.id, seated, map)
+    for (const p of sit) out.set(p.id, needsBoss(sit) ? `${t.label} ⚠ no manager (缺主管)` : t.label)
+  }
+  return out
 }
 
 async function officeDir($: EngineInterface): Promise<string> {
@@ -705,7 +910,7 @@ async function writeAutoCheckpoint($: EngineInterface) {
 
 // ---------- 離線信箱（jacky 2026-10-31：對方重開就收不到，SendMessage 不落地，ENOINBOX） ----------
 // ~/.claude/pixel-office/mail/<時間>-<亂數>.json，一封一檔。$.fs 沒有搬移／刪除，狀態寫在檔裡：pending → claimed（誰、何時）→ done
-export type Mail = { from: string; to: string; text: string; at: number; state: 'pending' | 'claimed' | 'done'; by?: string; claimedAt?: number; note?: string }
+export type Mail = { from: string; to: string; text: string; at: number; state: 'pending' | 'claimed' | 'done'; by?: string; claimedAt?: number; note?: string; match?: 'agent' } // match＝agent：只能用 ListAgents 名稱領（0.63.45 成組通知；職稱可能跟別人的名稱同字）
 export const MAIL_TTL_MS = 24 * 3600000 // 超過一天沒人收就作廢
 export const MAIL_CLAIM_MS = 30000 // 別人認領後這麼久沒送完，可以接手
 
@@ -713,7 +918,7 @@ export const MAIL_CLAIM_MS = 30000 // 別人認領後這麼久沒送完，可以
 export const shouldMail = (reason: string) => !/several|multiple|ambiguous|\[ref\]|refus|declin|denied|hook|not allowed/i.test(reason)
 
 /** 收件名對得到這個人：ListAgents 名稱或職稱（角色名：換人接手也收得到） */
-export const mailMatches = (to: string, c: { agent?: string; title?: string }) => to === c.agent || to === c.title
+export const mailMatches = (to: string, c: { agent?: string; title?: string }, match?: 'agent') => to === c.agent || (match !== 'agent' && to === c.title)
 
 /** 這一輪對這封信做什麼：claim 先寫認領、下一輪確認還是自己的才 send（多個視窗同時看到時只送一次） */
 export function mailStep(m: Mail, mine: string, now: number): 'claim' | 'send' | 'skip' | 'expire' {
@@ -729,7 +934,7 @@ export function parseMail(raw: unknown): Mail | undefined {
   const r = raw as Record<string, unknown>
   if (typeof r.from !== 'string' || typeof r.to !== 'string' || typeof r.text !== 'string' || typeof r.at !== 'number') return undefined
   const state = r.state === 'claimed' || r.state === 'done' ? r.state : 'pending'
-  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined, note: typeof r.note === 'string' ? r.note : undefined }
+  return { from: r.from, to: r.to, text: r.text, at: r.at, state, by: typeof r.by === 'string' ? r.by : undefined, claimedAt: typeof r.claimedAt === 'number' ? r.claimedAt : undefined, note: typeof r.note === 'string' ? r.note : undefined, ...(r.match === 'agent' ? { match: 'agent' as const } : {}) }
 }
 
 export const mailText = (m: Mail, at: string) => `[Pixel office mailbox] ${m.from} sent this at ${at} while you were offline; reply with SendMessage to ${m.from}.\n\n${m.text}`
@@ -791,7 +996,7 @@ async function deliverMail($: EngineInterface) {
   for (const { file, m } of await readMail($)) {
     const step = mailStep(m, instance, now)
     if (step === 'expire') await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: 'expired' }))
-    if (!mailMatches(m.to, me) || step === 'skip' || step === 'expire') continue
+    if (!mailMatches(m.to, me, m.match) || step === 'skip' || step === 'expire') continue
     if (step === 'claim') {
       // 先認領、下一輪還是自己的才送：同一個名稱或職稱有兩個視窗時只送一次
       await $.fs.write(file, JSON.stringify({ ...m, state: 'claimed', by: instance, claimedAt: now }))
@@ -808,7 +1013,7 @@ async function takeOwnMail($: EngineInterface): Promise<string[]> {
   const now = await $.clock.now()
   const texts: string[] = []
   for (const { file, m } of await readMail($)) {
-    if (!mailMatches(m.to, me)) continue
+    if (!mailMatches(m.to, me, m.match)) continue
     const step = mailStep(m, instance, now)
     if (step === 'skip' || step === 'expire') continue
     await $.fs.write(file, JSON.stringify({ ...m, state: 'done', note: `read by ${me.agent ?? me.id}` }))
@@ -822,7 +1027,7 @@ async function adopt($: EngineInterface, id: string) {
   await clearApproval($, id).catch(() => undefined) // 上次當掉留下的殘檔
   collisionWarned = false // 換了對話：撞號重新偵測
   dupNoted = false
-  defaultName = launchPlate(launchName) ?? plateName(await $.session.cwd(), id)
+  defaultName = launchPlate(launchName) ?? (isCommandName(launchName) ? shortCode(id) : plateName(await $.session.cwd(), id)) // 啟動名是指令：用短代號（審查 ④，跟伺服器、面板同一條）
   me = { id, name: defaultName, mode: 'idle', tool: '', isMe: true, role: 'staff', ...(oneshotRun ? { oneshot: true, label: launchName } : {}) }
   // 先讀 $.store；讀不到（例如同一 session 載了兩份 MOD、各自的儲存區不同）就用自己的狀態檔當備援
   const stored = (await $.store.get(`profile:${id}`).catch(() => undefined)) as Profile | undefined
@@ -889,7 +1094,7 @@ async function publish($: EngineInterface, left: boolean) {
   if (ownAddr) me = { ...me, addr: ownAddr }
   const updatedAt = await $.clock.now()
   lastWriteAt = updatedAt
-  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, configDir, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, newTokens: me.newTokens, updatedAt, left }))
+  await $.fs.write(`${d}/${me.id}.json`, JSON.stringify({ instance, id: me.id, name: me.name, role: me.role, mode: me.mode, tool: me.tool, agent: me.agent, ref: me.ref, title: me.title, titleAuto: me.titleAuto, titleAt: me.titleAt, addr: me.addr, since: me.since, lastError: me.lastError, prompt: me.prompt, office: me.office, approve: me.office && approveOn ? true : undefined, approval: me.approval, auto: me.auto, team: me.team, blocked: me.blocked, errand: me.errand, sentTo: me.sentTo, sentAt: me.sentAt, gotAt: me.gotAt, oneshot: me.oneshot, configDir, dup: me.dup, label: me.label, ctxPct: me.ctxPct, compacts: me.compacts, newTokens: me.newTokens, ver: VERSION, loadedAt: LOADED_AT, updatedAt, left }))
 }
 
 async function showCrew($: EngineInterface) {
@@ -929,7 +1134,7 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
-export const VERSION = '0.61.0'
+export const VERSION = '0.63.60'
 
 // 系統提示那段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
 export const ROLE_SECTION =
@@ -1029,7 +1234,8 @@ export const ctxText = (c: Pick<Coworker, 'ctxPct' | 'compacts'>): string =>
   c.ctxPct === undefined && !c.compacts ? '—' : `${c.ctxPct === undefined ? '?' : `${c.ctxPct}%`}${c.compacts ? ` ·compacted ${c.compacts}` : ''}`
 
 /** 辦公室名單（/office who 與 office_roster 共用）：主管在前，其餘依名牌 */
-export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = [], sortBy?: 'tokens'): string {
+export function roster(list: Coworker[], now: number, oneshot: { label: string; n: number }[] = [], sortBy?: 'tokens', seated?: Map<string, string>): string {
+  const tableOf = seated?.size ? seated : undefined // 沒有人坐協作桌就不多這一欄
   const extra = oneshot.length > 0 ? `\nOne-shot conversations (claude -p, not listed): ${oneshotText(oneshot)}` : ''
   if (list.length === 0) return `Nobody in the office right now.${extra}`
   const sorted = [...list].sort(sortBy === 'tokens' ? (a, b) => (b.newTokens ?? -1) - (a.newTokens ?? -1) || a.name.localeCompare(b.name) : (a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'manager' ? -1 : 1))
@@ -1038,7 +1244,7 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     const doing = doingText(c, now) + (stale ? ` · latest prompt "${c.prompt!.text}"` : '')
     const title = !c.title ? '—' : c.titleAuto ? `${c.title} (auto)` : stale ? `${c.title} (set ${Math.round((now - c.titleAt!) / 60000)} min ago)` : c.title
     const agent = c.kind === 'codex' ? `Codex: \`python ~/.claude/pixel-office/codex/codex_office.py send ${c.name} "…" --from <your name>\` (answers right away when idle)` : c.kind === 'agy' ? `Antigravity: \`python ~/.claude/pixel-office/agy/agy_office.py send ${c.name} "…" --from <your name>\` (delivered on its next action)` : c.agent ?? (c.addr ? `(no name) SendMessage with \`to=${c.addr}\`` : '(not registered, messages cannot reach it)')
-    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} | ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${fmtTokens(c.newTokens)} | ${doing} |`
+    return `| ${c.isMe ? '▶ ' : ''}${c.name} | ${title} |${tableOf ? ` ${tableOf.get(c.id) ?? '—'} |` : ''} ${c.role !== 'manager' ? 'staff' : isDeptLead(c, list) ? 'dept lead' : 'manager'}${c.auto ? ' (auto)' : ''}${c.team ? ` · under ${c.team}` : ''} | ${agent} | ${c.ref ?? '—'} | ${ctxText(c)} | ${fmtTokens(c.newTokens)} | ${doing} |`
   })
   const blockedNames = sorted.filter(c => c.blocked).map(c => c.name)
   const asking = sorted.filter(c => c.approval && now < c.approval.deadline)
@@ -1049,10 +1255,20 @@ export function roster(list: Coworker[], now: number, oneshot: { label: string; 
     ...(blockedNames.length > 0 ? [`🔴 Blocked: ${blockedNames.join(', ')} (the user must say "allow" in each window; relaying from another session does not work)`] : []),
     ...clashNotes(sorted),
     ...sorted.filter(c => c.dup).map(c => `🔴 ${c.agent ?? c.name}: the same conversation is open in two windows (claude --resume of one session); they overwrite each other and look like one person here. Ask the user to close one.`),
-    '| Name | Title | Role | ListAgents name (for SendMessage) | ref | ctx | new tok | Now |',
-    '|---|---|---|---|---|---|---|---|',
+    `| Name | Title |${tableOf ? ' Table |' : ''} Role | ListAgents name (for SendMessage) | ref | ctx | new tok | Now |`,
+    `|---|---|${tableOf ? '---|' : ''}---|---|---|---|---|---|`,
   ]
-  return [...head, ...rows].join('\n') + extra
+  return [...head, ...rows].join('\n') + tablemates(sorted, tableOf) + extra
+}
+
+/** 名單下面的「同桌」段：每張協作桌坐了誰（ListAgents 名稱），使用者叫你找同桌時從這裡找人傳話 */
+export function tablemates(list: Coworker[], tableOf?: Map<string, string>): string {
+  if (!tableOf || tableOf.size === 0) return ''
+  const by = new Map<string, Coworker[]>()
+  for (const c of list) { const t = tableOf.get(c.id); if (t !== undefined) by.set(t, [...(by.get(t) ?? []), c]) }
+  const who = (c: Coworker) => `${c.name}${c.agent ? ` (\`${c.agent}\`)` : c.addr ? ` (to=${c.addr})` : ''}`
+  const lines = [...by].map(([t, cs]) => `- ${cs.some(c => c.isMe) ? '▶ ' : ''}${t}: ${cs.map(who).join(', ')}`)
+  return `\nTablemates (same collaboration table in the office; when the user asks you to message your tablemates / 同桌, send to these ListAgents names, ▶ = your table):\n${lines.join('\n')}`
 }
 
 /** 只有真正的呼叫（有 tool_use_id）且判定為 ask 才算等待核准；$.tool.check 這類查詢不算 */
@@ -1076,7 +1292,7 @@ function trackEvents($: EngineInterface, list: Coworker[]) {
       const from = lastPlaced?.get(c.id)
       const to = target ? lastPlaced?.get(target.id) : undefined
       if (target && from && to) {
-        planes.push({ from: from.stand, to: to.stand, start: frame })
+        planes.push({ from: from.stand, to: to.stand, start: frame, fromId: c.id, toId: target.id })
         // 收件端的「收到」若先被讀到、已亮過信封，就收掉，等飛機到了再亮（避免亮兩次）
         notices = notices.filter(n => !(n.id === target.id && frame - n.start < NOTICE_FRAMES))
         notices.push({ id: target.id, start: frame + PLANE_FRAMES, end: frame + PLANE_FRAMES + NOTICE_FRAMES })
@@ -1182,6 +1398,7 @@ async function refresh($: EngineInterface) {
   }
   if (me.office && approveOn) await readApprovals($, d, now)
   await takeCommand($, d, now)
+  await takeOrder($, d, now)
   await showCrew($)
 }
 
@@ -1386,14 +1603,14 @@ async function attend($: EngineInterface) {
 /** --name → 預設名牌：去掉非 ASCII、截到 12 字，至少 2 字才用（名牌只能 ASCII，Raster 畫不出中文） */
 export function launchPlate(name: string | undefined): string | undefined {
   const ascii = (name ?? '').replace(/[^\x21-\x7e]/g, '').slice(0, 12)
-  return ascii.length >= 2 ? ascii : undefined
+  return ascii.length >= 2 && !isCommandName(ascii) ? ascii : undefined // 美術 A #14：! 或 / 開頭（指令當名字）不採用
 }
 
 /** 記下 --name：一次性對話拿它分組；互動 session 名牌還是預設的（沒手動設過）就換成它 */
 async function noteLaunchName($: EngineInterface, t: string) {
   launchName = t
   if (me.id === 'me') return // adopt 會套用
-  const plate = launchPlate(t)
+  const plate = launchPlate(t) ?? (isCommandName(t) ? shortCode(me.id) : undefined) // 晚到的啟動名是指令：同一條短代號規則（美術 A #14）
   if (me.oneshot) me = { ...me, label: t }
   if (plate && me.name === defaultName) {
     defaultName = plate
@@ -1464,27 +1681,198 @@ const officeRoot = (sessionsDir: string) => sessionsDir.replace(/\/sessions$/, '
 const approvalFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/approvals/${sid}.json`
 const decisionFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/decisions/${sid}.json`
 
+// ---------- 手機核准（0.63.51；0.63.53 安全審 A-1～A-3 改）：與電腦面板共用 approvals 的單 ----------
+// 外掛向本機伺服器問 GET /phone-live：伺服器只在 Cloudflare Access 的 JWT 驗過的手機頁請求記下「手機在看」（記憶體，不寫檔）。
+// 在看就送單、等手機最多 waitMs（預設 2 分鐘，上限 9 分鐘）。等待用 $.process.run 跑等待程式（hooks/waiter.ts，不吃 hook 的 10 秒預算），
+// 它向伺服器問 GET /approve-result（伺服器只回自己從 JWT 驗過的請求記下的決定），不讀 decisions 檔；電腦上先按（單變墓碑）或時間到就結束。
+// 電腦面板那條（decisions 檔）照舊、預設關；手機這條只認伺服器的決定
+export const PHONE_WAIT_MS = 120000
+export const PHONE_WAIT_MAX_MS = 540000
+/** 伺服器 /phone-live 的回覆 → 這次可以等手機多久（毫秒）；不在看、讀不到、壞掉回 undefined（照原本只看電腦面板） */
+export function phoneWait(raw: string | undefined): number | undefined {
+  try {
+    const j = JSON.parse(raw ?? '')
+    if (!j || j.live !== true) return
+    return typeof j.waitMs === 'number' && j.waitMs >= 10000 ? Math.min(j.waitMs, PHONE_WAIT_MAX_MS) : PHONE_WAIT_MS
+  } catch { return }
+}
+/** 手機核准只問正式的辦公室伺服器：127.0.0.1:8767（寫死，不從誰都能改的 remote.json 讀；安全審 (a)，0.63.54）；等待程式另外確認監聽的是 remote/server.ts */
+const OFFICE_URL = 'http://127.0.0.1:8767'
+/** 本機金鑰檔（0.63.56）：伺服器產的，等待程式讀它帶 X-PO-Key；外掛自己不讀內容 */
+const localKeyFile = (sessionsDir: string) => `${officeRoot(sessionsDir)}/local-key`
+async function officeUrl(_$: EngineInterface): Promise<string> { return OFFICE_URL }
+const pyOf = async ($: EngineInterface) => ((await $.env.get('USERPROFILE')) ? 'python' : '/usr/bin/python3') // Windows 是 python
+/** 問伺服器手機有沒有在看（1.5 秒內沒回就當沒有） */
+async function phoneLiveWait($: EngineInterface): Promise<number | undefined> {
+  try {
+    const url = `${await officeUrl($)}/phone-live`
+    const r = await $.process.run([await pyOf($), '-I', '-c', PHONE_LIVE_PY, url, localKeyFile(await sharedDir($))], { timeoutMs: 6000 })
+    return phoneWait(r.stdout.trim())
+  } catch { return }
+}
+
 // 手機下的命令（remote/server.ts 寫 commands/<session>.json）：nonce 跟 <session>.done.json 不同才送，
 // 先寫 done 再送，重載外掛也不會送兩次（MOD 的 $.fs 不能刪檔）。當成使用者自己打的字（jacky 2026-10-27 選），前面加 📱
 const commandFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/commands/${sid}.json`
 /** 命令 → 送進對話的字：手機的前面加 📱；別的 AI 寄的（agy_office.py send，帶 from）標寄件者，不能被當成使用者的話 */
 export const commandText = (c: { text: string; from?: unknown }) => (typeof c.from === 'string' && c.from !== '' ? `📨 ${c.from}: ${c.text}` : `📱 ${c.text}`)
 export const COMMAND_TTL_MS = 10 * 60 * 1000 // 送出超過 10 分鐘還沒被收的命令作廢（例如對方關了視窗）
+/**
+ * commands/<id>.json 是一個佇列（0.63.17，複驗 D）：items 依序排，寫的人（手機版伺服器、Codex、agy）把收過的、過期的拿掉再接在後面，
+ * 外掛一次送一則、送達才記收過（done 檔的 nonces 留最近 30 個）。原本只有一則：短時間連傳三則只剩第三則。
+ * 舊格式（沒有 items，只有 nonce／text）當成一則的佇列
+ */
+export type CommandItem = { nonce: string; text: string; at: number; from?: string }
+export function nextCommand(c: any, done: Set<string>, now: number): CommandItem | undefined {
+  const items: any[] = Array.isArray(c?.items) ? c.items : c && typeof c.nonce === 'string' ? [c] : []
+  return items.find(i => i && typeof i.nonce === 'string' && typeof i.text === 'string' && i.text.trim() !== '' && !done.has(i.nonce) && now - Number(i.at) < COMMAND_TTL_MS)
+}
+export const doneNonces = (d: any): Set<string> => new Set([...(Array.isArray(d?.nonces) ? d.nonces : []), d?.nonce].filter((x): x is string => typeof x === 'string'))
 async function takeCommand($: EngineInterface, d: string, now: number) {
   if (me.id === 'me' || me.oneshot) return
   const f = commandFile(d, me.id)
   if (!(await $.fs.exists(f).catch(() => false))) return
   try {
     const raw = await $.fs.read(f)
-    const c = JSON.parse(typeof raw === 'string' ? raw : '{}')
-    if (typeof c.nonce !== 'string' || typeof c.text !== 'string' || c.text.trim() === '' || !(now - Number(c.at) < COMMAND_TTL_MS)) return
+    const doneFile = f.replace(/\.json$/, '.done.json')
+    const done = doneNonces(await $.fs.read(doneFile).then(r => JSON.parse(typeof r === 'string' ? r : '{}')).catch(() => undefined))
+    if (cmdPending && done.has(cmdPending.nonce)) cmdPending = undefined
+    const c = nextCommand(JSON.parse(typeof raw === 'string' ? raw : '{}'), done, now)
+    if (!c) return
+    // 0.63.56：送達＝$.prompt.submit 的 promise resolve（引擎文件：那句進了對話、它的回合開始；排在別的回合後面就等輪到它）。
+    // 原本等自己的 prompt.submit 掛點看到那句才記 done，但外掛自己送的話自己的掛點聽不到（11-26 在隔離 tmux 實測），
+    // 所以從來沒成功過：連送兩句給閒著的 Claude，第二句卡到第一句 10 分鐘過期；補救路徑還把同一句附進 context 再送一次（已拿掉）。
+    // 送出後還沒 resolve＝在路上，不重送；被拒才隔 15 秒重送，最多 3 次，錯誤記在 <session>.err.json，之後放著等它過期
+    if (cmdPending?.nonce !== c.nonce) cmdPending = { nonce: c.nonce, text: commandText(c), ask: c.text, doneFile, sentAt: 0, tries: 0 }
+    const pend = cmdPending
+    if (pend.inFlight) return
+    if (pend.tries > 0 && now - pend.sentAt < CMD_CONFIRM_MS) return
+    if (pend.tries >= CMD_TRIES) return
+    pend.tries++
+    pend.sentAt = now
+    pend.inFlight = true
+    phoneAsk = c.text
+    // 不 await：排在長回合後面時要等那個回合結束才 resolve，不能卡住每秒的 refresh
+    void $.prompt.submit({ text: pend.text, asUser: true }).then(
+      async () => { pend.inFlight = false; await markCmdDone($, pend, await $.clock.now()) },
+      async err => {
+        pend.inFlight = false
+        await $.fs.write(f.replace(/\.json$/, '.err.json'), JSON.stringify({ nonce: c.nonce, at: now, tries: pend.tries, err: String(err).slice(0, 300) })).catch(() => undefined)
+      },
+    ).catch(() => undefined)
+  } catch {}
+}
+
+/** 手機／同事傳來、送出中或被拒待重送的那一則（takeCommand） */
+type CmdPending = { nonce: string; text: string; ask: string; doneFile: string; sentAt: number; tries: number; inFlight?: boolean }
+let cmdPending: CmdPending | undefined
+export const CMD_CONFIRM_MS = 15000, CMD_TRIES = 3
+async function markCmdDone($: EngineInterface, p: CmdPending, now: number) {
+  if (cmdPending === p) cmdPending = undefined
+  const before = doneNonces(await $.fs.read(p.doneFile).then(r => JSON.parse(typeof r === 'string' ? r : '{}')).catch(() => undefined))
+  const nonces = [...before, p.nonce].filter((x, i, a) => a.indexOf(x) === i).slice(-30)
+  await $.fs.write(p.doneFile, JSON.stringify({ nonce: p.nonce, nonces, at: now, via: 'submit' })).catch(() => undefined)
+}
+
+/**
+ * 人事令（roadmap 第 5 項，0.62.3）：手機版伺服器寫 orders/<session>.json { nonce, at, role?, team? }，外掛直接改身分（等同 office_profile），
+ * 不經模型；收過的 nonce 記在 orders/<session>.done.json。缺主管的桌子挑一位升主管、同桌其他人 team 指向他，都走這條
+ */
+export function orderInput(raw: unknown, now: number, doneNonce?: unknown): { nonce: string; role?: string; team?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.nonce !== 'string' || r.nonce === '' || r.nonce === doneNonce || !(now - Number(r.at) < COMMAND_TTL_MS)) return undefined
+  const out: { nonce: string; role?: string; team?: string } = { nonce: r.nonce }
+  if (r.role === 'manager' || r.role === 'staff') out.role = r.role
+  if (typeof r.team === 'string' && r.team.trim() !== '') out.team = r.team.trim().slice(0, 64)
+  return out.role || out.team ? out : undefined
+}
+/**
+ * office_task（roadmap 第 10 項，0.62.11）：create（只有主管）寫 tasks/<id>.json；update 寫 tasks/<id>.<第幾份>.json，
+ * 只有那份的負責人（ListAgents 名稱對得上）或開任務的主管能改。回傳要寫的檔，或錯誤訊息（給模型看）
+ */
+export function taskOp(input: Record<string, unknown>, who: Pick<Coworker, 'id' | 'role' | 'agent' | 'name'>, now: number, def?: TaskDef): { file: string; data: unknown; reply: string } | string {
+  if (input.action === 'create') {
+    if (who.role !== 'manager') return 'Only managers create tasks; update your own part with action=update.'
+    const title = typeof input.title === 'string' ? input.title.trim() : ''
+    if (!title || [...title].length > 40) return 'title is required (max 40 chars).'
+    const raw = Array.isArray(input.parts) ? input.parts : []
+    if (raw.length < 1 || raw.length > 12) return 'parts: 1–12 items of {who, what, after?}.'
+    const parts: TaskPart[] = []
+    for (const [i, p] of raw.entries()) {
+      const w = typeof (p as any)?.who === 'string' ? (p as any).who.trim().replace(/\s*\[[0-9a-f]+\]$/i, '') : ''
+      const what = typeof (p as any)?.what === 'string' ? (p as any).what.trim() : ''
+      if (!w || !what || what.length > 200) return `part ${i + 1}: who (ListAgents name) and what (max 200 chars) are required.`
+      const after = Array.isArray((p as any).after) ? (p as any).after.filter((n: unknown) => typeof n === 'number' && n >= 1 && n <= raw.length && n !== i + 1).map((n: number) => n - 1) : []
+      parts.push({ who: w, what, ...(after.length ? { after } : {}) })
+    }
+    const id = crypto.randomUUID().slice(0, 8)
+    const data: TaskDef = { id, title, boss: who.id, ...(who.agent ? { bossAgent: who.agent } : {}), parts, at: now }
+    return { file: `${id}.json`, data, reply: `Task ${id} 「${title}」 created with ${parts.length} parts. Tell each person: "task ${id} part N: <what>; update it with office_task action=update id=${id} part=N state=doing|done|stuck".` }
+  }
+  if (input.action === 'update') {
+    if (!def) return 'No such task id (office_task action=list shows yours).'
+    const n = Number(input.part)
+    if (!Number.isInteger(n) || n < 1 || n > def.parts.length) return `part must be 1–${def.parts.length}.`
+    const state = String(input.state ?? '')
+    if (!(state in PART_ZH)) return 'state must be waiting, doing, done or stuck.'
+    const owner = def.parts[n - 1].who === who.agent
+    if (!owner && def.boss !== who.id) return `Part ${n} belongs to ${def.parts[n - 1].who}; only they or the manager can update it.`
+    const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 120) : undefined
+    return { file: `${def.id}.${n - 1}.json`, data: { state, at: now, ...(note ? { note } : {}), by: who.agent ?? who.name }, reply: `Task ${def.id} part ${n}: ${PART_ZH[state as PartState]}.` }
+  }
+  return 'action must be create, update or list.'
+}
+
+/**
+ * 自動多開幫手（roadmap 第 13 項）：主管不能自己開，只能請使用者決定 → helpers/<id>.json，手機版伺服器（remote/helpers.ts）跳通知、使用者按「加」才開。
+ * 回傳要寫的請求，或錯誤訊息（給模型看）
+ */
+export function helperAsk(input: Record<string, unknown>, who: Pick<Coworker, 'id' | 'role' | 'agent' | 'name'>): { id: string; from: string; agent?: string; plate: string; reason: string; task: string; name?: string; kind?: 'codex-art' } | string {
+  if (who.role !== 'manager') return 'Only managers can ask for helpers (office_profile role=manager first, or ask your manager).'
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : ''
+  const task = typeof input.task === 'string' ? input.task.trim() : ''
+  if (!reason || [...reason].length > 60) return 'reason is required: one short line, max 60 characters.'
+  if (!task || task.length > 2000) return 'task is required: max 2000 characters.'
+  const name = typeof input.name === 'string' && input.name.trim() ? [...input.name.replace(/[\x00-\x1f\x7f]/g, '').trim()].slice(0, 20).join('') : undefined
+  if (input.kind !== undefined && input.kind !== 'codex-art') return "kind must be 'codex-art' (a Codex image helper) or left out (a Claude helper)."
+  return { id: crypto.randomUUID(), from: who.id, agent: who.agent, plate: who.name, reason, task, ...(name ? { name } : {}), ...(input.kind === 'codex-art' ? { kind: 'codex-art' as const } : {}) }
+}
+
+const orderFile = (sessionsDir: string, sid: string) => `${officeRoot(sessionsDir)}/orders/${sid}.json`
+async function takeOrder($: EngineInterface, d: string, now: number) {
+  if (me.id === 'me' || me.oneshot) return
+  const f = orderFile(d, me.id)
+  if (!(await $.fs.exists(f).catch(() => false))) return
+  try {
+    const raw = await $.fs.read(f)
     const doneFile = f.replace(/\.json$/, '.done.json')
     const done = await $.fs.read(doneFile).then(r => JSON.parse(typeof r === 'string' ? r : '{}').nonce).catch(() => undefined)
-    if (done === c.nonce) return
-    await $.fs.write(doneFile, JSON.stringify({ nonce: c.nonce, at: now }))
-    phoneAsk = c.text
-    void $.prompt.submit({ text: commandText(c), asUser: true }).catch(() => undefined)
+    const o = orderInput(JSON.parse(typeof raw === 'string' ? raw : '{}'), now, done)
+    if (!o) return
+    const result = await applyProfile($, { role: o.role, team: o.team })
+    await $.fs.write(doneFile, JSON.stringify({ nonce: o.nonce, at: now, result }))
   } catch {}
+}
+
+/** 這份外掛程式碼載入（或重載）的時間：每次重載模組會重新算，狀態檔帶著，看得出重載有沒有真的發生（0.63.25） */
+const LOADED_AT = Date.now()
+
+/** 外掛自己換新版（0.63.25）：App 分頁、Remote Control 的對話從外面送不到 /reload-plugins，由外掛自己叫 */
+async function selfReload($: EngineInterface) {
+  if (me.id === 'me' || me.oneshot) return
+  const disk = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(t => String(JSON.parse(String(t)).version ?? '')).catch(() => undefined)
+  const now = await $.clock.now()
+  const key = `reload:${await $.session.id()}`
+  const last = (await $.store.get(key).catch(() => undefined)) as ReloadTry | undefined
+  // 版號與重試次數先過（閒不閒交給 reloadIfIdle 在呼叫前一刻判定）
+  if (!shouldReload({ disk, loaded: VERSION, idle: true, last, now })) return
+  // 先記下這次嘗試再叫（快驗第 1 項）：重載會換掉這份程式碼，叫完之後的程式不一定跑得到；沒叫成再改回去
+  const tried: ReloadTry = { version: disk!, tries: (last?.version === disk ? last!.tries : 0) + 1, at: now }
+  await $.store.set(key, tried).catch(() => undefined)
+  const r = await reloadIfIdle($)
+  if (!r.ran) { await $.store.set(key, last ?? null).catch(() => undefined); return }
+  await r.done.catch(() => undefined)
 }
 
 // 每輪結束把最後的回覆寫到 replies/<session>.json，手機卡片顯示（jacky 2026-10-27：看不到回應就不知道要跟他說什麼）
@@ -1528,7 +1916,7 @@ export function matchAsk(list: Ask[], tool: string, input: string, now: number):
 }
 
 /** 讀到的決定檔：沒有／墓碑＝none；四項（session、toolUseId、nonce、指令 hash）有一項不符＝mismatch（丟棄）；壞檔＝corrupt（不回答） */
-export function judgeDecision(raw: string | undefined, want: Want): { kind: 'none' } | { kind: 'corrupt' } | { kind: 'mismatch'; why: string } | { kind: 'ok'; behavior: 'allow' | 'deny' } {
+export function judgeDecision(raw: string | undefined, want: Want): { kind: 'none' } | { kind: 'corrupt' } | { kind: 'mismatch'; why: string } | { kind: 'ok'; behavior: 'allow' | 'deny'; message?: string; via?: string } {
   if (raw === undefined || raw.trim() === '') return { kind: 'none' }
   let d: Record<string, unknown>
   try {
@@ -1539,7 +1927,10 @@ export function judgeDecision(raw: string | undefined, want: Want): { kind: 'non
   if (!d || typeof d !== 'object') return { kind: 'corrupt' }
   if (d.state !== 'decided') return { kind: 'none' }
   for (const k of ['session', 'toolUseId', 'nonce', 'textHash'] as const) if (d[k] !== want[k]) return { kind: 'mismatch', why: k }
-  return d.behavior === 'allow' || d.behavior === 'deny' ? { kind: 'ok', behavior: d.behavior } : { kind: 'corrupt' }
+  if (d.behavior !== 'allow' && d.behavior !== 'deny') return { kind: 'corrupt' }
+  // 拒絕的原因（手機可附，0.63.51）：去控制字元、最多 300 字；via＝誰按的（phone／panel）
+  const msg = typeof d.message === 'string' ? d.message.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 300) : ''
+  return { kind: 'ok', behavior: d.behavior, ...(d.behavior === 'deny' && msg ? { message: msg } : {}), ...(typeof d.via === 'string' ? { via: d.via.slice(0, 10) } : {}) }
 }
 
 /** 讀到的核准單：墓碑、壞檔、欄位不全、過了 deadline（等的那方已不再等）一律當不存在 */
@@ -1611,29 +2002,63 @@ async function clearApproval($: EngineInterface, sid: string) {
 
 export type SlipIO = WaitIO & { writeSlip: (text: string) => Promise<void>; clearAll: () => Promise<void>; nonce: () => string; shown: (on: { tool: string; at: number; deadline: number } | undefined) => Promise<void> }
 
+export type Decided = { behavior: 'allow' | 'deny'; message?: string; via?: string }
 /** 送單一輪：先把舊決定清成墓碑再送單（上一輪的決定不會被誤採用）→ 等 → 不論結果兩個檔都清成墓碑 */
 export async function runSlip(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string, window: number): Promise<'allow' | 'deny' | undefined> {
+  return (await runSlipWith(io, who, toolUseId, tool, text, window, async (want, deadline) => { const b = await waitForDecision(io, want, deadline); return b ? { behavior: b } : undefined }))?.behavior
+}
+/** 送單、等（wait 決定怎麼等：電腦面板＝原本的輪詢；手機＝外部等待程式，0.63.51）、收單；onSlip 拿到這張單的 nonce（結案寫墓碑用） */
+export async function runSlipWith(io: SlipIO, who: { session: string; name: string }, toolUseId: string, tool: string, text: string, window: number, wait: (want: Want, deadline: number) => Promise<Decided | undefined>, onSlip?: (nonce: string | undefined) => void): Promise<Decided | undefined> {
   const start = await io.now()
   const deadline = start + window
   const want = { session: who.session, toolUseId, nonce: io.nonce(), textHash: await textHash(text) }
   await io.discard()
   const rec: ApprovalRecord = { state: 'waiting', session: want.session, toolUseId, nonce: want.nonce, name: who.name, tool, text, at: start, deadline }
   await io.writeSlip(JSON.stringify(rec))
+  onSlip?.(want.nonce)
   await io.shown({ tool, at: start, deadline })
   try {
-    return await waitForDecision(io, want, deadline)
+    return await wait(want, deadline)
   } finally {
+    onSlip?.(undefined)
     await io.clearAll().catch(() => undefined)
     await io.shown(undefined).catch(() => undefined)
   }
 }
+/**
+ * 手機的等法（0.63.53）：跑等待程式到伺服器有決定／單結案／到期（不吃 hook 預算）。決定只認等待程式從伺服器拿到的那份，
+ * 而且 session、toolUseId、nonce、指令全文的 hash 四項都要跟這張單一樣；不讀 decisions 檔，等待程式跑不起來就交回電腦（A-3）
+ */
+export async function waitPhone(io: { runWaiter: (want: Want, deadline: number) => Promise<string | undefined>; log: (t: string) => void }, want: Want, deadline: number): Promise<Decided | undefined> {
+  const out = await io.runWaiter(want, deadline).catch(() => undefined)
+  if (!out || !out.startsWith('decided ')) return
+  const j = judgeDecision(out.slice('decided '.length), want)
+  if (j.kind === 'ok') return { behavior: j.behavior, ...(j.message ? { message: j.message } : {}), ...(j.via ? { via: j.via } : {}) }
+  if (j.kind === 'mismatch') io.log(`pixel-office: discarded a mismatched phone decision (${j.why} differs)`)
+  return undefined
+}
 
-/** 送單到辦公室並等決定；回 undefined＝不回答（交回終端機） */
-async function askOffice($: EngineInterface, toolUseId: string, tool: string, text: string, window: number, signal: AbortSignal): Promise<'allow' | 'deny' | undefined> {
+/**
+ * 等待端採用的每個決定都記一筆到 approve-log.jsonl（R7 留證據，顧問 2026-11-26 改版裁示）。
+ * 使用者 2026-11-26 接受「decisions 檔寫得出正確 allow 就會被採用」（不用在場驗證），防線改成事後查得到：
+ * 時間、自己的 session、工具、指令前 200 字、allow／deny、來源（panel-file＝decisions 檔，phone＝手機經伺服器）。
+ * $.fs 只能整檔覆寫，伺服器也在同一檔附加 → 用 O_APPEND 附加（之後設了 chflags uappnd 也寫得進去），0600
+ */
+export { APPROVE_LOG_PY }
+export function adoptedEntry(o: { at: number; session: string; name: string; tool: string; text: string; decided: Decided; phone: boolean }): string {
+  return JSON.stringify({ at: o.at, kind: 'adopted', id: o.session, name: o.name, tool: o.tool, text: o.text.slice(0, 200), behavior: o.decided.behavior, via: o.phone ? 'phone' : 'panel-file' })
+}
+async function logAdopted($: EngineInterface, entry: string) {
+  const d = await sharedDir($)
+  await $.process.run([await pyOf($), '-I', '-c', APPROVE_LOG_PY, `${officeRoot(d)}/approve-log.jsonl`, entry], { timeoutMs: 3000 }).catch(() => undefined)
+}
+
+let openSlip: { sid: string; nonce: string; toolUseId: string } | undefined // 這個視窗正在等的那張單（結案時寫墓碑，讓等待程式停下；0.63.51）
+/** 送單到辦公室並等決定；回 undefined＝不回答（交回終端機）。phone＝手機核准開著：用等待程式等（最多 window） */
+async function askOffice($: EngineInterface, toolUseId: string, tool: string, text: string, window: number, signal: AbortSignal, phone = false): Promise<Decided | undefined> {
   const d = await sharedDir($)
   const sid = me.id
-  return runSlip(
-    {
+  const io = {
       read: () => $.fs.read(decisionFile(d, sid)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined),
       discard: () => $.fs.write(decisionFile(d, sid), TOMBSTONE).catch(() => undefined),
       writeSlip: t => $.fs.write(approvalFile(d, sid), t),
@@ -1647,14 +2072,33 @@ async function askOffice($: EngineInterface, toolUseId: string, tool: string, te
       now: () => $.clock.now(),
       sleep: ms => sleep($, ms, signal),
       settled: () => settled.has(toolUseId) || signal.aborted, // 引擎放棄這次詢問（使用者中斷、預算用完）→ 立刻清單
-      log: t => $.ui.log(t),
-    },
-    { session: sid, name: me.name },
-    toolUseId,
-    tool,
-    text,
-    window,
-  )
+      log: (t: string) => $.ui.log(t),
+      runWaiter: async (want: Want, deadline: number) => {
+        const q = `session=${encodeURIComponent(want.session)}&toolUseId=${encodeURIComponent(want.toolUseId)}&nonce=${encodeURIComponent(want.nonce)}`
+        const r = await $.process.run([await pyOf($), '-I', '-c', WAITER_PY, `${await officeUrl($)}/approve-result?${q}`, approvalFile(d, sid), want.nonce, String(deadline), localKeyFile(d)], { timeoutMs: Math.max(1000, deadline - (await $.clock.now()) + 5000) })
+        return r.stdout.trim() || 'timeout'
+      },
+    } satisfies SlipIO & { runWaiter: unknown }
+    const r = await runSlipWith(io, { session: sid, name: me.name }, toolUseId, tool, text, window,
+      (want, deadline) => (phone ? waitPhone(io, want, deadline) : waitForDecision(io, want, deadline).then(b => (b ? { behavior: b } : undefined))),
+      nonce => { openSlip = nonce ? { sid, nonce, toolUseId } : undefined })
+    if (r) await logAdopted($, adoptedEntry({ at: await $.clock.now(), session: sid, name: me.name, tool, text, decided: r, phone })).catch(() => undefined)
+    return r
+}
+/** 工具結束（成功、失敗、被拒）：記成已結案，同時把這張單改成墓碑（0.63.51）；只認同一個 tool_use_id */
+async function settleAndClose($: EngineInterface, e: unknown) {
+  settle(e)
+  const id = (e as { tool_use_id?: unknown }).tool_use_id
+  if (typeof id === 'string') await closeOpenSlip($, id).catch(() => undefined)
+}
+/** 詢問在別處結案了（電腦上按了、工具跑完、使用者中斷、送了新的話）：這個視窗正在等的單改成墓碑，等待程式看到就停，手機卡跟著消失 */
+async function closeOpenSlip($: EngineInterface, toolUseId?: string) {
+  const o = openSlip
+  if (!o || (toolUseId !== undefined && toolUseId !== o.toolUseId)) return // 別的工具呼叫結束：不是這張
+  const d = await sharedDir($)
+  const raw = await $.fs.read(approvalFile(d, o.sid)).then(r => (typeof r === 'string' ? r : undefined)).catch(() => undefined)
+  try { if (JSON.parse(raw ?? '{}').nonce !== o.nonce) return } catch { return } // 已經換成別張了：不動
+  await $.fs.write(approvalFile(d, o.sid), TOMBSTONE).catch(() => undefined)
 }
 
 /** 隊伍順序：等核准（waiting）早的排前面。靠狀態不靠單 —— 核准關著時一樣排隊 */
@@ -1782,6 +2226,7 @@ function revertLater($: EngineInterface, ms: number, to: OfficeMode) {
 }
 
 export const register: Register = on => {
+  registerHr(on) // 手機版人事室的換模型、打斷、整理記憶、清空、封存（舊 po-hr 外掛）
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'office', description: 'pixel-office: open the shared pixel office pane' })
     await $.tool.register({
@@ -1803,8 +2248,41 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'office_roster',
       description:
-        'List online sessions: nameplate, title, role, ListAgents name and ref (for SendMessage), current activity. Use to find a manager or owner, or confirm who someone is. Read-only.',
+        'List online sessions: nameplate, title, collaboration table (Table column + Tablemates list), role, ListAgents name and ref (for SendMessage), current activity. Use to find a manager or owner, your tablemates (同桌), or confirm who someone is. Read-only.',
       inputSchema: { type: 'object', properties: {} },
+    })
+    await $.tool.register({
+      name: 'office_task',
+      description:
+        'Task cards on your collaboration table (shared notes on the phone). Managers: when dispatching (lead.md §4), action=create with title and parts [{who: ListAgents name, what, after?: [part numbers to wait for]}], then tell each person their task id and part number. Anyone: action=update id, part (1-based), state doing|done|stuck|waiting, optional note — update your own part when you start, finish or get stuck (the manager may update any part). action=list shows your tasks.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'update', 'list'] },
+          title: { type: 'string', description: 'create: task name (max 40 chars)' },
+          parts: { type: 'array', items: { type: 'object', properties: { who: { type: 'string' }, what: { type: 'string' }, after: { type: 'array', items: { type: 'number' } } }, required: ['who', 'what'] }, description: 'create: 1–12 parts; who = ListAgents name; after = 1-based part numbers that must finish first' },
+          id: { type: 'string', description: 'update: task id' },
+          part: { type: 'number', description: 'update: 1-based part number' },
+          state: { type: 'string', enum: ['waiting', 'doing', 'done', 'stuck'] },
+          note: { type: 'string', description: 'update: optional one line (max 120 chars), e.g. what you are stuck on' },
+        },
+        required: ['action'],
+      },
+    })
+    await $.tool.register({
+      name: 'office_helper',
+      description:
+        'Managers only: ask the user (phone notification) to open a helper session for your table, e.g. a long code change or a slow job. You may not open helpers yourself; the user taps Add or No and you get a message back. Max 2 helpers per table; helpers idle 30 min are closed automatically (the user is warned first). kind=codex-art opens a Codex image helper (draws with image_gen, delivers into art-inbox with a delivery note, max 8 images per batch, reports back with office_send; you check the images).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: 'Why, one short line the user reads (max 60 chars), e.g. 改程式改很久了' },
+          task: { type: 'string', description: 'What the helper should do (its first instruction, max 2000 chars)' },
+          name: { type: 'string', description: 'Optional helper name (max 20 chars)' },
+          kind: { type: 'string', enum: ['codex-art'], description: 'Optional: codex-art = a Codex image helper. In task list the parts to draw and the reference image paths' },
+        },
+        required: ['reason', 'task'],
+      },
     })
     await $.tool.register({
       name: 'office_meeting',
@@ -1866,7 +2344,12 @@ export const register: Register = on => {
     $.clock.every(5000, () => void followSession($).then(() => followRename($)).then(() => publish($, false)).then(() => deliverMail($)).catch(() => undefined))
     // 每 10 秒重讀個人按鈕：某次讀取失敗（例如重載當下）會自己恢復；改了 buttons.json 也不必再打 /office buttons
     $.clock.every(10000, () => void loadButtons($).catch(() => undefined))
-    $.clock.after(3000, () => void selfRegister($)) // 等工具就緒再登記
+    // 等工具就緒再登記；Remote Control 重開的對話開場幾秒還是暫時名稱（例：某個對話-d7），之後才換回對話名稱 → 30 秒、2 分鐘再登記一次（不花 tokens）
+    for (const ms of [3000, 30000, 120000]) $.clock.after(ms, () => void selfRegister($))
+    await hrSessionStart($).catch(() => undefined) // 手機版人事室的請求（hr.ts）
+    setBusyOf(() => ({ cmdPending: !!cmdPending, approval: !!me.approval }))
+    // 外掛自己換新版（0.63.25，selfreload.ts）：來源資料夾的版號比自己新、對話閒著，就自己 /reload-plugins
+    $.clock.every(60000, () => void selfReload($).catch(() => undefined))
 
     return next(e)
   })
@@ -1889,6 +2372,37 @@ export const register: Register = on => {
   })
 
   // office_profile／office_roster 原本強制開場載入（user-30 2026-10-03）；2026-10-31 jacky 裁示改回用到才載入，系統提示那段已寫出工具全名
+  on('tool.call', { tool: 'mcp__pixel-office__office_task' }, async ($, e) => {
+    const d = `${officeRoot(await sharedDir($))}/tasks`
+    const input = e as unknown as Record<string, unknown>
+    const now = await $.clock.now()
+    const readDef = async (id: string) => parseTask(await $.fs.read(`${d}/${id}.json`).catch(() => undefined))
+    if (input.action === 'list') {
+      const out: string[] = []
+      for (const entry of await $.fs.list(d).catch(() => [])) {
+        if (entry.kind !== 'file' || !/^[0-9a-f]{8}\.json$/.test(entry.name)) continue
+        const def = await readDef(entry.name.slice(0, 8))
+        if (!def || now - def.at > TASK_KEEP_MS * 4) continue
+        const mine = def.boss === me.id || def.parts.some(p => p.who === me.agent)
+        if (mine) out.push(`${def.id} 「${def.title}」: ${def.parts.map((p, i) => `${i + 1}. ${p.who} — ${p.what}`).join('; ')}`)
+      }
+      return { result: out.length ? out.join('\n') : 'No tasks for you.' }
+    }
+    const r = taskOp(input, me, now, input.action === 'update' && typeof input.id === 'string' ? await readDef(input.id) : undefined)
+    if (typeof r === 'string') return { result: r }
+    await $.fs.write(`${d}/${r.file}`, JSON.stringify(r.data))
+    return { result: r.reply }
+  })
+
+  on('tool.call', { tool: 'mcp__pixel-office__office_helper' }, async ($, e) => {
+    const r = helperAsk(e as unknown as Record<string, unknown>, me)
+    if (typeof r === 'string') return { result: r }
+    const now = await $.clock.now()
+    const ask = { ...r, at: now, cwd: await $.session.cwd().catch(() => undefined) }
+    await $.fs.write(`${officeRoot(await sharedDir($))}/helpers/${ask.id}.json`, JSON.stringify(ask))
+    return { result: `Asked the user on the phone: "${ask.reason}". Wait for their answer (a message comes back); do not open helper sessions yourself.` }
+  })
+
   on('tool.call', { tool: 'mcp__pixel-office__office_meeting' }, async ($, e) => {
     const text = await setMeeting($, e as unknown as Record<string, unknown>).catch(() => 'Could not write meeting.json; the meeting room was not updated.')
     await refresh($).catch(() => undefined)
@@ -1897,7 +2411,8 @@ export const register: Register = on => {
 
   on('tool.call', { tool: ROSTER }, async $ => {
     await refresh($).catch(() => undefined)
-    return { result: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots)) }
+    const all = everyone()
+    return { result: roster(all, await $.clock.now(), oneshotGroups(oneshots), undefined, await tableSeating($, all).catch(() => undefined)) }
   })
 
   // 送出訊息（SendMessage）：記下收件者與時間，各視窗據此畫紙飛機
@@ -1916,6 +2431,7 @@ export const register: Register = on => {
     try {
       if (sent.isDelivered) {
         me = { ...me, sentTo: e.to, sentAt: await $.clock.now() }
+        await logTableChat($, e.to, String(e.text ?? ''), me.sentAt!).catch(() => undefined)
         await showCrew($)
         await publish($, false)
       } else if (e.origin.kind === 'model' && !e.agentId && shouldMail(sent.reason)) { // claude -p 也能留言；轉交才排除 oneshot
@@ -1979,21 +2495,26 @@ export const register: Register = on => {
       const toolUseId = matchAsk(asks, ev.tool_name, canon(ev.tool_input), await $.clock.now())
       if (!toolUseId) return next(e)
       await refresh($).catch(() => undefined)
-      if (!officeApproves(everyone())) return next(e)
-      // 這個 hook 只有 10 秒預算（過了引擎就改由終端機問，hook 卻還在背景跑）：等到預算快用完就自己收單（oftest 2026-10-26 實測）
-      const window = approvalWindow(next.budget.remainingMs)
+      // 手機核准（0.63.51）：心跳在就等手機（預設 2 分鐘，不吃預算）；不然照原本只在電腦面板核准開著時送單
+      const pw = await phoneLiveWait($) // 伺服器說手機（JWT 驗過）在看才等手機（A-2）
+      if (pw === undefined && !officeApproves(everyone())) return next(e)
+      // 只有電腦面板時：這個 hook 只有 10 秒預算（$.clock 的等待吃預算）：等到預算快用完就自己收單（oftest 2026-10-26 實測）
+      const window = pw ?? approvalWindow(next.budget.remainingMs)
       if (window === undefined) return next(e)
-      const behavior = await askOffice($, toolUseId, ev.tool_name, approvalText(ev.tool_name, ev.tool_input), window, next.signal)
-      if (behavior === 'allow') return { decision: { behavior: 'allow' } }
-      if (behavior === 'deny') return { decision: { behavior: 'deny', message: 'The user pressed Deny in the pixel office' } }
+      const r = await askOffice($, toolUseId, ev.tool_name, approvalText(ev.tool_name, ev.tool_input), window, next.signal, pw !== undefined)
+      if (r?.behavior === 'allow') return { decision: { behavior: 'allow' } }
+      if (r?.behavior === 'deny') return { decision: { behavior: 'deny', message: r.via === 'phone' ? `The user denied this on their phone (pixel office)${r.message ? `. Their reason: ${r.message}` : ''}` : 'The user pressed Deny in the pixel office' } }
     } catch {}
     return next(e)
   })
 
   // 終端機先按了（指令跑完／失敗／被拒）：那張單結案，等的迴圈停下、清檔
-  on('classic.PostToolUse', ($, e, next) => (settle(e), next(e)))
-  on('classic.PostToolUseFailure', ($, e, next) => (settle(e), next(e)))
-  on('classic.PermissionDenied', ($, e, next) => (settle(e), next(e)))
+  // 0.63.51：同時把這張單改成墓碑（手機的等待程式看到就停、手機卡消失）；只認同一個 tool_use_id
+  on('classic.PostToolUse', async ($, e, next) => (await settleAndClose($, e), next(e)))
+  on('classic.PostToolUseFailure', async ($, e, next) => (await settleAndClose($, e), next(e)))
+  on('classic.PermissionDenied', async ($, e, next) => (await settleAndClose($, e), next(e)))
+  // 使用者在電腦上按 Esc／Ctrl+C（含在詢問畫面按 No 之後中斷）、或送了新的一句：這一輪的詢問都不在了
+  on('session.stop', ($, e, next) => { void closeOpenSlip($).catch(() => undefined); return next(e) })
 
   on('ui.close', async ($, e, next) => {
     if ((e as { id?: unknown }).id === PANE) await setOffice($, false).catch(() => undefined)
@@ -2064,7 +2585,8 @@ export const register: Register = on => {
     if (sub === 'version') return { text: `pixel-office ${VERSION}` }
     if (sub === 'who') {
       await refresh($).catch(() => undefined)
-      return { text: roster(everyone(), await $.clock.now(), oneshotGroups(oneshots), 'tokens') } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
+      const all = everyone()
+      return { text: roster(all, await $.clock.now(), oneshotGroups(oneshots), 'tokens', await tableSeating($, all).catch(() => undefined)) } // 人看的：最花的排最上面；給模型的 office_roster 維持主管在前
     }
     if (sub !== '' && sub !== undefined) return { text: 'Usage: /office | /office who | /office role manager|staff | /office title <title> | /office name <letters/digits> | /office agent <ListAgents name> | /office team <manager>|off | /office auto on|off | /office approve on|off (answer others\' approvals, off by default) | /office buttons (reload personal buttons) | /office bite [name] (send the pet at someone) | /office pet [cat|baby|bird] (switch pet) | /office meeting [off] (meeting status / end) | /office hits (Desktop click calibration) | /office version' }
 
@@ -2106,6 +2628,7 @@ export const register: Register = on => {
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    await closeOpenSlip($).catch(() => undefined)
     await noteSessionTitle($, e).catch(() => undefined)
     return next(e)
   })
@@ -2172,7 +2695,7 @@ export const register: Register = on => {
     try {
       await setMode($, READING.has(name) ? 'reading' : 'typing', name)
     } catch {}
-    const ran = await next(e)
+    let ran = await next(e)
     settle(e)
     if (!e.agentId) cpWorked = true
     try {
@@ -2197,6 +2720,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    hrTurnDone(e.turnId)
     if (!e.agentId && e.answer) void saveReply($, e.answer).catch(() => undefined)
     try {
       if (!e.agentId) {
@@ -2212,7 +2736,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const list = await read($, crew)
-    const shown = list.length > 0 ? list : everyone()
+    const shown = list.length > 0 ? list : everyone() // 名字照原樣（座位、團隊都靠它）；指令名換短代號只在畫名牌時做（美術 A #14、複驗）
     nightMode = await read($, night)
     pet = await read($, petRef)
     // 餵／放／換寵物按鈕 0.16.0 拿掉：改成點寵物（overlay）；/office pet、/office bite 照舊
@@ -2248,7 +2772,26 @@ export const register: Register = on => {
       let svg = ''
       const t = new Date(await $.clock.now())
       const clock = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` // 牆上時鐘：本機時區
-      for (let tries = 0; tries < 4; tries++) {
+      // v2 辦公室（2026-11-22）：跟手機版同一套版面與座位表（上方協作區、下方辦公區，office-<port>.json）；
+      // 畫不出來（素材表壞了、人多到超過 Svg 上限）才退回下面原本的 2dPig 向量辦公室
+      // 面板一欄＝8 px、一列＝20 px（2.5 單位，見 vector.ts CELL_UNITS）：v2 的 SVG 照這個比例撐滿面板
+      if (tableChat && (await $.clock.now()) - tableChat.at > 5000) await loadTableChat($, tableChat.id).catch(() => undefined) // 開著的聊天室 5 秒更新一次
+      const openHit = openMenu ? lastHits.find(h => h.what === openMenu) : undefined
+      const v2menu = openMenu && openHit ? { title: FURNITURE_ZH[openMenu], items: menuFor(openMenu, mine).map(i => i.label), cancel: '取消', at: openHit, pressed: menuPressed, enter: Date.now() - menuOpenedAt < 300 } : undefined
+      const v2 = await v2Svg($, shown, e.props.bodyColumns * 8, Math.max(20, (e.props.scroll?.bodyRows ?? MIN_ROWS) - approvals.length) * 20, oneshotGroups(oneshots), v2menu).catch(() => undefined)
+      lastMenuHits = []
+      let sceneW = 0 // 點擊區的座標單位：v2 是「格」，整張寬 v2.w 格
+      if (v2 && v2.svg.length <= SVG_MAX) {
+        width = sw
+        rows = sr
+        lastPlaced = assignSeats(shown, width, rows, lastPlaced ?? undefined, meeting, attendees) // 走路、開會、排隊的計算照舊用得到
+        lastHits = v2.hits // 家具選單、點窗戶切夜間跟原本一樣；v2 沒有寵物、柯基
+        lastMenuHits = v2.menuHits ?? []
+        lastFixed = []
+        sceneW = v2.w
+        svg = v2.svg
+      }
+      for (let tries = 0; tries < 4 && !svg; tries++) {
         if (width !== sw || rows !== sr) {
           width = sw
           rows = sr
@@ -2264,18 +2807,19 @@ export const register: Register = on => {
           svg = svg.replace(/<\/svg>$/, `${grid}${marks}</svg>`)
         }
         if (svg.length <= SVG_MAX) break
+        if (tries < 3) svg = '' // 太長：縮小再畫一次（最後一次就照原本，畫多少算多少）
         sw = Math.max(48, sw - 12)
         sr = Math.max(40, sr - 8)
       }
-      const k = e.props.bodyColumns / width
-      // 舊格式的個人按鈕（沒有 object）：疊在員工區上緣左邊的空地，不另外佔一塊白底
-      const at = cellAt(GEOM.WALL + 1, GEOM.OPEN_Y + 1, 'desktop', k)
+      const k = e.props.bodyColumns / (sceneW || width)
+      // 舊格式的個人按鈕（沒有 object）：疊在員工區上緣左邊的空地，不另外佔一塊白底（v2：會議室下方、協作區標示上方）
+      const at = sceneW ? cellAt(12, 62, 'desktop', k) : cellAt(GEOM.WALL + 1, GEOM.OPEN_Y + 1, 'desktop', k)
       return (
         <Box flexDirection="column">
           {approvals}
           <Box key="stage">
             <Svg key="scene" source={svg} alt={`Pixel office: ${shown.length} online`} />
-            {overlay($, els, lastHits, 'desktop', mine, width, k)}
+            {overlay($, els, lastHits, 'desktop', mine, sceneW || width, k)}
             {row.length > 0 ? (
               <Box key="mine" position="absolute" top={at.top} left={at.left} flexDirection="row">
                 {row.map((b, i) =>

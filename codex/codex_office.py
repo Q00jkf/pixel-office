@@ -7,6 +7,7 @@
   python codex_office.py mcp          .mcp.json 呼叫：stdio MCP server（office_profile／office_roster／office_send），Codex 主動傳話給 Claude 用
   python codex_office.py watch        背景看守：Codex 程式還在就續心跳，結束就標離開
   python codex_office.py install      印出安裝指令（不替使用者改 Codex 設定）
+  python codex_office.py locked <thread> [CODEX_HOME]  那段對話的寫入鎖有沒有人握著（true／false／none）
 
 🔴 hook 失敗不能擋 Codex：每一步吞例外、一律 exit 0；Stop 一定印 JSON（{}）。
 不存使用者打的話（UserPromptSubmit 的 prompt）。設計與實測：pixel-office 的 docs/designs/codex.md。
@@ -63,6 +64,75 @@ def save(p: Path, s: dict) -> None:
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+ORDERS = BASE / "orders"
+ORDER_TTL_MS = 10 * 60 * 1000  # 同 hooks/register.tsx COMMAND_TTL_MS：人事令 10 分鐘作廢
+
+
+def read_order(oid: str, applied: str = ""):
+    """人事令（0.63.6，跟 Claude 端 register.tsx takeOrder／orderInput 同一套）：orders/<id>.json {nonce, at, role?, team?, title?}，
+    手機版伺服器寫、看守與 hook 直接改狀態檔，不經模型；收過的 nonce 記在 <id>.done.json，同一道令只套一次，10 分鐘作廢。
+    有效的回 (nonce, 要改的欄位)，沒有回 None"""
+    try:
+        if not oid.startswith("codex-"):
+            return None
+        f = ORDERS / f"{oid}.json"
+        if not f.exists():
+            return None
+        o = load(f)
+        nonce = o.get("nonce")
+        # 套過沒有看狀態檔自己記的 orderNonce（0.63.10，審查第 3 項）：hook 用舊的 s 存回、把剛套的欄位蓋掉時，
+        # orderNonce 也一起回到舊值，下一輪就會再套一次（人事欄位是「設成」，重套沒有副作用）
+        if not isinstance(nonce, str) or not nonce or nonce == applied:
+            return None
+        if not (now_ms() - float(o.get("at") or 0) < ORDER_TTL_MS):
+            return None
+        out = {}
+        if o.get("role") == "staff":  # 主管只能是 Claude（0.63.14，審查第 5 項）：manager 的令不收，其他欄位照套
+            out["role"] = "staff"
+        for k, n in (("team", 64), ("title", 16)):
+            if isinstance(o.get(k), str) and o[k].strip():
+                out[k] = o[k].strip()[:n]
+        cp = o.get("cpFile")  # 檢查點檔（0.63.6）：絕對路徑的 .md
+        if isinstance(cp, str) and cp.endswith(".md") and os.path.isabs(cp) and len(cp) < 512:
+            out["cpFile"] = cp
+        return (nonce, out) if out else None
+    except Exception:
+        return None
+
+
+def apply_fields(s: dict, o: dict, nonce: str = "") -> None:
+    if nonce:
+        s["orderNonce"] = nonce
+    if "role" in o:
+        s["role"] = o["role"]
+    if "team" in o:
+        if o["team"].lower() == "off":
+            s.pop("team", None)
+        else:
+            s["team"] = o["team"]
+    if "title" in o:
+        s.update(title=o["title"], titleAuto=False)
+    if "cpFile" in o and o["cpFile"] != s.get("cpFile"):  # 換了檢查點檔：從現在起算一小時
+        s.update(cpFile=o["cpFile"], cpBase=now_ms(), cpWorked=False, cpNoted=False)
+
+
+def apply_order_now(p: Path, s: dict, order) -> bool:
+    """看守套人事令：重讀最新的狀態檔再改、條件寫入；寫進去了才標已收（codex-trust 複驗 ①，比照 hook），沒寫成下一輪再套"""
+    fresh = load(p) or s
+    apply_fields(fresh, order[1], order[0])
+    if save_if(p, fresh, fresh.get("owner")):
+        mark_order(str(s["id"]), *order)
+        return True
+    return False
+
+
+def mark_order(oid: str, nonce: str, o: dict) -> None:
+    try:
+        save(ORDERS / f"{oid}.done.json", {"nonce": nonce, "at": now_ms(), "result": ", ".join(f"{k}={v}" for k, v in o.items())})
+    except Exception:
+        pass
 
 
 def live_crew() -> list:
@@ -152,15 +222,30 @@ def codex_pid() -> int:
     return 0
 
 
-def writer_locked(sid: str):
+def writer_locked(sid: str, home: str = ""):
     """Codex 開著一個對話時會鎖住 ~/.codex/thread-writer-locks/<id>.lock（2026-11-09 實測：開著的鎖住、關掉的放掉或刪掉）。
-    True＝開著、False＝關了、None＝看不出來（沒有這個資料夾或不是 Windows）"""
-    d = Path(os.environ.get("CODEX_HOME") or HOME / ".codex") / "thread-writer-locks"
-    if os.name != "nt" or not sid or not d.is_dir():
+    True＝開著、False＝關了、None＝看不出來（沒有這個資料夾）。
+    Mac／Linux 用 flock（2026-11-23 實測 Codex Desktop：開著的對話 flock 鎖住，關掉的鎖檔還在但沒人鎖）"""
+    d = Path(home or os.environ.get("CODEX_HOME") or HOME / ".codex") / "thread-writer-locks"  # 那個 Codex 自己的 home（0.63.15，審查第 9 項）
+    if not sid or not d.is_dir():
         return None
     f = d / f"{sid}.lock"
     if not f.exists():
         return False
+    if os.name != "nt":
+        import fcntl
+        try:
+            with open(f, "rb") as fh:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True  # 有人鎖著
+                except OSError:
+                    return None  # 其他錯誤：看不出來（審查第 9 項：原本一律當成鎖著）
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                return False
+        except OSError:
+            return None
     import msvcrt
     try:
         with open(f, "r+b") as fh:
@@ -176,9 +261,34 @@ def writer_locked(sid: str):
         return None
 
 
+CODEX_OPT_VALUE = {"-c", "--config", "-m", "--model", "-C", "--cd", "--add-dir", "-s", "--sandbox", "-a", "--ask-for-approval",
+                   "-p", "--profile", "-i", "--image", "--enable", "--disable", "--local-provider", "--remote"}
+
+
+def is_shared_cmd(cmd: str) -> bool:
+    """ps 的命令列 → 是不是 App 的常駐程式：子指令（第一個不是選項、也不是選項值的參數）是 app-server 或 exec-server。
+    只看子指令的位置（0.63.18，複驗第 1 項）：原本整串找字，招聘的第一句話裡出現 app-server 也會被當成 App 的"""
+    t = cmd.split()[1:]
+    i = 0
+    while i < len(t):
+        if t[i].startswith("-"):
+            i += 1 if "=" in t[i] or t[i] not in CODEX_OPT_VALUE else 2
+            continue
+        return t[i] in ("app-server", "exec-server")
+    return False
+
+
 def shared_host(pid: int) -> bool:
     """這個 Codex 行程是不是多個對話共用的（app-server 常駐程式、桌面 App）：它活著不代表對話還開著"""
     path = codex_exe(pid).lower().replace("/", "\\") if pid else ""
+    if os.name != "nt" and pid:  # Mac：App 的常駐程式是 …/codex app-server（app-server 在命令列參數，不在執行檔路徑）
+        try:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+            # 看參數，不看路徑（0.63.10，審查第 1 項）：~/.local/bin/codex 是指向 ChatGPT.app 裡執行檔的 wrapper，
+            # tmux 開的 CLI 路徑也在 /ChatGPT.app/ 底下；共用的是 App 的常駐程式（app-server／exec-server 子指令）
+            return is_shared_cmd(cmd)
+        except Exception:
+            pass
     return "app-server" in path or "\\openai\\codex\\bin\\" in path
 
 
@@ -203,6 +313,156 @@ def alive(pid: int) -> bool:
         return False
 
 
+TMUX_PATHS = ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux")
+
+
+def _tmux(*args: str):
+    """跑 tmux：回 (returncode, stdout, stderr)；找不到 tmux、逾時、執行失敗回 None"""
+    exe = shutil.which("tmux") or next((x for x in TMUX_PATHS if os.path.exists(x)), "")
+    if not exe:
+        return None
+    try:
+        r = subprocess.run([exe, *args], capture_output=True, text=True, timeout=2)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+# 「這個 session（或整個 tmux 伺服器）不存在」的回覆；其他錯誤一律當「查不到」（未知）
+TMUX_ABSENT = re.compile(r"no such session|can't find session|no server running|error connecting to .*\(No such file or directory\)", re.I)
+
+
+def _launch_marker(session: str) -> str:
+    """查 tmux session 的 @po_launch：回標記字串；session 不存在回 ""；查不到（逾時、其他錯誤）回 None"""
+    r = _tmux("show-options", "-v", "-t", f"={session}:", "@po_launch")
+    if r is None:
+        return None
+    code, out, err = r
+    if code == 0:
+        return out
+    if TMUX_ABSENT.search(err):
+        return ""
+    if re.search(r"invalid option|unknown option", err, re.I):
+        return ""  # session 在、但沒有這個標記：不是那次接回
+    return None
+
+
+def owner_state(s: dict) -> str:
+    """hook 端驗世代（handoff 審查第 9 項；trust 審查 ④ 改三態）。hr.ts 接回後台時寫 owner＝tmux:<session>@<marker>，
+    marker 也存在那個 session 的 @po_launch。回：
+      none＝沒有 owner；mine＝這個 hook 就是從 owner 那個 tmux 跑的；other＝owner 還在、這個 hook 來自別的（舊）程序；
+      gone＝確認 owner 已失效（session 不在、或標記換了）；unknown＝查不到（tmux 找不到、逾時、其他錯誤）
+    呼叫端：other、unknown 都不寫狀態、保留 owner；gone 才清掉 owner"""
+    own = s.get("owner")
+    if not isinstance(own, str) or not own:
+        return "none"
+    m = re.match(r"^tmux:(.+)@([0-9A-Za-z-]+)$", own)
+    if not m:
+        return "unknown"
+    pane = os.environ.get("TMUX_PANE") if os.environ.get("TMUX") else None
+    if pane:
+        r = _tmux("display", "-p", "-t", pane, "#{session_name}")
+        if r is None or r[0] != 0:
+            return "unknown"
+        if r[1] == m.group(1):
+            mk = _launch_marker(m.group(1))
+            if mk is None:
+                return "unknown"
+            if mk == m.group(2):
+                return "mine"
+            return "gone"  # 我就在那個 session 名稱裡，但標記換了：owner 那次接回已經不在
+    mk = _launch_marker(m.group(1))
+    if mk is None:
+        return "unknown"
+    return "other" if mk == m.group(2) else "gone"
+
+
+try:
+    import fcntl  # 狀態檔鎖用核心的檔案鎖：程序結束就自動放，不用清「留下來的鎖」（codex-trust 第三輪複驗 ①）
+except ImportError:  # Windows：不在 codex-trust 範圍，照舊不鎖
+    fcntl = None
+STATUS_LOCK_WAIT = 2.0  # 秒
+
+
+class StatusLock:
+    """拿到的鎖：記著自己的 fd，只關一次。重複放鎖是空動作（fd 號碼關掉後會被重用，不能再按號碼關，免得關到別人的新鎖）"""
+
+    def __init__(self, fd: int):
+        self.fd = fd
+
+    def release(self) -> None:
+        fd, self.fd = self.fd, -1
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def status_lock(p: Path):
+    """拿狀態檔的鎖：狀態檔旁的 <檔名>.flock（flock，跟 hr.ts writeStatusLocked 同一把）。
+    回 StatusLock（Windows 回不鎖的空鎖）或 None（等 2 秒還拿不到）。鎖檔留著不刪：刪了會讓兩邊鎖到不同的檔"""
+    if fcntl is None:
+        return StatusLock(-1)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p) + ".flock", os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+    end = time.monotonic() + STATUS_LOCK_WAIT
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return StatusLock(fd)
+        except BlockingIOError:
+            if time.monotonic() >= end:
+                break
+            time.sleep(0.05)
+        except OSError:
+            break
+    os.close(fd)
+    return None
+
+
+def status_unlock(lock) -> None:
+    """放鎖＝關掉自己的 fd（只會放自己的；重複放是空動作）"""
+    if isinstance(lock, StatusLock):
+        lock.release()
+
+
+def update_status(p: Path, fn) -> bool:
+    """在鎖裡重讀最新的狀態檔、套 fn(s) 再寫；拿不到鎖回 False（什麼都沒寫）"""
+    fd = status_lock(p)
+    if fd is None:
+        return False
+    try:
+        s = load(p)
+        fn(s)
+        save(p, s)
+        return True
+    finally:
+        status_unlock(fd)
+
+
+_ANY = object()  # save_if 不比 updatedAt
+
+
+def save_if(p: Path, s: dict, owner0, was=_ANY) -> bool:
+    """條件寫入（trust 審查 ④、複驗 ②）：拿狀態檔的鎖，在鎖裡重讀；owner 世代跟讀進來時不同（hr.ts 剛好接回、發布了新 owner），
+    或給了 was 而 updatedAt 變了（別人剛寫過），就不寫，回 False。搶不到鎖也不寫"""
+    fd = status_lock(p)
+    if fd is None:
+        return False
+    try:
+        cur = load(p)
+        if cur.get("owner") != owner0 or (was is not _ANY and cur.get("updatedAt") != was):
+            return False
+        save(p, s)
+        return True
+    finally:
+        status_unlock(fd)
+
+
 def sync_cli() -> None:
     """把自己複製一份到 DATA：Claude 端寄信用固定路徑，外掛升版也跟上"""
     me = Path(__file__).resolve()
@@ -217,11 +477,21 @@ def sync_cli() -> None:
         pass
 
 
+WATCH_VER = "2"  # 看守的版本（0.63.21，複驗第 10 項）：watch.pid 寫「pid 版本」；舊版只寫 pid、沒有自退，hook 看到就換掉它
+
+
 def ensure_watch() -> None:
     pidf = DATA / "watch.pid"
     try:
         if pidf.exists() and time.time() - pidf.stat().st_mtime < BEAT * 3:
-            return
+            parts = pidf.read_text().split()
+            if parts and parts[0] == "starting" or len(parts) > 1 and parts[1] >= WATCH_VER:
+                return
+            if parts and parts[0].isdigit() and alive(int(parts[0])):  # 舊版看守：結束它，下面開新版的
+                try:
+                    os.kill(int(parts[0]), 15)
+                except OSError:
+                    pass
     except OSError:
         pass
     flags = 0
@@ -242,14 +512,24 @@ def ensure_watch() -> None:
 
 # ---------------------------------------------------------------- 寄信
 
-def deliver(to: str, text: str, frm: str) -> str:
-    """寄給在線的 Codex；成功回說明，失敗丟 ValueError"""
+def deliver(to: str, text: str, frm: str, hit: dict = None) -> str:
+    """寄給在線的 Codex；成功回說明，失敗丟 ValueError。hit＝已經找到的收件人（不再查第二次；複驗第 8 項）"""
+    return _deliver_to(hit if hit is not None else find_codex(to), text, frm)
+
+
+def find_codex(to: str) -> dict:
+    """收件者（名牌、id、thread，可帶「 [ref]」）→ 唯一一位在線的 Codex；找不到或不只一位丟 ValueError"""
     want = re.sub(r"\s*\[[0-9a-f]+\]$", "", to.strip())
     crew = live_crew()
     hits = [s for s in crew if s.get("kind") == "codex" and want in (s.get("name"), s.get("id"), str(s.get("id", ""))[len("codex-"):])]
     if len(hits) != 1:
         names = ", ".join(s.get("name", "?") for s in crew if s.get("kind") == "codex")
         raise ValueError(f"No unique Codex session \"{to}\" ({len(hits)} matches). Codex online: {names or 'none'}")
+    return hits[0]
+
+
+def _deliver_to(target: dict, text: str, frm: str) -> str:
+    hits = [target]
     text = text.strip()
     if not text or len(text) > 4000:
         raise ValueError("Message is empty or too long (max 4000 characters)")
@@ -257,16 +537,34 @@ def deliver(to: str, text: str, frm: str) -> str:
     exe = codex_exe(int(hits[0].get("pid") or 0))
     if exe:  # codex queue：開著的 Codex 閒置時會自己撿起來回（2026-11-09 實測，不用 --resume）
         try:
-            r = subprocess.run([exe, "queue", "--thread", sid, "--message", mail_line(frm, text)],
+            home = str(hits[0].get("codexHome") or "")  # 照收件人自己的 CODEX_HOME 排（複驗第 8 項）
+            env = {**os.environ, "CODEX_HOME": home} if home and ".." not in home else None
+            r = subprocess.run([exe, "queue", "--thread", sid, "--message", mail_line(frm, text)], env=env,
                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
-            if r.returncode == 0:
-                return f"Queued in {hits[0].get('name')}'s Codex session: it answers right away if idle, after its current turn if busy"
+            if r.returncode == 0:  # 排進去了，不等於已經讀到（複驗第 8 項：原本說閒著就會馬上回）
+                return f"Queued in {hits[0].get('name')}'s Codex session: it is handled when that session is free (usually soon if idle)"
+        except subprocess.TimeoutExpired:
+            # 逾時不退回收件夾（0.63.15，審查第 8 項）：queue 可能其實已經排進去，退回會送兩次
+            return f"codex queue did not answer in 20s; the message may still arrive in {hits[0].get('name')}'s session. Check before resending"
         except (OSError, subprocess.SubprocessError):
             pass
     INBOX.mkdir(parents=True, exist_ok=True)
     with open(INBOX / f"{sid}.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"from": frm, "text": text, "at": now_ms()}, ensure_ascii=False) + "\n")
     return f"codex queue unavailable; put in {hits[0].get('name')}'s inbox: delivered when its user next sends it a message"
+
+
+CHAT_OUTBOX = BASE / "chat" / "outbox"
+
+
+def chat_out(frm: dict, to: dict, text: str, extra: dict = None) -> None:
+    """傳話記進協作桌聊天室（0.63.8）：寫一份待記，手機版伺服器（server.ts drainChatOutbox）照座位記到寄件人、收件人坐的桌。
+    Claude 的外掛送出時自己記；Codex 這邊不知道座位，交給伺服器。失敗不影響傳話"""
+    try:
+        CHAT_OUTBOX.mkdir(parents=True, exist_ok=True)
+        save(CHAT_OUTBOX / f"{now_ms()}-{uuid.uuid4().hex[:8]}.json", {"at": now_ms(), "from": frm, "to": to, "text": text[:20000], **(extra or {})})
+    except Exception:
+        pass
 
 
 def mail_line(frm: str, text: str) -> str:
@@ -366,16 +664,24 @@ def takeover_hint(prompt: str) -> str:
 CP_REMIND_MS = 60 * 60000  # 跟 register.tsx 一樣：持有角色、做了事、一小時沒存 → 下一輪提醒一次
 
 
-def hold_role(p: Path, out: str) -> None:
-    """office_takeover 接成了：記下檢查點檔與起算時間，hook 照這個提醒（第 2 層卡沒有第 5 步＝不提醒；有 STOP＝沒接）"""
+def took_role(out: str):
+    """takeover.py 的輸出：接成了（有第 5 步的檢查點檔、沒有 STOP）回檢查點檔路徑，否則 None"""
     m = re.search(r"^5\. .*?在 (.+?\.md) 檔尾", out.split("# 接手後要做的")[-1], re.M)  # 只看最後那段：卡與檢查點內文不算
-    s = load(p)
-    if m and not re.search("^STOP：", out, re.M):
-        s.update({"cpFile": m.group(1), "cpBase": now_ms(), "cpWorked": False, "cpNoted": False})
-    else:  # 沒接成、第 2 層卡：先前接的角色也不再提醒
-        for k in ("cpFile", "cpBase", "cpWorked", "cpNoted"):
-            s.pop(k, None)
-    save(p, s)
+    return m.group(1) if m and not re.search("^STOP：", out, re.M) else None
+
+
+def hold_role(p: Path, out: str) -> bool:
+    """office_takeover 接成了：記下檢查點檔與起算時間，hook 照這個提醒（第 2 層卡沒有第 5 步＝不提醒；有 STOP＝沒接）。
+    在鎖裡重讀再改；狀態檔忙（拿不到鎖）回 False"""
+    cp = took_role(out)
+
+    def fn(s):
+        if cp:
+            s.update({"cpFile": cp, "cpBase": now_ms(), "cpWorked": False, "cpNoted": False})
+        else:  # 沒接成、第 2 層卡：先前接的角色也不再提醒
+            for k in ("cpFile", "cpBase", "cpWorked", "cpNoted"):
+                s.pop(k, None)
+    return update_status(p, fn)
 
 
 def cp_note(s: dict) -> str:
@@ -397,6 +703,15 @@ def cp_note(s: dict) -> str:
     except Exception:
         pass
     return ""
+
+
+def compact_note(s: dict) -> str:
+    """對話剛被壓縮（SessionStart source=compact）：有檢查點檔就提示先重讀最後一筆（Claude 端 register.tsx 的 /compact 同一個用意）"""
+    f = s.get("cpFile")
+    if not f:
+        return ""
+    return (f"Pixel office: your conversation was just compacted. Before continuing, re-read the last entry of your checkpoint {f} "
+            "(做完／卡在／下一步) and pick up from 下一步. If the file does not exist yet, write one entry now.")
 
 
 NAME_OK = re.compile(r"^[A-Za-z0-9]{1,12}$")
@@ -429,33 +744,43 @@ def caller(params: dict) -> str:
 
 def tool_profile(sid: str, a: dict) -> str:
     p = status_file(sid)
-    s = load(p)
-    s["updatedAt"] = now_ms()  # 看守讀寫之間改的名牌不會被蓋回去
-    name, title = a.get("name"), a.get("title")
+    name, title, team = a.get("name"), a.get("title"), a.get("team")
     if name is not None:
         name = str(name).strip()
         if not NAME_OK.match(name):
             raise ValueError("Nameplate must be 1-12 letters or digits")
-        if any(c.get("name") == name and c.get("id") != s.get("id") for c in live_crew()):
+        if any(c.get("name") == name and c.get("id") != f"codex-{sid}" for c in live_crew()):
             raise ValueError(f"Nameplate {name} is taken, pick another")
-        s["name"] = name
-    if title is not None:
-        s.update(title=str(title).strip()[:16], titleAuto=False)
-    team = a.get("team")
-    if team is not None:  # 掛到主管底下（Claude 的 office_profile 同一欄）；off 或空字串拿掉
+    if team is not None:
         team = str(team).strip()
-        if team.lower() in ("", "off"):
-            s.pop("team", None)
-        else:
-            s["team"] = team[:64]
-    save(p, s)
-    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}, team {s.get('team') or '—'}"
+    done = {}
+
+    def fn(s):  # 在鎖裡重讀最新的狀態檔再改（第三輪複驗 ②）
+        s["updatedAt"] = now_ms()  # 看守讀寫之間改的名牌不會被蓋回去
+        if name is not None:
+            s["name"] = name
+        if title is not None:
+            s.update(title=str(title).strip()[:16], titleAuto=False)
+        if team is not None:  # 掛到主管底下（Claude 的 office_profile 同一欄）；off 或空字串拿掉
+            if team.lower() in ("", "off"):
+                s.pop("team", None)
+            else:
+                s["team"] = team[:64]
+        done.update(s)
+    if not update_status(p, fn):
+        raise ValueError("The office status file is busy, nothing was saved. Call office_profile again in a moment.")
+    return f"Registered: nameplate {done.get('name')}, title {done.get('title')}, team {done.get('team') or '—'}"
 
 
 def tool_takeover(sid: str, a: dict) -> str:
     s = load(status_file(sid))
     out = run_takeover("codex", f"codex-{sid}", s.get("name") or "codex", {**a, "cwd": a.get("cwd") or s.get("cwd")})
-    hold_role(status_file(sid), out)
+    if not hold_role(status_file(sid), out):
+        if took_role(out):  # 確認接成了：接手的步驟已經做了（有副作用），不叫它重接，只說提醒沒記下
+            out += ("\n\n(Pixel office: the office status file was busy, so the hourly checkpoint reminder for this role was not recorded. "
+                    "The takeover itself is done: do NOT call office_takeover again. Save checkpoints as the steps above say.)")
+        else:  # 沒接成（STOP 等）：原本的指示照舊，只補一句
+            out += "\n\n(Pixel office: the office status file was busy, so the reminder state was not updated.)"
     return out
 
 
@@ -488,8 +813,21 @@ def tool_send(sid: str, a: dict) -> str:
     s = hits[0]
     if s.get("id") == f"codex-{sid}":
         raise ValueError("That is you; pick someone else from office_roster")
+    _LAST_NONCE[0] = ""
+    r = _send_to(sid, me, s, text)
+    # 聊天室待記標上送達狀態（0.63.20，複驗 C）：給 Claude 的帶佇列 nonce，伺服器等它收過才記；不確定、進收件夾的照實標
+    extra = {"ack": {"kind": "claude", "id": s.get("id"), "nonce": _LAST_NONCE[0]}} if s.get("kind") not in ("codex", "agy") and _LAST_NONCE[0] else \
+        {"state": "unsure"} if r.startswith("codex queue did not answer") else {"state": "inbox"} if "inbox" in r and not r.startswith("Queued") else {}
+    chat_out({"id": f"codex-{sid}", "name": me}, {"id": s.get("id"), "name": s.get("agent") or s.get("name")}, text, extra)
+    return r
+
+
+_LAST_NONCE = [""]
+
+
+def _send_to(sid: str, me: str, s: dict, text: str) -> str:
     if s.get("kind") == "codex":
-        return deliver(str(s["id"]), text, me)
+        return deliver(str(s["id"]), text, me, hit=s)
     if s.get("kind") == "agy":
         box = BASE / "agy" / "inbox"
         box.mkdir(parents=True, exist_ok=True)
@@ -497,10 +835,47 @@ def tool_send(sid: str, a: dict) -> str:
             f.write(json.dumps({"from": me, "text": text, "at": now_ms()}, ensure_ascii=False) + "\n")
         return f"Put in {s.get('name')}'s inbox: delivered on its next action"
     reply = f"python \"{CLI}\" send {sid} \"<reply>\" --from <your ListAgents name>"  # 用 session id：名牌會改、會撞
-    save(COMMANDS / f"{s['id']}.json", {
+    _LAST_NONCE[0] = enqueue_command(str(s["id"]), {
         "nonce": uuid.uuid4().hex, "at": now_ms(), "from": f"{me} (Codex, not the user)",
         "text": f"{text}\n(Reply with {reply}; it reaches this Codex session right away)"})
     return f"Sent to {s.get('agent') or s.get('name')}: its plugin picks it up within a second; discarded if not picked up in 10 minutes. Its reply arrives as a new message in this conversation."
+
+
+def enqueue_command(cid: str, item: dict) -> str:
+    """commands/<id>.json 是佇列（0.63.17，複驗 D；跟 remote/server.ts enqueueCommand 同一套）：拿掉收過的、過期的，新的接在後面。
+    寫的人共用一把鎖（0.63.22，最後複驗第 1 項）：commands/<id>.lock 資料夾，搶到才寫，5 秒以上的當成留下來的清掉。
+    滿 20 則丟 ValueError（不靜默丟舊的）"""
+    COMMANDS.mkdir(parents=True, exist_ok=True)
+    lock = COMMANDS / f"{cid}.lock"
+    got = False
+    for _ in range(40):
+        try:
+            lock.mkdir()
+            got = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 5:
+                    shutil.rmtree(lock, ignore_errors=True)
+                    continue
+            except OSError:
+                pass
+            time.sleep(0.05)
+    if not got:
+        raise ValueError("The recipient's inbox is busy, try again shortly")
+    try:
+        f = COMMANDS / f"{cid}.json"
+        c, d = load(f), load(COMMANDS / f"{cid}.done.json")
+        done = set(x for x in (d.get("nonces") or []) if isinstance(x, str)) | {d.get("nonce")}
+        items = c.get("items") if isinstance(c.get("items"), list) else ([{k: c[k] for k in ("nonce", "text", "at", "from") if k in c}] if isinstance(c.get("nonce"), str) else [])
+        now = int(time.time() * 1000)
+        keep = [i for i in items if isinstance(i, dict) and i.get("nonce") not in done and now - (i.get("at") or 0) < 10 * 60 * 1000]
+        if len(keep) >= 20:
+            raise ValueError(f"The recipient still has {len(keep)} unread messages; wait for it to catch up before sending more")
+        save(f, {**item, "items": keep + [item]})
+        return item["nonce"]
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
 
 
 def mcp() -> None:
@@ -566,13 +941,31 @@ def hook(event: str) -> None:
             p = status_file(sid)
             s = load(p)
             now = now_ms()
+            owner0 = s.get("owner")
+            st = owner_state(s)
+            if st in ("other", "unknown"):  # 這段對話已經被接回某個 tmux、這個 hook 來自舊程序；或查不到：不蓋狀態、不標結束、保留 owner
+                return
+            if st == "gone":
+                s.pop("owner", None)  # 確認失效才清
             if event == "SessionEnd":
-                s.update({"left": True, "updatedAt": now})
-                save(p, s)
+                s.update({"left": True, "ended": True, "updatedAt": now})  # ended：Codex 自己說結束了（看守不會因為鎖還在就叫回來）
+                save_if(p, s, owner0)
                 return
             mode, tool = state(event, d)
             cwd = str(d.get("cwd") or "")
+            # 人事令先套（0.63.15，審查第 6 項）：同一個事件帶來的 cpFile，下面的壓縮提示、每小時提醒才看得到
+            order = read_order(f"codex-{sid}", str(s.get("orderNonce") or ""))
+            if order:
+                apply_fields(s, order[1], order[0])
+            tp = d.get("transcript_path")
+            if isinstance(tp, str) and tp.endswith(".jsonl"):
+                s["transcriptPath"] = tp  # 完整對話照這個讀（審查第 9 項：fork 出來的檔名是 …_<thread>.jsonl，掃資料夾找不到）
+            s["codexHome"] = os.environ.get("CODEX_HOME") or str(HOME / ".codex")  # 寫入鎖照它自己的 home 看
+            if event == "SessionStart" and d.get("source") == "compact":
+                # 壓縮完：提示重讀自己的檢查點（0.63.6）。SessionStart 的輸出會進上下文（審查第 6 項：官方確認），只提示這一次
+                out = compact_note(s)
             if event == "UserPromptSubmit":
+                s.pop("cpAfterCompact", None)  # 舊版留下的
                 out = "\n\n".join(x for x in (takeover_hint(str(d.get("prompt") or "")), take_mail(sid), cp_note(s)) if x)  # 純文字 stdout 會當成這一輪的額外上下文；prompt 只比對、不存
             if event == "PostToolUse" and s.get("cpFile") and "office_" not in tool:  # 接手、登記、報到不算做事
                 s["cpWorked"] = True
@@ -589,13 +982,16 @@ def hook(event: str) -> None:
                 "name": s.get("name") or plate(cwd, sid),
                 "title": s.get("title") or (Path(cwd).name[:16] if cwd else "Codex"),
                 "titleAuto": s.get("titleAuto", True),
-                "mode": mode, "tool": tool, "updatedAt": now, "left": False,
+                "mode": mode, "tool": tool, "updatedAt": now, "left": False, "ended": False,
                 **({"cwd": cwd} if cwd else {}),  # office_takeover 沒給 cwd 時用
             })
             if s.get("modeWas") != mode:
                 s["since"] = now
             s["modeWas"] = mode
-            save(p, s)
+            if not save_if(p, s, owner0):  # 讀完到現在 hr.ts 換了 owner：這一輪的狀態作廢
+                return
+            if order:
+                mark_order(f"codex-{sid}", *order)  # 存好了才記收過
             ensure_watch()
     except Exception:
         pass
@@ -613,24 +1009,64 @@ def watch() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     pidf = DATA / "watch.pid"
     quiet_since = time.time()
-    while True:
-        live = 0
+    me = Path(__file__).resolve()
+
+    def stamp():
         try:
-            pidf.write_text(str(os.getpid()))
+            return me.stat().st_mtime
+        except OSError:
+            return None
+    born = stamp()
+    while True:
+        # 外掛更新後（sync_cli 換掉了這支腳本）自己結束，下一個 hook 的 ensure_watch 會開新版的看守（0.63.15，審查第 10 項）
+        if stamp() != born:
+            pidf.unlink(missing_ok=True)
+            ensure_watch()  # 自己開新版的接班，不用等下一個 hook（複驗第 10 項：閒著的 Codex 會斷心跳）
+            return
+        live = 0
+        shared_now: dict = {}  # 這一輪：pid → 是不是共用的 App 程序（同一個 App 程序只查一次）
+        try:
+            pidf.write_text(f"{os.getpid()} {WATCH_VER}")
+            # 同一個程序最近一次 hook 的時間（複驗第 9 項）：/new、fork 後同一個 Codex 程序換了 thread，舊的那筆放了鎖、
+            # 程序卻還活著，原本會一直算在線
+            newest: dict = {}
+            for q in SESSIONS.glob("codex-*.json"):
+                t = load(q)
+                if t and not t.get("left") and t.get("pid"):
+                    newest[int(t["pid"])] = max(newest.get(int(t["pid"]), 0), int(t.get("lastHook") or 0))
             for p in SESSIONS.glob("codex-*.json"):
                 s = load(p)
-                if not s or s.get("left"):
+                if not s:
+                    continue
+                if s.get("left"):
+                    # 以鎖為準（2026-11-23）：被標離開、但對話的寫入鎖還握著（Desktop 開著、只是很久沒 hook 事件）→ 叫回來；
+                    # Codex 自己送 SessionEnd 結束的（ended）不叫
+                    if not s.get("ended") and writer_locked(str(s.get("id", ""))[len("codex-"):], str(s.get("codexHome") or "")) is True:
+                        s.update(left=False, updatedAt=now_ms(), lastHook=now_ms())
+                        save_if(p, s, s.get("owner"))
+                        live += 1
                     continue
                 was = s.get("updatedAt")
                 pid = int(s.get("pid") or 0)
-                held = writer_locked(str(s.get("id", ""))[len("codex-"):])
+                held = writer_locked(str(s.get("id", ""))[len("codex-"):], str(s.get("codexHome") or ""))
                 quiet = now_ms() - s.get("lastHook", s.get("updatedAt", 0))
-                if held is False and quiet > STALE_MS and (s.get("shared") or not (pid and alive(pid))):
+                # 每輪重新判斷是不是共用的 App 程序（舊版寫的狀態檔 shared 可能是錯的）；共用的：只要鎖放了就當關了（2026-11-23）
+                if pid and pid not in shared_now:
+                    shared_now[pid] = shared_host(pid)
+                shared = shared_now.get(pid, bool(s.get("shared")))
+                if shared != bool(s.get("shared")):
+                    s["shared"] = shared
+                replaced = pid and int(s.get("lastHook") or 0) < newest.get(pid, 0)  # 同一個程序已經換到別的 thread
+                if held is False and quiet > STALE_MS and (shared or replaced or not (pid and alive(pid))):
                     s["left"] = True  # 對話關了：Codex 放掉了它的寫入鎖（剛開的對話給 20 秒拿鎖）
-                elif held is None and s.get("shared") and quiet > SHARED_IDLE_MS:
+                elif held is None and shared and quiet > SHARED_IDLE_MS:
                     s["left"] = True  # 看不到鎖、又是共用的常駐程式：太久沒事件就當離開
                 elif held or (pid and alive(pid)):
                     live += 1
+                    order = read_order(str(s.get("id", "")), str(s.get("orderNonce") or ""))  # 人事令（0.63.6）：閒著沒 hook 事件也在幾秒內生效
+                    if order:  # 馬上單獨存（重讀最新的檔再改），不受下面「hook 寫過就不蓋」影響；存好了才記收過
+                        apply_order_now(p, s, order)
+                        continue  # 這一輪不再用舊的 s 存回（複驗第 3 項：會蓋掉 hook 剛寫的欄位）；下一輪重算
                     s["updatedAt"] = now_ms()
                     if s.get("mode") == "done" and now_ms() - s.get("since", 0) > DONE_MS:
                         s.update(mode="idle", modeWas="idle", since=now_ms())
@@ -638,8 +1074,7 @@ def watch() -> None:
                     s["left"] = True  # 程式結束；找不到程式的，hook 停了 20 秒也當離開
                 else:
                     continue
-                if load(p).get("updatedAt") == was:  # 讀完到現在 hook 寫過就不蓋它
-                    save(p, s)
+                save_if(p, s, s.get("owner"), was)  # 讀完到現在 hook 或 hr.ts 寫過（updatedAt、owner 變了）就不蓋它；鎖裡比對再寫
         except Exception:
             pass  # 看守不能因一次讀寫失敗就停：停了，停在提示字元的 Codex 20 秒後就離線
         if live:
@@ -653,11 +1088,14 @@ def watch() -> None:
 # ---------------------------------------------------------------- 安裝
 
 def install() -> None:
-    here = Path(__file__).resolve().parent
-    print("Run these yourself (they change your Codex config), then open Codex and trust the hooks with /hooks:")
-    print(f'  codex plugin marketplace add "{here}"')
+    stub = "~/.claude/pixel-office/release/codex-stub"  # 固定寫上線資料夾（trust 審查 ⑤：不從自己的位置推，同步副本、開發資料夾都印同一行）
+    print("Run these yourself (they change your Codex config), then open Codex and pick Trust all once:")
+    print("  codex plugin marketplace remove pixel-office-codex")
+    print(f"  codex plugin marketplace add {stub}")
+    print("  codex plugin remove pixel-office@pixel-office-codex")
     print("  codex plugin add pixel-office@pixel-office-codex")
-    print("Untrusted hooks are skipped silently. After changing this folder, run the two commands again (Codex runs a cached copy).")
+    print("The Codex plugin (codex-stub) never changes: it runs ~/.claude/pixel-office/release/codex/codex_office.py,")
+    print("so later pixel-office upgrades need no reinstall and no new Trust all.")
 
 
 if __name__ == "__main__":
@@ -677,8 +1115,16 @@ if __name__ == "__main__":
         if len(args) < 2:
             sys.exit("Usage: send <to> <message> [--from <sender>]")
         try:
-            print(deliver(args[0], " ".join(args[1:]), frm))
+            target = find_codex(args[0])
+            out = deliver(args[0], " ".join(args[1:]), frm, hit=target)
+            print(out)
+            # Claude 寄給 Codex 的也記進聊天室（--from 是 ListAgents 名稱，去掉「 [ref]」；伺服器照名稱找人）
+            extra = {"state": "unsure"} if out.startswith("codex queue did not answer") else {"state": "inbox"} if "inbox" in out and not out.startswith("Queued") else {}
+            chat_out({"name": re.sub(r"\s*\[[0-9a-f]+\]$", "", frm)}, {"id": target.get("id"), "name": target.get("name")}, " ".join(args[1:]), extra)
         except ValueError as e:
             sys.exit(str(e))
+    elif cmd == "locked":  # 給手機版伺服器（交給 App／接回後台，0.63.28）：那段對話的寫入鎖有沒有人握著 → true／false／none
+        r = writer_locked(sys.argv[2] if len(sys.argv) > 2 else "", sys.argv[3] if len(sys.argv) > 3 else "")
+        print({True: "true", False: "false"}.get(r, "none"))
     else:
         {"install": install, "watch": watch, "mcp": mcp}.get(cmd, lambda: print(__doc__))()

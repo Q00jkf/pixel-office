@@ -67,7 +67,7 @@ claude plugin update pixel-office@pixel-office
 ```
 
 重開 Claude Code 才生效；開著的舊視窗照舊用舊版。`/office version` 看這個視窗是哪一版。升版後第一則指令，外掛會提醒一次並指到 [CHANGELOG](CHANGELOG.md) 該版的「升級要做的」。
-- **Codex 那一半**：`codex plugin add` 不會更新已裝的，要先 `codex plugin remove pixel-office@pixel-office-codex` 再 `add`；開 Codex 跳「hooks are new or changed」選 **2. Trust all and continue**。沒信任的 hook 不跑也不報錯，Codex 會從辦公室消失
+- **Codex 那一半**：Codex 外掛是 `codex-stub/`，一支永遠不改的轉接程式，跑的是 `~/.claude/pixel-office/release/codex/codex_office.py`。之後升版只要更新上線資料夾，不用重裝、不用再按 Trust all。第一次照 CHANGELOG「codex-trust」那段裝好，選一次 **2. Trust all and continue**。沒信任的 hook 不跑也不報錯，Codex 會從辦公室消失
 - **Antigravity 那一半**：關掉所有 agy 視窗，再跑 `python <外掛>/agy/agy_office.py install`
 
 ## 常用

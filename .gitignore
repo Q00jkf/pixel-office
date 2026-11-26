@@ -2,3 +2,11 @@ __pycache__/
 tsconfig.json
 team-window/team*.json
 !team-window/team.example.json
+.hire-*
+shots/
+.old/
+art-inbox/
+# 本機金鑰與存取紀錄（0.63.56）：本來就在 ~/.claude/pixel-office/，不在 repo；保險起見也擋
+local-key
+access-log.jsonl
+.DS_Store

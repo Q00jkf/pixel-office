@@ -5,7 +5,7 @@
 印出（不寫任何檔）：
 - 角色卡的定義（拿掉註解與 frontmatter）
 - 卡的啟動位置（卡上沒寫：別處的卡用它所在專案根目錄）不是目前資料夾 → 印 MOVE 與開新視窗的 open_role.py 指令、exit 3，其他都不印
-- 你是誰：~/.claude/sessions 裡這個 session 的名稱；跟角色名（卡上有 office_name 用它）不同 → 提醒請使用者 /rename（session 名稱＝角色名，換人接手下屬的 team 才接得上；jacky 2026-11-08）
+- 你是誰：Claude Code 的 sessions 資料夾（CLAUDE_CONFIG_DIR/sessions，沒設才 ~/.claude/sessions）裡這個 session 的名稱；跟角色名（卡上有 office_name 用它）不同 → 提醒請使用者 /rename（session 名稱＝角色名，換人接手下屬的 team 才接得上；使用者 2026-11-08）
 - 撞角色：辦公室裡別的在線 session 職稱＝這個角色，或這份對話同時開在兩個視窗 → 印 STOP，停下來問使用者
 - 登記辦公室那一行（office_profile 的參數；卡的 office_name／office_title 優先）
 - 最後一筆檢查點
@@ -70,9 +70,15 @@ def front(text):
     return meta, text[m.end():]
 
 
+def cli_sessions_dir():
+    """Claude Code 自己的 sessions 資料夾：這個對話的 CLAUDE_CONFIG_DIR 底下，沒設才是 ~/.claude（2026-11-23，跟外掛 0.62.6 cliSessionsDir 同一個修法）"""
+    cfg = os.environ.get('CLAUDE_CONFIG_DIR', '').strip()
+    return os.path.join(os.path.expanduser(cfg) if cfg else os.path.join(os.path.expanduser('~'), '.claude'), 'sessions')
+
+
 def my_session():
     sid = os.environ.get('CLAUDE_CODE_SESSION_ID', '')
-    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+    for p in glob.glob(os.path.join(cli_sessions_dir(), '*.json')):
         try:
             with open(p, encoding='utf-8') as f:
                 j = json.load(f)

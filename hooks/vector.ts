@@ -7,7 +7,7 @@ import type { Coworker, ErrandKind, OfficeMode, Pet } from '../types'
 import {
   GEOM, OFFICE_DOOR_W, OFFICE_DOOR_X, PALETTE as C, TEAM_RUGS,
   assignSeats, bossSeating, catMoveFrame, catPose, catRange, counterSpot, counterX, hash, layout, mailboxX, meetTable,
-  pathLength, planePos, queueSpot, raidPath, raidPose, teamZones, walkerPos, zoneUnits,
+  pathLength, planePos, queueSpot, raidPath, raidPose, shownName, teamZones, walkerPos, zoneUnits,
   type Placement, type SceneOptions, type Seat, type Step, type Walker,
 } from './scene'
 import { CELL, PEOPLE, SHEET_H, SHEET_PNG, SHEET_W, SHIRTS, SPRITES, type SpriteId } from './sheet'
@@ -28,7 +28,7 @@ export type Shape =
 export type Furniture = 'printer' | 'cabinet' | 'mailbox' | 'calendar' | 'vending' | 'clock' | 'meeting'
 export type Rect = { x: number; y: number; w: number; h: number }
 /** room＝這件東西所在的房間（選單不能跨出去，例如會議室的選單不壓主管室） */
-export type Hit = Rect & { what: Furniture | 'pet' | 'corgi' | 'window'; sitting?: boolean; room?: Rect }
+export type Hit = Rect & { what: Furniture | 'pet' | 'corgi' | 'window' | 'table'; sitting?: boolean; room?: Rect; table?: number }
 
 /**
  * shapes → 夜間暗幕 → glow（夜裡發光的）→ labels（名牌、TEAM 牌：永遠最上層，什麼都蓋不到它）；
@@ -407,7 +407,7 @@ function ctxBar(p: Pen, cx: number, baseline: number, who: Coworker) {
 
 function nameTag(p: Pen, x: number, y: number, who: Coworker, maxW: number, bg: Paint, align: 'start' | 'middle' = 'middle', barAt = y) {
   const badge = who.kind ? AGY_BADGE + 0.3 : 0 // 不是 Claude：agy 掛 G、Codex 掛 X
-  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${who.name}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
+  const t = fitLabel(`${who.role === 'manager' ? '★' : ''}${shownName(who)}`, maxW - badge, NAME_SIZE, plateNo.get(who.id))
   const tx = align === 'middle' ? x - badge / 2 : x
   p.label(tx, y, t.text, t.size, who.isMe ? C.me : who.role === 'manager' ? C.goldDark : C.text, { anchor: align, bold: who.isMe, bg })
   ctxBar(p, align === 'middle' ? tx : tx + textWidth(t.text, t.size) / 2, barAt, who)
@@ -449,7 +449,7 @@ function bossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame: num
   p.glowing(() => p.circle(x + 1.5, y + 1.5, 0.6, C.gold))
   p.spriteAt('paper', x + 14.2, y + 0.6, 0.3)
   if (who) {
-    const t = fitLabel(`★${who.name}`, 13, NAME_SIZE, plateNo.get(who.id))
+    const t = fitLabel(`★${shownName(who)}`, 13, NAME_SIZE, plateNo.get(who.id))
     p.label(x + 7, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
     ctxBar(p, x + 7, y + 4.6, who)
   }
@@ -462,7 +462,7 @@ function smallBossDesk(p: Pen, x: number, y: number, who: Coworker | null, frame
   p.sprite('table', x, y, DESK_W, 6)
   screen(p, x + 1, y + 1.3, 6, who ? who.mode : null, frame)
   if (who) {
-    const t = fitLabel(`★${who.name}`, DESK_W + 0.6, NAME_SIZE, plateNo.get(who.id))
+    const t = fitLabel(`★${shownName(who)}`, DESK_W + 0.6, NAME_SIZE, plateNo.get(who.id))
     p.label(x + DESK_W / 2, y + 4.6, t.text, t.size, C.gold, { anchor: 'middle', bold: true })
     ctxBar(p, x + DESK_W / 2, y + 4.6, who)
   }
@@ -548,7 +548,7 @@ export function drawVector(crew: Coworker[], frame: number, width: number, rows:
     p.rect(x, top, rw, bottom - top, 'none', 0, look.edge, 0.3)
     const arm = 3
     for (const [cx, cy, dx, dy] of [[x, top, 1, 1], [x + rw, top, -1, 1], [x, bottom, 1, -1], [x + rw, bottom, -1, -1]]) p.path(`M${n(cx + dx * arm)} ${n(cy)}H${n(cx)}V${n(cy + dy * arm)}`, undefined, look.edge, 0.7)
-    const t = fitText(`TEAM ${lead.name}`, rw - 5, 1.7)
+    const t = fitText(`TEAM ${shownName(lead)}`, rw - 5, 1.7)
     const tw = textWidth(t, 1.7) + 1.6
     p.labelRect(x + 2, top - 1.2, tw, 2.4, TEAM_TAG_BG, 0.3)
     p.labels.push({ k: 'rect', x: x + 2, y: top - 1.2, w: tw, h: 2.4, r: 0.3, fill: 'none', stroke: look.edge, sw: 0.3 })

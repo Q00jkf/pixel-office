@@ -1146,8 +1146,8 @@ function nightify(p: Px, frame: number) {
 
 export type Scene = { px: Uint32Array; labels: Label[]; width: number; rows: number }
 
-/** 紙飛機：從寄件者座位飛到收件者座位 */
-export type Plane = { from: Seat; to: Seat; start: number }
+/** 紙飛機：從寄件者座位飛到收件者座位（fromId、toId：v2 辦公室用來找兩人在 v2 版面上的座位） */
+export type Plane = { from: Seat; to: Seat; start: number; fromId?: string; toId?: string }
 /** 收件者頭上的信封：在 [start, end) 期間顯示 */
 export type Notice = { id: string; start: number; end: number }
 
@@ -1350,6 +1350,12 @@ export function encode(scene: Scene): string {
 }
 
 /** 名牌只放得下 ASCII（中文寬 2 格，Raster 不收） */
+/** 美術 A #14（審查 ④）：名字是指令（以 ! 或 / 開頭，例如拿第一句「!cat ~/.cl」當了名字）就不當名牌用 */
+export const isCommandName = (name: string | undefined) => /^[!\/]/.test((name ?? '').trim())
+/** 短代號 s-<id 前 4 碼>（Codex／agy 先去掉 codex-／agy- 前綴）：沒有好名字時的名牌，跟 plateName 的退路一樣 */
+export const shortCode = (id: string) => `s-${id.replace(/^(codex|agy)-/, '').slice(0, 4)}`
+/** 名牌上顯示的名字：伺服器名冊、Desktop 面板（v2 與舊畫面）都用這一條 */
+export const shownName = (c: { name: string; id: string }) => isCommandName(c.name) ? shortCode(c.id) : c.name
 export function plateName(cwd: string, id: string): string {
   const base = cwd.split(/[\\/]/).filter(Boolean).pop() ?? ''
   const ascii = base.replace(/[^\x20-\x7e]/g, '')

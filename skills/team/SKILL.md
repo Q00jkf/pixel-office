@@ -59,3 +59,22 @@ description: "Multi-session collaboration: calling or opening a role's session, 
 - 對方不在線：外掛把信存進辦公室信箱（回覆會寫 saved it to its mailbox），對方以同名或同職稱上線時由對方的外掛送進它的對話，24 小時內有效——不用重送。回覆沒說存了（同名多人、被拒）才寫 `peer-reply-<自己的名稱>.md` 到專案根目錄，請使用者轉交。
 - 開新 session 由使用者決定（多花 token 是他的成本）；未經允許不開 subagent。
 - `office_roster` 一次給每個人的名牌、職稱、主管／員工、ListAgents 名稱、正在做什麼——**先看它，不要逐張讀角色卡**。名單是即時畫面，權責以 `collab.md` 為準。
+
+## 本機呼叫辦公室伺服器（手機版，0.63.56 起要金鑰）
+
+在電腦上用 curl 打辦公室伺服器（`http://127.0.0.1:8767`，第二間辦公室看它的 `remote*.json` 的 port）時，要帶本機金鑰：
+
+```
+po() { curl -s -H @<(printf 'X-PO-Key: %s' "$(cat ~/.claude/pixel-office/local-key)") "$@"; }
+po http://127.0.0.1:8767/state.json
+po -X POST -H 'content-type: application/json' \
+  -d '{"id":"<session id>","text":"<要說的話>"}' http://127.0.0.1:8767/command
+```
+
+（`-H @<(…)` 讓金鑰不出現在指令列：`ps` 和辦公室的存取紀錄只看得到 `/dev/fd/…`。不要寫成 `-H "X-PO-Key: $(cat …)"`。）
+
+- 金鑰由伺服器第一次啟動時產生（`~/.claude/pixel-office/local-key`，權限 600）。不要貼進對話、檔案、commit 或 issue；不要改它的權限（太寬伺服器就不用它，本機呼叫全部回 401）。
+- 沒帶金鑰回 401「請用 Cloudflare 網址開…」；Mac 上直接用瀏覽器開 127.0.0.1 也一樣，請改用 Cloudflare 網址。
+- `/approve`（按允許）、`/stuck`（替新員工按確認畫面）、`/perm`（換模式）只能在經 Cloudflare 登入的手機頁按，帶金鑰也回 403：這三個要使用者本人。
+- `/hire`、`/helper`、`/perm`、`/stuck` 每次都記一筆，用金鑰的本機呼叫也每次都記（`~/.claude/pixel-office/access-log.jsonl`：時間、端點、來源程序）。
+- 測試埠（8781／8782）用 `PO_DEV=1 PO_PORT=8782 bun remote/server.ts` 開，可以不帶金鑰；其他埠設了 `PO_DEV` 也不理。

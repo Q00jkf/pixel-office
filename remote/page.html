@@ -1,30 +1,50 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#29366f">
+<meta name="theme-color" content="#3b2412">
 <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
-<title>Pixel Office</title>
+<title>像素辦公室</title>
 <script src="/vendor/marked.umd.js"></script>
 <script src="/vendor/purify.min.js"></script>
+<link rel="stylesheet" href="/v2/scene.css">
 <style>
+  /* v2（2026-11-22）：辦公室畫在 v2/scene.js 的 canvas 上（上方協作區、下方辦公區），點人直接開完整對話、點名牌開狀態卡。
+     人事室（招聘、等你回覆、薪水單、排班、協作桌）、完整對話、換智力／打斷／解雇都在這一頁 */
   :root { --bg: #e4eef6; --ink: #1a1c2c; --dim: #566c86; --bar: #29366f; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: system-ui, "Noto Sans TC", sans-serif; }
   header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: var(--bar); color: #f4f4f4; font-size: 14px; }
   #stale { color: #ffcd75; display: none; }
   header { position: sticky; top: 0; z-index: 1; }
+  #count { cursor: pointer; }
+  #hrbtn { border: 1px solid #ffcd75; border-radius: 6px; background: none; color: #ffcd75; font: inherit; padding: 2px 10px; cursor: pointer; }
   main { min-height: calc(100% - 37px); }
-  img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
   #card { position: fixed; left: 0; right: 0; bottom: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: #f4f4f4; border-top: 3px solid var(--bar); box-shadow: 0 -4px 16px #0003; font-size: 15px; line-height: 1.6; display: none; }
   #card h2 { margin: 0 0 4px; font-size: 18px; }
   #card .k { color: var(--dim); display: inline-block; min-width: 4.5em; }
   #card .err { color: #b13e53; }
   #card #close { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 22px; color: var(--dim); }
   #card { max-height: 70%; overflow-y: auto; }
+  #hr { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccd; font-size: 14px; }
+  #hr:empty { display: none; }
+  .chip { border: 1px solid var(--bar); border-radius: 14px; background: #fff; color: var(--bar); font: inherit; font-size: 13px; padding: 3px 10px; margin: 3px 4px 0 0; }
+  .chip.on { background: var(--bar); color: #fff; }
+  .chip.red { border-color: #b13e53; color: #b13e53; }
+  .chip.redon { border-color: #b13e53; background: #b13e53; color: #fff; }
+  .chip:disabled, .chip[aria-disabled] { opacity: .4; cursor: not-allowed; }
+  select.chip { max-width: 12em; }
+  .hsel { display: flex; align-items: center; gap: 8px; width: 100%; margin: 4px 0 0; padding: 6px 10px; border: 1px solid var(--bar); border-radius: 8px; background: #fff; font: inherit; font-size: 13px; color: inherit; text-align: left; }
+  .hsel .v { flex: 1; } .hsel[aria-disabled] { opacity: .45; cursor: not-allowed; }
+  #c2back { border: 1px solid var(--bar); border-radius: 8px; background: #fff; font: inherit; padding: 2px 10px; }
+  #card .cstat { font-weight: 600; } #card .cwarn { color: #c9662a; } #card .cwarn.err { color: #b13e53; }
+  #reply .md.clamp { max-height: 4.8em; overflow: hidden; } #reply .more { color: var(--dim); font-size: 12px; }
+  #hr .g2 { display: flex; gap: 8px; } #hr .g2 > * { flex: 1; }
+  #hr .hoask { margin: 6px 0; color: #c9662a; } #hr .hoask span { display: block; font-size: 12px; }
+  .badge-cfg { font-style: normal; font-size: 12px; color: var(--bar); border: 1px solid var(--bar); border-radius: 10px; padding: 0 8px; white-space: nowrap; }
   #say { display: flex; gap: 8px; margin-top: 10px; }
   #say textarea { flex: 1; min-height: 2.6em; max-height: 8em; font: inherit; padding: 6px 8px; border: 1px solid var(--dim); border-radius: 6px; resize: vertical; }
   #say button { border: 0; border-radius: 6px; padding: 0 16px; background: var(--bar); color: #fff; font: inherit; }
@@ -32,158 +52,1073 @@
   #sent { color: var(--dim); font-size: 13px; margin-top: 4px; }
   #reply { margin-top: 10px; border-top: 1px solid #ccd; padding-top: 8px; }
   #reply .head { color: var(--dim); font-size: 13px; }
-  #reply .md { margin: 4px 0 0; max-height: 40vh; overflow-y: auto; word-break: break-word; font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif; background: #fff; border-radius: 6px; padding: 8px; }
-  #reply .md > :first-child { margin-top: 0; }
-  #reply .md > :last-child { margin-bottom: 0; }
-  #reply .md p, #reply .md ul, #reply .md ol, #reply .md pre, #reply .md table, #reply .md blockquote { margin: .4em 0; }
-  #reply .md h1, #reply .md h2, #reply .md h3, #reply .md h4 { font-size: 15px; margin: .6em 0 .3em; }
-  #reply .md ul, #reply .md ol { padding-left: 1.4em; }
-  #reply .md blockquote { padding-left: 8px; border-left: 3px solid #ccd; color: var(--dim); }
-  #reply .md code { font: 13px Consolas, "Cascadia Mono", monospace; background: #eef2f6; padding: 0 3px; border-radius: 3px; }
-  #reply .md pre { background: var(--ink); color: #f4f4f4; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre; word-break: normal; }
-  #reply .md pre code { background: none; color: inherit; padding: 0; }
-  #reply .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; word-break: normal; }
-  #reply .md th, #reply .md td { border: 1px solid #ccd; padding: 2px 6px; text-align: left; vertical-align: top; min-width: 3em; }
-  #reply .md th { background: #eef2f6; }
-  #reply pre.raw { white-space: pre-wrap; }
+  #reply .md, .mdbox { margin: 4px 0 0; max-height: 40vh; overflow-y: auto; word-break: break-word; font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif; background: #fff; border-radius: 6px; padding: 8px; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: .4em 0; }
+  .md h1, .md h2, .md h3, .md h4 { font-size: 15px; margin: .6em 0 .3em; }
+  .md ul, .md ol { padding-left: 1.4em; }
+  .md blockquote { padding-left: 8px; border-left: 3px solid #ccd; color: var(--dim); }
+  .md code { font: 13px Consolas, "Cascadia Mono", Menlo, monospace; background: #eef2f6; padding: 0 3px; border-radius: 3px; }
+  .md pre { background: var(--ink); color: #f4f4f4; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre; word-break: normal; }
+  .md pre code { background: none; color: inherit; padding: 0; }
+  .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; word-break: normal; }
+  .md th, .md td { border: 1px solid #ccd; padding: 2px 6px; text-align: left; vertical-align: top; min-width: 3em; }
+  .md th { background: #eef2f6; }
+  pre.raw { white-space: pre-wrap; }
+  #menu { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; max-height: 75%; overflow-y: auto; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: #f4f4f4; border-top: 3px solid #c9a227; box-shadow: 0 -4px 16px #0003; font-size: 15px; line-height: 1.5; display: none; }
+  #menu h2 { margin: 0 0 8px; font-size: 18px; }
+  #menu #mclose { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 22px; color: var(--dim); }
+  #menu label { color: var(--dim); font-size: 13px; display: block; margin-bottom: 4px; }
+  #menu select:not(.chip), #menu input, #menu textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--dim); border-radius: 6px; background: #fff; margin-bottom: 8px; }
+  #menu .mbtn { display: block; width: 100%; margin: 6px 0; padding: 10px 12px; border: 1px solid #c9a227; border-radius: 8px; background: #fff; color: var(--ink); font: inherit; text-align: left; }
+  #menu .mbtn.go { text-align: center; background: var(--bar); color: #fff; }
+  #menu .mbtn small { display: block; color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #menu .mbtn:disabled { opacity: .5; }
+  #menu .note { color: var(--dim); font-size: 13px; margin-bottom: 6px; }
+  #menu .shift { border: 1px solid #ccd; border-radius: 8px; padding: 8px; margin: 6px 0; background: #fff; }
+  #menu .shift.off { opacity: .55; }
+  #chat { position: fixed; inset: 0; z-index: 5; display: none; flex-direction: column; background: var(--bg); }
+  #chat .chhead { display: flex; align-items: center; gap: 8px; padding: calc(6px + env(safe-area-inset-top)) 12px 6px; background: var(--bar); color: #f4f4f4; }
+  #chat #chback { border: 0; background: none; color: #fff; font-size: 30px; line-height: 1; padding: 0 8px 4px 0; }
+  #chat .chwho { min-width: 0; }
+  #chat .chwho b { font-size: 16px; }
+  #chat #chstat { font-size: 12px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chlog { flex: 1; overflow-y: auto; padding: 10px 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #chlog .ctop, #chlog .cn { text-align: center; color: var(--dim); font-size: 12px; margin: 8px 0; }
+  #chlog .cb { margin: 8px 0; max-width: 88%; word-break: break-word; font: 15px/1.55 system-ui, "Noto Sans TC", sans-serif; }
+  #chlog .me { margin-left: auto; }
+  #chlog .me .t { background: var(--bar); color: #fff; border-radius: 14px 14px 4px 14px; padding: 8px 12px; white-space: pre-wrap; }
+  #chlog .me .im { margin-top: 4px; font-size: 13px; opacity: .85; }
+  #chlog .me .tm { text-align: right; color: var(--dim); font-size: 11px; margin-top: 2px; }
+  #chlog .ai { max-width: 100%; }
+  #chlog .ai .md { background: #fff; border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 15px; line-height: 1.55; }
+  #chlog .ct { margin: 2px 0; font-size: 12.5px; color: var(--dim); }
+  #chlog .ct summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; cursor: pointer; }
+  #chlog .ct summary b { font-weight: 600; color: #3b4a66; }
+  #chlog .ct.run summary::after { content: ' ⏳'; }
+  #chlog .ct.bad summary { color: #b13e53; } #chlog .ct.bad summary::after { content: ' ✗'; }
+  #chlog .ct .lab { margin: 4px 0 2px; font-size: 11px; }
+  #chlog .ct pre { margin: 0; max-height: 40vh; overflow: auto; background: #fff; border: 1px solid #ccd; border-radius: 6px; padding: 6px 8px; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
+  #chsay { display: flex; gap: 6px; padding: 8px 12px 4px; background: #f4f4f4; border-top: 1px solid #ccd; }
+  #chsay textarea { flex: 1; min-height: 2.4em; max-height: 160px; font: 16px/1.4 system-ui, "Noto Sans TC", sans-serif; padding: 6px 10px; border: 1px solid var(--dim); border-radius: 16px; resize: none; }
+  #chsay button { border: 0; border-radius: 16px; padding: 0 14px; background: var(--bar); color: #fff; font: inherit; font-size: 15px; }
+  #chsay #chphoto { background: #fff; border: 1px solid var(--dim); color: inherit; padding: 0 10px; }
+  #chsent { min-height: 1.2em; padding: 0 12px calc(6px + env(safe-area-inset-bottom)); background: #f4f4f4; color: var(--dim); font-size: 12px; }
+  #ptoast { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 8; max-width: calc(100% - 32px); background: var(--bar); color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 14px; display: none; }
+  /* 首次載入畫面（0.63.46）：一張角色主視覺，素材載入期間蓋在畫面上，場景第一次畫好就淡出。不擋點擊（pointer-events: none） */
+  #kvsplash { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; box-sizing: border-box; background: #2a1a0e; color: #fff6e6; pointer-events: none; transition: opacity .45s ease; }
+  #kvsplash.out { opacity: 0; }
+  #kvsplash .kvf { position: relative; width: 100%; max-width: 560px; aspect-ratio: 16 / 9; }
+  #kvsplash .kvf img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .6s ease; }
+  #kvsplash .kvf img.on { opacity: 1; }
+  #kvsplash .kvt { font: 600 20px/1.3 system-ui, "Noto Sans TC", sans-serif; text-align: center; }
+  #kvsplash .kvt small { display: block; margin-top: 4px; font-weight: 400; font-size: 13px; opacity: .75; }
+  @media (prefers-reduced-motion: reduce) { #kvsplash, #kvsplash .kvf img { transition: none; } }
 </style>
 </head>
 <body>
-<header><span id="count">Pixel Office</span><span id="stale">Disconnected, frozen at <b id="at"></b></span></header>
-<main><img id="scene" alt="Pixel Office"></main>
-<div id="card"><button id="close" aria-label="Close">×</button><div id="info"></div>
-  <div id="reply"></div>
-  <form id="say"><textarea id="text" placeholder="Send a command (same as typing in its window)" enterkeyhint="send"></textarea><button type="button" id="photo" aria-label="Send a photo">📷</button><button id="send">Send</button></form>
-  <input type="file" id="pick" accept="image/*" hidden>
-  <div id="sent"></div></div>
+<div id="kvsplash"><div class="kvf"><img alt=""></div><div class="kvt" role="status" aria-live="polite">像素辦公室<small>載入中…</small></div></div>
 <script>
-  const img = document.getElementById('scene')
-  const main = document.querySelector('main')
-  const W = 64 // 手機直立用 64 單位寬：比 Desktop 窄，名牌才不會小到看不清
-  let busy = false
-  let lastOk
-  let state
-  let picked // 卡片開著的人（session id），每秒跟著更新
-  async function tick() {
+// 首次載入畫面（0.63.46；審查 kv 修正）：每次開頁隨機一位角色的主視覺小圖（kv_splash_<角色>_sm.webp，約 60 KB）。
+// 只載這一張，低優先、開頁就載：場景前段（scene.js、manifest、state）多是等來回、頻寬空著，小圖用那段空檔。
+// 實測（冷快取、80 ms、220 KB/s、390 寬）：場景就緒比擋掉這張慢約 0.25 秒；改成等首批場景圖請求發出後才載反而慢 0.38 秒（跟桌子大圖搶）。
+// 其他三張不載（場景好了畫面就收掉，看不到）。
+// 這張載不到就換下一位角色試，都不行只剩字。場景第一次畫好（po:scene-ready）淡出移除；最多 20 秒也收掉。不擋點擊。
+;(() => {
+  const box = document.getElementById('kvsplash'), im = box.querySelector('img')
+  const SRC = { claude: '/v2/assets/kv_splash_claude_sm.webp', chatgpt: '/v2/assets/kv_splash_chatgpt_sm.webp', gemini: '/v2/assets/kv_splash_gemini_sm.webp', deepseek: '/v2/assets/kv_splash_deepseek_sm.webp' }
+  const order = Object.keys(SRC), k = Math.floor(Math.random() * order.length), tries = [...order.slice(k), ...order.slice(0, k)]
+  let fails = 0, cap = 0
+  const tryNext = () => { if (fails < tries.length) { im.fetchPriority = 'low'; im.src = SRC[tries[fails]] } }
+  im.onload = () => im.classList.add('on')
+  im.onerror = () => { fails++; tryNext() }
+  const done = () => {
+    clearTimeout(cap); removeEventListener('po:scene-ready', done)
+    im.onload = im.onerror = null; if (!im.complete) im.removeAttribute('src') // 還沒到的圖不再等
+    box.classList.add('out'); setTimeout(() => box.remove(), 500)
+  }
+  tryNext()
+  addEventListener('po:scene-ready', done, { once: true })
+  cap = setTimeout(done, 20000)
+})()
+</script>
+<header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span><button id="hrbtn" type="button">☰ 人事室</button></header>
+<main></main>
+<div id="card"><div id="c1"><div class="tbar"><img id="cchibi" class="kvchibi" alt="" hidden><h2 id="cname"></h2><button id="close" class="tclose" aria-label="關閉"></button></div><div id="info"></div>
+  <div id="reply"></div>
+  <form id="say"><textarea id="text" placeholder="輸入訊息…" enterkeyhint="send"></textarea><button type="button" id="photo" aria-label="傳照片">照片</button><button id="send">送出</button></form>
+  <input type="file" id="pick" accept="image/*" hidden>
+  <div id="sent"></div>
+  <div id="hr"></div></div>
+  <div id="c2" hidden><div class="tbar"><button id="c2back" class="c2back">‹ 返回</button><h2 id="c2title"></h2><button id="close2" class="tclose" aria-label="關閉"></button></div><div id="c2body"></div></div></div>
+<div id="poscrim"></div>
+<div id="menu"><div class="tbar"><h2 id="mtitle"></h2><button id="mclose" class="tclose" aria-label="關閉"></button></div><div id="mbody"></div></div>
+<div id="chat"><div class="chhead tbar"><h2 class="chwho"><b id="chname"></b></h2><button type="button" id="chcfg" class="chcfg" aria-label="設定" title="設定"></button><button type="button" id="chback" class="tclose" aria-label="關閉"></button></div>
+  <div id="chstat"><div class="cs1"><span id="chmode" role="status" aria-live="polite"></span><span id="chbtns"></span></div><div class="cs2" id="chline"></div></div><img id="chchibi" class="kvchibi" alt="" hidden>
+  <div class="chbody"><div id="chlog"></div><button type="button" id="chnew" hidden>↓ 新訊息</button></div>
+  <div id="chlive" hidden></div>
+  <div id="chask" hidden></div>
+  <form id="chsay"><textarea id="chtext" rows="1" placeholder="輸入訊息…" enterkeyhint="send"></textarea><button type="button" id="chphoto" aria-label="傳照片">照片</button><button id="chsend">送出</button></form>
+  <div id="chsent" role="status" aria-live="polite"></div></div>
+<div id="ptoast"></div>
+<script>
+;(() => {
+  // ---------- 共用：狀態每秒拿一次，大家共用（場景、卡片、人事室、完整對話） ----------
+  // 網址帶 ?demo=N：用 N 位示意同事（伺服器產生）取代真資料；所有送出都擋下，只有換座位、改協作桌會改「示意」座位表
+  const q = new URLSearchParams(location.search)
+  const demoN = q.has('demo') ? Math.max(0, Math.min(400, Number(q.get('demo')) || 0)) : -1
+  const DEMO = demoN >= 0
+  const $ = id => document.getElementById(id)
+  const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  // 回覆是 AI 寫的、頁面能從手機遠端開：轉出來的 HTML 一律過 DOMPurify；兩個檔沒載到就退回純文字
+  const md = t => window.marked && window.DOMPurify ? DOMPurify.sanitize(marked.parse(String(t), { gfm: true, breaks: true })) : `<pre class="raw">${esc(t)}</pre>`
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : `${Math.round(m / 60)} 小時前` }
+  const MODE = { idle: '閒著', thinking: '思考中', typing: '正在寫', reading: '正在讀', waiting: '等你回覆／核准', done: '剛做完', blocked: '卡住了' }
+  const KIND = { codex: 'Codex', agy: 'agy' }
+  // 模型・投入程度・模式（2026-11-24 像素顧問定案、使用者確認）：選項以伺服器給的為準（state.efforts／perms／codex*），沒給就用這組
+  const EFFORTS = [{ v: 'low', name: '低' }, { v: 'medium', name: '中' }, { v: 'high', name: '高' }, { v: 'xhigh', name: '很高' }, { v: 'max', name: '最高' }]
+  // 投入程度每級一行說明（顧問 11-25 定的字；伺服器給的選單沒附說明時用這份，Codex 只列它有的級數）
+  const EFFDESC = { minimal: '幾乎不多想，最快', low: '最快、最省，簡單的事', medium: '平常用', high: '想得比較多', xhigh: '難題，較慢、較花用量', max: '最難的題目，最慢、最花用量', ultra: '比最高更慢、更花用量，留給真的很難的題目' }
+  const PERMS = [{ v: 'auto', name: '自動', desc: 'Claude 處理權限決策' }, { v: 'default', name: '手動', desc: '進行變更前一律先詢問' },
+    { v: 'acceptEdits', name: '接受編輯', desc: '自動接受所有檔案編輯' }, { v: 'plan', name: '規劃', desc: '進行變更前先建立計畫' }]
+  /** p.kind＝codex 時，model（slug）決定投入程度清單：codexModels[i].efforts 有給就只列那幾個 */
+  function cfgOpts(p, model) {
+    const s0 = st || {}
+    if (p && p.kind === 'codex') {
+      const cm = s0.codexModels || [], mm = model || p.model, m = cm.find(x => x.slug === mm) || cm.find(x => x.name === mm), all = s0.codexEfforts || []
+      // 工程師B 0.63.22：員工身上的 efforts＝它目前模型支援的級數（codexModels 只列前四款），先用它；招聘（有帶 model）照 codexModels
+      const own = !model && Array.isArray(p.efforts) ? p.efforts : null
+      const models = cm.map(x => ({ v: x.slug, name: x.name }))
+      if (!model && p.model && !m) models.unshift({ v: p.model, name: p.model }) // 清單外的模型：列在最上面打勾，看得出現在用哪個
+      return { models, efforts: own ? all.filter(e => own.includes(e.v)) : !m ? [] : m.efforts ? all.filter(e => m.efforts.includes(e.v)) : all, perms: s0.codexPerms || [] } // 複驗 5：不認得的模型不猜級數
+    }
+    return { models: Object.entries(s0.models || {}).map(([v, name]) => ({ v, name })), efforts: s0.efforts || EFFORTS, perms: s0.perms || PERMS }
+  }
+  /** 目前的模型（p.model 是顯示名，例如「Opus 5.5」或帶括號；比 v 或名字第一個字）、投入程度、模式；找不到回 undefined */
+  function cfgNow(p) {
+    const o = cfgOpts(p), w = x => String(x || '').split(/[\s（(]/)[0].toLowerCase()
+    // 審查 13：先比 v（slug）、再比完整名稱；首字比對只給 Claude（四個模型首字都不同），Codex 多個 GPT-5.5* 會勾錯
+    const model = !p.model ? undefined : o.models.find(m => m.v === p.model) || o.models.find(m => m.name === p.model)
+      || (p.kind ? undefined : o.models.find(m => m.v === w(p.model) || w(m.name) === w(p.model)))
+    return { o, model,
+      effort: o.efforts.find(e => e.v === p.effort), perm: o.perms.find(m => m.v === p.perm) }
+  }
+  const listeners = []
+  let st, lastOk, busy = false, picked // picked：卡片開著的人（session id），每秒跟著更新
+  const people = () => (st ? st.people : [])
+  const find = id => people().find(p => p.id === id)
+
+  let tt
+  // ---------- 動畫（2026-11-23，第 2、4 段）：開＝加 po-in；關＝加 po-out，0.18 秒後才真的藏起來；系統設「減少動態效果」就不動、不等 ----------
+  const RM = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false }
+  const isOn = el => el.style.display && el.style.display !== 'none' && !el.classList.contains('po-out')
+  function pop(el, disp) {
+    clearTimeout(el._pt); el.classList.remove('po-out')
+    const was = el.style.display === disp, hidden = !el.style.display || el.style.display === 'none'
+    el.style.display = disp
+    if (was || RM.matches) return
+    el.classList.remove('po-in')
+    // 開卡卡頓：原本是 display:none 的，換成顯示時動畫本來就從頭播，不用強制排版（那次排版約 12 ms）；只有顯示著（例如收起動畫中）要重播才強制
+    if (!hidden) void el.offsetWidth
+    el.classList.add('po-in')
+  }
+  function unpop(el, done) {
+    clearTimeout(el._pt); el.classList.remove('po-in')
+    if (RM.matches || !el.style.display || el.style.display === 'none') { el.style.display = 'none'; el.classList.remove('po-out'); if (done) done(); return }
+    el.classList.add('po-out')
+    el._pt = setTimeout(() => { el.style.display = 'none'; el.classList.remove('po-out'); if (done) done() }, 180)
+  }
+  // 按下去馬上有回饋：iPhone Safari 沒有 touchstart 監聽時 :active 不會亮；送出時按下的那顆按鈕先變「處理中」，不等伺服器
+  document.addEventListener('touchstart', () => {}, { passive: true })
+  let pressed = null
+  document.addEventListener('pointerdown', e => { pressed = { el: e.target.closest && e.target.closest('button'), at: Date.now() } }, true)
+  function toast(t) { const el = $('ptoast'); el.textContent = t; pop(el, 'block'); clearTimeout(tt); tt = setTimeout(() => unpop(el), 3500) }
+  async function post(path, body) {
+    const b = pressed && Date.now() - pressed.at < 1500 && pressed.el; pressed = null
+    if (b) b.classList.add('po-busy')
+    try { return await post0(path, body) } finally { if (b) b.classList.remove('po-busy') }
+  }
+  async function post0(path, body) {
+    if (DEMO && path !== '/move' && path !== '/effort' && path !== '/perm' && path !== '/codex-handoff' && path !== '/tables' && path !== '/table-say' && path !== '/table-reply' && path !== '/table-note' && path !== '/table-meet' && path !== '/table-meet-end' && path !== '/table-boss' && path !== '/table-team' && path !== '/helper' && path !== '/helper-keep' && path !== '/stuck' && path !== '/handover' && path !== '/approve') return { ok: false, error: '示意資料，沒有送出', text: '示意資料，沒有送出' }
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(DEMO ? { ...body, demo: demoN } : body) })
+      const j = await r.json().catch(() => ({}))
+      return { ...j, ok: r.ok && j.ok !== false }
+    } catch { return { ok: false, error: '連不到電腦', text: '連不到電腦' } }
+  }
+  let skew = 0
+  const srvNow = () => Date.now() + skew
+  // 允許卡倒數（0.63.56）：deadline − 伺服器現在時間；手機每秒重畫時往下數
+  const askLeft = info => { if (!info || !info.deadline) return ''; const s = Math.ceil((info.deadline - srvNow()) / 1000); return s > 0 ? `還有 ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}，過了交回電腦` : '時間到了，正在交回電腦…' }
+  async function load() {
     if (busy || document.hidden) return
     busy = true
     try {
-      const a = ((innerHeight - 37) / main.clientWidth).toFixed(2)
-      const r = await fetch(`/scene.svg?w=${W}&a=${a}`, { cache: 'no-store' })
+      const r = await fetch(DEMO ? `/state.json?demo=${demoN}` : '/state.json', { cache: 'no-store' })
       if (!r.ok) throw new Error(r.status)
-      const url = URL.createObjectURL(await r.blob())
-      const old = img.src
-      img.onload = () => { if (old.startsWith('blob:')) URL.revokeObjectURL(old) }
-      img.src = url
-      const s = state = await (await fetch('/state.json', { cache: 'no-store' })).json()
-      if (picked) show(s.people.find(p => p.id === picked), true)
-      const waiting = s.people.filter(p => p.mode === 'waiting').length
-      document.getElementById('count').textContent = `${s.people.length} online` + (waiting ? ` · ${waiting} waiting for you` : '')
-      document.getElementById('stale').style.display = 'none'
+      st = await r.json()
+      if (typeof st.now === 'number') skew = st.now - Date.now() // 伺服器時間（0.63.56）：允許卡倒數照伺服器的鐘，手機時鐘不準也一樣
+      if (picked) show(find(picked), true)
+      warmReplies()
+      const waiting = people().filter(p => p.mode === 'waiting').length
+      $('count').textContent = `${people().length} 人在線` + (waiting ? ` · ${waiting} 位等你` : '')
+      $('stale').style.display = 'none'
       lastOk = new Date()
+      listeners.forEach(f => { try { f(st) } catch (e) { console.error(e) } })
     } catch {
-      document.getElementById('at').textContent = lastOk ? lastOk.toLocaleTimeString() : '(never connected)'
-      document.getElementById('stale').style.display = 'inline'
-    } finally {
-      busy = false
-    }
+      $('at').textContent = lastOk ? lastOk.toLocaleTimeString() : '（還沒連上過）'
+      $('stale').style.display = 'inline'
+    } finally { busy = false }
   }
-  // 回覆是 AI 寫的、頁面能從手機遠端開：轉出來的 HTML 一律過 DOMPurify；兩個檔沒載到就退回純文字
-  const md = t => window.marked && window.DOMPurify ? DOMPurify.sanitize(marked.parse(String(t), { gfm: true, breaks: true })) : `<pre class="raw">${esc(t)}</pre>`
-  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
-  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago` }
-  const CMD = { pending: 'sent, waiting for pickup', delivered: 'delivered', expired: 'not picked up in 10 min, discarded' }
+
+  // ---------- 狀態卡（點名牌開） ----------
+  const CMD = { pending: '已送出，等它接收', delivered: '已送達', expired: '10 分鐘沒被接收，已丟棄' }
+  let cardGen = 0 // 員工卡開啟世代：每次開、關都加一（複驗：關卡又重開同一人時，舊回應不能替新卡開確認）
+  // 開卡卡頓：最後回覆的 markdown 轉成 HTML 約 18 ms（手機更久）；同一則回覆（人＋時間＋長度）轉過就重用，留最近 40 則
+  const replyHtml = new Map()
+  function replyMd(p) {
+    const k = p.id + '|' + p.reply.at + '|' + p.reply.text.length
+    let h = replyHtml.get(k)
+    if (h == null) { h = md(p.reply.text); replyHtml.set(k, h); if (replyHtml.size > 40) replyHtml.delete(replyHtml.keys().next().value) }
+    return h
+  }
+  // 閒置時先把每個人的最後回覆轉好（一次轉一則，不搶畫面），點人物開卡時就不用現轉
+  let warmT = 0
+  function warmReplies() {
+    if (warmT) return
+    const idle = window.requestIdleCallback || (f => setTimeout(() => f({ timeRemaining: () => 8 }), 200))
+    const step = dl => {
+      warmT = 0
+      const p = people().find(q => q.reply && q.reply.text && !replyHtml.has(q.id + '|' + q.reply.at + '|' + q.reply.text.length))
+      if (!p) return
+      if (dl.timeRemaining() > 4) replyMd(p)
+      warmT = idle(step, { timeout: 2000 })
+    }
+    warmT = idle(step, { timeout: 2000 })
+  }
   function show(p, refresh) {
-    const card = document.getElementById('card')
-    if (!p) { picked = undefined; card.style.display = 'none'; return }
-    if (!refresh && picked !== p.id) document.getElementById('text').value = ''
+    const card = $('card')
+    if (!p) { picked = undefined; hoAsk = null; cardGen++; fromChat = false; unpop(card, () => { if (!picked) card.classList.remove('overchat') }); drawHr(); return } // 複驗 15：關卡片＝確認作廢
+    if (!refresh && picked !== p.id) { $('text').value = ''; closeSub() }
+    if (!refresh) { fromChat = false; card.classList.remove('overchat') }
+    if (!refresh) { closeSub(); cardGen++ } // 重新點人：回第一層；開啟世代加一（晚到的回應靠它判斷）
     picked = p.id
-    const rep = document.getElementById('reply')
-    const body = rep.querySelector('.md')
+    const rep = $('reply'), body = rep.querySelector('.md')
     const keep = body && body.dataset.at === String(p.reply?.at) // 同一則回覆：不重畫，捲到哪就停在哪
-    if (!keep) rep.innerHTML = p.reply
-      ? `<div class="head">Latest reply (${ago(p.reply.at)})${p.reply.ask ? ` · to you: 📱 ${esc(p.reply.ask.slice(0, 40))}` : ''}</div><div class="md" data-at="${p.reply.at}">${md(p.reply.text)}</div>`
-      : '<div class="head">No reply yet (needs 0.23.0+ and one finished turn)</div>'
-    else rep.querySelector('.head').textContent = `Latest reply (${ago(p.reply.at)})` + (p.reply.ask ? ` · to you: 📱 ${p.reply.ask.slice(0, 40)}` : '')
-    document.getElementById('sent').textContent = p.cmd ? `Last command: "${p.cmd.text.slice(0, 40)}" — ${CMD[p.cmd.state]} (${ago(p.cmd.at)})` : ''
-    const row = (k, v) => v ? `<div><span class="k">${k}</span>${v}</div>` : ''
-    document.getElementById('info').innerHTML =
-      `<h2>${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}</h2>` +
-      row('Title', p.title && esc(p.title)) +
-      row('Status', esc(p.modeText) + (p.since ? ` (since ${ago(p.since)})` : '')) +
-      row('Tool', p.tool && esc(p.tool)) +
-      row('Approval', p.approval && esc(p.approval)) +
-      row('Team', p.team && esc(p.team)) +
-      row('Name', p.agent && esc(p.agent)) +
-      (p.lastError ? `<div class="err"><span class="k">Error</span>${esc(p.lastError.text)} (${ago(p.lastError.at)})</div>` : '')
-    card.style.display = 'block'
+    const head = p.reply ? `最新回覆（${ago(p.reply.at)}）` + (p.reply.ask ? ` · 問你：${p.reply.ask.slice(0, 40)}` : '') : ''
+    // 他最後說的話：先三行，點了展開／收起（同一則回覆不重畫，展開狀態留著）
+    if (!keep) {
+      rep.innerHTML = p.reply ? `<div class="head">${esc(head)}</div><div class="md clamp" data-at="${p.reply.at}">${replyMd(p)}</div><div class="more" hidden>▾ 看全部</div>` : '<div class="head">還沒有回覆（做完一輪才有）</div>'
+      const m = rep.querySelector('.md'); if (m) requestAnimationFrame(() => { rep.querySelector('.more').hidden = m.scrollHeight <= m.clientHeight + 2 })
+    } else rep.querySelector('.head').textContent = head
+    $('sent').textContent = p.cmd ? `上一則指令：「${p.cmd.text.slice(0, 40)}」— ${CMD[p.cmd.state]}（${ago(p.cmd.at)}）` : ''
+    $('cname').innerHTML = `${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}${p.kind ? ` <i class="badge-codex">${KIND[p.kind] || esc(p.kind)}</i>` : ''}`
+    // 狀態列一行（狀態・模型・投入程度・模式・記憶）；待核准、錯誤有才另起一行；標題、工具、團隊、名稱移到「人事」二級
+    $('info').innerHTML = statLine(p)
+    // 員工卡上方的 Q 版小人（0.63.46）：照 species（scene.js 給網址；四種角色以外的不顯示）
+    const ch = $('cchibi'), cu = window.PO_KV ? window.PO_KV.chibi(p.species) : ''
+    if (cu && ch.getAttribute('src') !== cu) ch.src = cu
+    ch.hidden = !cu
+    ch.parentNode.classList.toggle('kvon', !!cu) // 有小人：標題列左右讓位（320 寬長名＋徽章不壓到小人）
+    ch.onerror = () => { ch.hidden = true; ch.parentNode.classList.remove('kvon') } // 小人載不到：收起、名牌回到原本寬度
+    pop(card, 'block')
+    drawHr()
   }
-  // 點圖：把點的位置換回圖上的座標，找最近的人
-  img.addEventListener('click', ev => {
-    if (!state) return
-    const r = img.getBoundingClientRect()
-    const k = Math.min(r.width / state.box.w, r.height / state.box.h)
-    const x = (ev.clientX - r.left - (r.width - state.box.w * k) / 2) / k
-    const y = (ev.clientY - r.top - (r.height - state.box.h * k) / 2) / k
-    let best, d = 8
-    for (const p of state.people) {
-      if (p.x === undefined) continue
-      const e = Math.hypot(p.x - x, p.y + 1.5 - y)
-      if (e < d) { d = e; best = p }
-    }
-    show(best)
+  $('close').addEventListener('click', () => show())
+  $('reply').addEventListener('click', ev => {
+    if (ev.target.closest('a')) return
+    const m = $('reply').querySelector('.md'), more = $('reply').querySelector('.more'); if (!m || !more) return
+    if (more.hidden && m.classList.contains('clamp')) return // 三行內放得下：不用展開
+    m.classList.toggle('clamp'); more.hidden = false; more.textContent = m.classList.contains('clamp') ? '▾ 看全部' : '▴ 收起'
   })
-  document.getElementById('close').addEventListener('click', () => show())
-  document.getElementById('say').addEventListener('submit', async ev => {
+  $('say').addEventListener('submit', async ev => {
     ev.preventDefault()
-    const box = document.getElementById('text')
-    const btn = document.getElementById('send')
+    const box = $('text'), btn = $('send')
     if (!picked || !box.value.trim()) return
+    const ctx = cardCtx()
+    if (!sendLock('card')) return
     btn.disabled = true
-    try {
-      const r = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: picked, text: box.value }) })
-      const j = await r.json().catch(() => ({}))
-      if (r.ok) box.value = ''
-      document.getElementById('sent').textContent = r.ok ? 'Sent, waiting for pickup' : `Not sent: ${j.error ?? r.status}`
-    } catch {
-      document.getElementById('sent').textContent = 'Not sent: cannot reach the computer'
-    } finally {
-      btn.disabled = false
-    }
+    let j
+    try { j = await post('/command', { id: ctx.id, text: ctx.text }) } finally { btn.disabled = false; sendUnlock('card') }
+    const msg = j.ok ? j.text || '已送出，等它接收' : j.unsure ? `不確定有沒有收到：${j.error}` : `沒送出：${j.error || j.text || '失敗'}`
+    if (cardStill(ctx)) { if (j.ok) clearIfSame(box, ctx); $('sent').textContent = msg } else toast(msg)
   })
-  // 照片：縮到長邊 1600、轉 JPEG（順便解掉 HEIC 等格式），連同輸入框的字一起送
-  const pick = document.getElementById('pick')
-  document.getElementById('photo').addEventListener('click', () => { if (picked) pick.click() })
+
+  // ---------- 送出鎖與草稿快照（審查 photo ①②）：員工卡、完整對話、整桌傳話各一把，文字與照片共用；處理中不能開第二輪 ----------
+  // 點送出／點照片當下就記下「傳給誰、附的話、輸入框版本、開啟世代」；照片準備期間換了對象就取消；送到了，輸入框沒被改過才清空
+  const sending = new Set()
+  function sendLock(k) { if (sending.has(k)) { toast('上一則還在送，等一下'); return false } sending.add(k); return true }
+  const sendUnlock = k => { sending.delete(k) }
+  const boxVer = new WeakMap()
+  const verOf = box => boxVer.get(box) || 0
+  for (const id of ['text', 'chtext']) $(id).addEventListener('input', e => boxVer.set(e.target, verOf(e.target) + 1))
+  const clearIfSame = (box, ctx) => { if (box.value === ctx.raw && verOf(box) === ctx.v) { box.value = ''; boxVer.set(box, verOf(box) + 1); return true } return false }
+  const cardCtx = () => { const box = $('text'); return { id: picked, gen: cardGen, raw: box.value, text: box.value, v: verOf(box) } }
+  const cardStill = ctx => picked === ctx.id && cardGen === ctx.gen
+  const chatCtx = () => ({ chat, id: chat && chat.id, raw: ctext.value, text: ctext.value, v: verOf(ctext) })
+  const chatStill = ctx => chat === ctx.chat
+
+  // ---------- 照片：縮到長邊 1600、轉 JPEG（順便解掉 HEIC 等格式），連同附的話一起送；卡片、完整對話、整桌傳話（scene.js）共用 ----------
+  // 瀏覽器解不了的 HEIC（例如電腦上的 Chrome）：原檔照送，伺服器用 sips 轉 JPEG（2026-11-25）
+  let photoFor = null
+  const pick = $('pick')
+  const PHOTO_MAX = 8 * 1024 * 1024
+  /**
+   * 選一張照片送出。o＝{ key: 送出鎖, ctx: 點下去當下的快照, still(ctx): 對象還是同一個嗎, send(data, ctx): Promise<要顯示的話>, say(t): 顯示在原處 }
+   * 選好之後才拿鎖（取消選檔不會卡住）；準備期間對象換了就取消，不送
+   */
+  function choosePhoto(o) {
+    if (sending.has(o.key)) { toast('上一則還在送，等一下'); return }
+    photoFor = o; pick.click()
+  }
+  function askPhoto(say, ctxOf, still, key) {
+    if (DEMO) { say('示意資料，沒有送出'); return }
+    const ctx = ctxOf()
+    if (!ctx.id) return
+    choosePhoto({ key, ctx, still, say, send: async (data, c) => {
+      const r = await fetch('/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: c.id, text: c.text, data }) })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok && j.ok) { if (still(c)) clearIfSame(c.box, c); return j.text || '照片已送出，等它接收' }
+      return j.unsure ? `不確定有沒有收到：${j.error}` : `照片沒送出：${j.error ?? r.status}`
+    } })
+  }
+  const fileB64 = f => new Promise((ok, no) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(',')[1]); rd.onerror = no; rd.readAsDataURL(f) })
+  /** 檔頭是不是 HEIC／HEIF：規則跟伺服器 remote/server.ts isHeic 一樣（ftyp 盒子內、最多前 256 位元組，主品牌或相容品牌，跳過版本號；複驗次要） */
+  async function looksHeic(f) {
+    const b = new Uint8Array(await f.slice(0, 256).arrayBuffer())
+    if (b.length < 16 || String.fromCharCode(...b.slice(4, 8)) !== 'ftyp') return false
+    const size = Math.min(b.length, ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0, 256)
+    for (let i = 8; i + 4 <= size; i += 4) if (i !== 12 && /^(heic|heix|heim|heis|hevc|hevx|mif1|msf1)$/.test(String.fromCharCode(...b.slice(i, i + 4)))) return true
+    return false
+  }
+  async function photoData(f) {
+    let bmp
+    try { bmp = await createImageBitmap(f) } catch {
+      if (!/hei[cf]/i.test(f.type) && !/\.hei[cf]$/i.test(f.name) && !(await looksHeic(f))) throw new Error('讀不到照片（只收 JPEG、HEIC 等照片）')
+      if (f.size > PHOTO_MAX) throw new Error('照片太大（最多 8 MB）')
+      return fileB64(f) // 這個瀏覽器解不了 HEIC：交給電腦轉
+    }
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
+    const c = document.createElement('canvas')
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k)
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+    return c.toDataURL('image/jpeg', 0.85).split(',')[1]
+  }
+  const cardSay = t => { $('sent').textContent = t }
+  $('photo').addEventListener('click', () => { if (picked) askPhoto(cardSay, () => ({ ...cardCtx(), box: $('text') }), cardStill, 'card') })
   pick.addEventListener('change', async () => {
-    const f = pick.files && pick.files[0]
-    pick.value = ''
-    if (!f || !picked) return
-    const box = document.getElementById('text')
-    const btn = document.getElementById('photo')
-    const sent = document.getElementById('sent')
-    btn.disabled = true
-    sent.textContent = 'Preparing photo…'
+    const f = pick.files && pick.files[0], o = photoFor
+    pick.value = ''; photoFor = null
+    if (!f || !o) return
+    if (!sendLock(o.key)) return
+    const say = t => { if (o.still(o.ctx)) o.say(t); else toast(t) }
     try {
-      const bmp = await createImageBitmap(f)
-      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
-      const c = document.createElement('canvas')
-      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k)
-      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
-      const data = c.toDataURL('image/jpeg', 0.85).split(',')[1]
-      sent.textContent = 'Uploading photo…'
-      const r = await fetch('/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: picked, text: box.value, data }) })
-      const j = await r.json().catch(() => ({}))
-      if (r.ok) box.value = ''
-      sent.textContent = r.ok ? 'Photo sent, waiting for pickup' : `Photo not sent: ${j.error ?? r.status}`
-    } catch {
-      sent.textContent = 'Photo not sent: cannot read the photo or reach the computer'
-    } finally {
-      btn.disabled = false
-    }
+      say('照片準備中…')
+      let data
+      try { data = await photoData(f) } catch (e) { say(`照片沒送出：${e && e.message || '讀不到照片'}`); return }
+      if (!o.still(o.ctx)) { toast('照片沒送出：準備照片時換了對象，請重新選'); return } // 審查 photo ①：不拿新對象的草稿、不送到舊對象
+      say('照片上傳中…')
+      let msg
+      try { msg = await o.send(data, o.ctx) } catch { msg = '照片沒送出：連不到電腦' }
+      say(msg)
+    } finally { sendUnlock(o.key) }
   })
-  tick()
-  setInterval(tick, 1000)
-  document.addEventListener('visibilitychange', tick)
+
+  // ---------- 底部選單（人事室的各項、協作桌） ----------
+  const menu = $('menu')
+  // 選單從下方滑上來、後面變暗（點變暗處＝關）；選單開著又換一頁：內容從右邊滑進來
+  // sheetId：每開一頁、每關一次加一；先開「讀取中」再補資料的，補之前比對還是不是同一頁
+  const scrim = $('poscrim')
+  let sheetN = 0
+  function closeSheet() { sheetN++; unpop(menu); unpop(scrim) }
+  $('mclose').addEventListener('click', closeSheet)
+  scrim.addEventListener('click', closeSheet)
+  function sheet(title, html, fill) {
+    if (!fill) sheetN++
+    if ($('card').style.display === 'block') show()
+    $('mtitle').textContent = String(title).replace(/^[^\p{L}\p{N}★]+/u, '')
+    const body = $('mbody'), open = isOn(menu)
+    body.innerHTML = html
+    if (open && !fill && !RM.matches) { body.classList.remove('po-next'); void body.offsetWidth; body.classList.add('po-next') }
+    if (!fill) menu.scrollTop = 0
+    pop(menu, 'block'); pop(scrim, 'block')
+    return sheetN
+  }
+  const sheetId = () => sheetN
+  const LOADING = '<div class="note po-load">讀取中</div>'
+  const opt = (p, sel) => `<option value="${esc(p.id)}"${p.id === sel ? ' selected' : ''}>${esc(p.plate)}${p.code && p.code !== p.plate ? '（' + esc(p.code) + '）' : ''}</option>`
+  const waitingList = () => people().filter(p => p.mode === 'waiting').sort((a, b) => (a.since || 0) - (b.since || 0))
+
+  // 🔔 等你回覆：一次一位，看他最後說什麼、直接回
+  let qSkip = []
+  function openQueue(skipId) {
+    if (skipId) qSkip.push(skipId)
+    const list = waitingList(), rest = list.filter(p => !qSkip.includes(p.id)), p = rest[0]
+    if (!p) { qSkip = []; sheet('等你回覆', `<div class="note">${list.length ? '都看過一輪了' : '沒有人在等你'}</div>`); return }
+    const mins = p.since ? Math.round((Date.now() - p.since) / 60000) : 0
+    sheet(rest.length > 1 ? `等你回覆（還有 ${rest.length - 1} 位）` : '等你回覆',
+      `<div class="mcard"><b class="big">${esc(p.plate)}</b><small class="wait">等待 ${mins < 60 ? mins + ' 分鐘' : Math.round(mins / 60) + ' 小時'}${p.title ? '・' + esc(p.title) : ''}</small>` +
+      `<div class="md">${p.reply ? md(p.reply.text) : '（沒有回覆紀錄）'}</div></div>` +
+      `<h3 class="sec">回覆</h3><textarea id="qtext" rows="3" placeholder="輸入回覆…"></textarea>` +
+      `<div class="mline q"><button class="mbtn go" id="qsend">送出，下一位</button><button class="mbtn" id="qskip">先跳過</button></div>`)
+    $('qskip').addEventListener('click', () => openQueue(p.id))
+    $('qsend').addEventListener('click', async ev => {
+      const t = $('qtext').value.trim()
+      if (!t) { toast('先寫要回什麼'); return }
+      ev.target.disabled = true
+      const j = await post('/command', { id: p.id, text: t })
+      if (!j.ok) { ev.target.disabled = false; toast(`沒送出：${j.error || j.text || '失敗'}`); return }
+      toast(`已回 ${p.plate}`)
+      openQueue(p.id)
+    })
+  }
+
+  // 💰 薪水單：今天的用量（從對話紀錄算，單位是 token）
+  const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n || 0)
+  function openPay() {
+    const rows = people().filter(p => p.usage).map(p => ({ p, u: p.usage, read: p.usage.i + p.usage.cw + p.usage.cr })).sort((a, b) => b.u.o - a.u.o || b.read - a.read)
+    const tot = rows.reduce((t, r) => ({ o: t.o + r.u.o, read: t.read + r.read }), { o: 0, read: 0 })
+    const max = Math.max(1, ...rows.map(r => r.u.o))
+    sheet('薪水單',
+      `<div class="mcard"><small>全辦公室總計</small><b class="big">寫出 ${fmt(tot.o)}<small>　讀進 ${fmt(tot.read)}</small></b></div>` +
+      rows.map(r => `<div class="mcard pay"><div class="payh"><span>${esc(r.p.plate)} <small>${esc(r.p.model || '')}</small></span><span class="num">${fmt(r.u.o)} <small>/ 讀 ${fmt(r.read)}</small></span></div>` +
+        `<div class="bar"><i style="width:${Math.round(r.u.o / max * 100)}%"></i></div></div>`).join('') +
+      (rows.length ? '' : '<div class="note">還沒有資料</div>') +
+      `<div class="note">依「寫出」排序；讀進大多是快取，比較便宜。很長的對話早一點的可能沒算到。</div>`)
+  }
+
+  // 📅 排班：每天（或平日）幾點替某位員工送一道命令
+  function openShift() {
+    const list = (st && st.shifts) || []
+    sheet('📅 排班',
+      (list.length ? list.map(x => `<div class="mcard shift${x.on ? '' : ' off'}"><b class="big">${esc(x.time)} → ${esc(x.name)}</b><small>${x.days === 'weekdays' ? '平日' : '每天'}${x.on ? '' : '・暫停中'}</small><div>${esc(x.text)}</div>` +
+        (x.last ? `<div class="${x.last.ok ? 'ok' : 'bad'}">上次結果：${new Date(x.last.at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} ${esc(x.last.msg)}</div>` : '') +
+        `<div class="g3"><button class="chip prim" data-s="run" data-sid="${x.sid}">現在跑</button><button class="chip" data-s="toggle" data-sid="${x.sid}">${x.on ? '暫停' : '恢復'}</button><button class="chip red" data-s="del" data-sid="${x.sid}">刪除</button></div></div>`).join('')
+        : '<div class="note">還沒有排班</div>') +
+      `<h3 class="sec">新增排班</h3>` +
+      `<label>誰</label><select id="swho">${people().map(p => opt(p)).join('')}</select>` +
+      `<label>時間</label><input id="stime" type="time" value="08:30">` +
+      `<label>哪幾天</label><select id="sdays"><option value="daily">每天</option><option value="weekdays">平日（週一到週五）</option></select>` +
+      `<label>交代什麼</label><textarea id="stext" rows="3" placeholder="例：整理今天的行程，列出要準備的東西"></textarea>` +
+      `<button class="mbtn go" id="sadd">排進去</button>` +
+      `<div class="note">到時間他要在線才收得到；對話重開過也會用同名的人認出來。</div>`)
+    menu.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.s === 'del' && !b.dataset.sure) { b.dataset.sure = '1'; b.classList.add('redon'); b.textContent = '再按一次刪除'; return }
+      const j = await post('/schedule', { op: b.dataset.s, sid: b.dataset.sid })
+      toast(j.text || '沒有回應')
+      await load(); openShift()
+    }))
+    $('sadd').addEventListener('click', async () => {
+      const j = await post('/schedule', { op: 'add', id: $('swho').value, time: $('stime').value, days: $('sdays').value, text: $('stext').value })
+      toast(j.text || '沒有回應')
+      if (j.ok) { await load(); openShift() }
+    })
+  }
+
+  // 📇 員工檔案
+  async function openProfile(p) {
+    if (DEMO) { toast('示意資料，沒有員工檔案'); return }
+    const tok = sheet('員工檔案', LOADING)
+    const j = await (await fetch(`/profile.json?id=${encodeURIComponent(p.id)}`, { cache: 'no-store' })).json().catch(() => ({ ok: false, text: '連不到電腦' }))
+    if (sheetN !== tok) return
+    if (!j.ok) { sheet('員工檔案', `<div class="note po-err">${esc(j.text || '讀不到')}</div>`, true); return }
+    const u = j.usage || { i: 0, o: 0, cw: 0, cr: 0 }
+    const when = t => new Date(t).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const kv = (k, v) => `<div class="kv wide"><span class="k">${k}</span><span class="v">${v}</span></div>`
+    sheet('員工檔案',
+      `<div class="mcard"><b class="big">${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}</b><div class="kvs">` +
+      kv('職稱', esc(p.title || '—')) + (p.team ? kv('主管', esc(p.team)) : '') +
+      kv('智力', esc(j.model || '—')) + kv('今天用量', `寫出 ${fmt(u.o)}、讀進 ${fmt(u.i + u.cw + u.cr)}`) +
+      kv('上班地點', `<span class="path">${esc(j.cwd)}</span>`) + `</div></div>` +
+      `<h3 class="sec">最近交代的事</h3>` +
+      (j.asks.length ? j.asks.map(a => `<div class="mcard ask"><span class="when">${when(a.at)}</span><span>${esc(a.text)}</span></div>`).join('') : '<div class="note">沒有紀錄</div>'), true)
+  }
+
+  // 🧑‍💼 招聘新員工
+  const MODEL_NOTE = { fable: '最聰明、最貴', opus: '聰明，大部分工作', sonnet: '快又省，日常雜事', haiku: '最快最省，簡單的事' }
+  function openHire() {
+    if (DEMO) { toast('示意資料：招聘會開「招聘新員工」'); return }
+    if (!st) return
+    const dirs = st.hireDirs || []
+    const bosses = people().filter(p => p.role === 'manager' && p.agent)
+    sheet('招聘新員工',
+      `<label>名字</label><input id="hname" maxlength="20" placeholder="輸入員工名字（也是 Claude app 裡的對話名稱）">` +
+      `<label>智力</label><select id="hmodel">${Object.entries(st.models || {}).map(([k, v]) => `<option value="${k}"${k === 'sonnet' ? ' selected' : ''}>${esc(v)}｜${MODEL_NOTE[k] || ''}</option>`).join('')}</select>` +
+      (dirs.length > 1 ? `<label>在哪裡上班</label><select id="hdir">${dirs.map(d => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join('')}</select>` : '') +
+      `<label>主管（可不選）</label><select id="hteam"><option value="">不掛主管</option>${bosses.map(p => `<option value="${esc(p.agent)}">${esc(p.plate)}</option>`).join('')}</select>` +
+      `<label>第一件工作</label><textarea id="htask" rows="3" placeholder="輸入要交代的工作…（可不寫，進來後再交代）"></textarea>` +
+      `<button class="mbtn go" id="hgo">招聘</button>`)
+    $('hgo').addEventListener('click', async ev => {
+      const name = $('hname').value.trim()
+      if (!name) { toast('先取個名字'); return }
+      ev.target.disabled = true
+      const j = await post('/hire', { name, model: $('hmodel').value, dir: ($('hdir') || {}).value, team: $('hteam').value, task: $('htask').value })
+      if (j.ok) closeSheet(); else ev.target.disabled = false
+      toast(j.text || j.error || '沒有回應')
+    })
+  }
+
+  // ---------- 員工卡兩層（2026-11-25 像素顧問定案、使用者交主管）：第一層狀態列＋最後說的話＋輸入＋打斷／完整對話＋三個入口；二級從右邊滑進來 ----------
+  const PERMWHY = p => p.kind === 'codex' ? 'App 裡開的 Codex 要到 App 裡操作' : 'App 開的 Claude 要在 App 裡切模式'
+  const APPONLY = 'App 裡開的 Codex 要到 App 裡操作'
+  // 只能傳話的人（App 或終端機視窗開的 Codex、agy）：二級只寫一行「<哪裡>開的，只能傳話」，人事頁「…只能傳話、調部門」（使用者 11-25 定的字樣；顧問 11-25 補：照實際來源寫）
+  const whereOf = p => p.kind === 'agy' ? 'agy 開的' : p.src === 'terminal' ? '終端機視窗開的' : p.src === 'app' || (!p.src && !p.ctl) ? 'App 裡開的' : '這位'
+  const RELOAD = '這位的對話還沒載入新版像素辦公室外掛：在那個對話裡打 /reload-plugins（或重開對話），就能從這裡換智力、模式、打斷、整理記憶'
+  const OPS = ['model', 'effort', 'perm', 'key', 'fire']
+  /**
+   * 審查 14：每個操作能不能做、不能的理由（''＝可以）。
+   * 後端有給 p.can（{ model, effort, perm, key, fire }: boolean）、p.why（同鍵的理由，all＝共用）就照它，不再用 !ctl 猜「App 裡開的」；
+   * 沒給（舊伺服器）先照舊推論：Claude 看 ctl／permCtl，Codex 看 ctl
+   */
+  function capOf(p) {
+    if (p.can) { const w = p.why || {}; return Object.fromEntries(OPS.map(op => [op, p.can[op] ? '' : w[op] || w.all || '這位現在不能從手機操作'])) }
+    const c = {}
+    for (const op of OPS) c[op] = !p.kind ? (op === 'fire' ? '' : p.ctl ? '' : RELOAD) : p.kind === 'codex' ? (p.ctl ? '' : APPONLY) : '這位不能從手機操作'
+    if (!p.kind && p.ctl && p.permCtl === false) c.perm = PERMWHY(p)
+    return c
+  }
+  /** 只能傳話（Codex、agy 每項都不能操作）：第一層不列灰掉的打斷，二級只寫一行，不列灰掉的按鈕 */
+  const talkOnly = (p, cap) => (p.kind === 'codex' || p.kind === 'agy') && OPS.every(op => cap[op])
+  /** 來源：後端給 p.src 就照它；沒給照舊 */
+  function srcText(p) {
+    const cx = p.kind === 'codex'
+    if (p.src) return ({ tmux: cx ? 'Codex・在電腦背景跑' : '在電腦背景跑', app: cx ? '開在 ChatGPT／Codex App 裡' : '從 Claude app 開的', terminal: '在電腦的終端機視窗裡', other: '在電腦視窗裡', unknown: '還判斷不出開在哪' })[p.src] || p.src
+    return { app: '從 Claude app 開的', tmux: '在電腦背景跑', other: '在電腦視窗裡', unknown: '', codex: p.ctl ? 'Codex・在電腦背景跑' : '開在 ChatGPT／Codex App 裡', agy: 'agy' }[p.host] || ''
+  }
+  /**
+   * Codex 交給 App／接回後台（2026-11-25 使用者定案；伺服器工程師B 0.63.28）：回 { to, label, why } 或 null（不顯示）
+   * 看 p.can.handoffApp（tmux 開的 → 交給 App）、p.can.handoffTmux（App 開的 → 接回後台）；不能時理由在 p.why 同名鍵
+   */
+  function handoffOf(p) {
+    if (p.kind !== 'codex' || !p.can) return null
+    const w = p.why || {}, one = (k, to, label) => ({ to, label, why: p.can[k] ? '' : w[k] || w.all || '現在不能換' })
+    // 先看哪個是 true；都不是時，只有後端給了原因（暫時不能）才照來源列出停用的那顆，其他人（兩個都 false、沒原因）不顯示
+    if (p.can.handoffApp) return one('handoffApp', 'app', '📱 交給 App')
+    if (p.can.handoffTmux) return one('handoffTmux', 'tmux', '🖥 接回後台')
+    // 審查 14：只有共用的 why.all 時也要停用並說原因（例如 App 還開著這段、握著寫入鎖）
+    if (p.src === 'tmux' && (w.handoffApp || w.all)) return one('handoffApp', 'app', '📱 交給 App')
+    if (p.src === 'app' && (w.handoffTmux || w.all)) return one('handoffTmux', 'tmux', '🖥 接回後台')
+    return null
+  }
+  const ck = on => on ? ' on' : ''
+  const dk = w => w ? ` aria-disabled="true" data-why="${esc(w)}"` : ''
+
+  // 二級：sub＝{ kind: 'cfg'|'hr'|'talk', id }；arm＝按兩次的動作（clear／fire）或手動確認（manual）；subSeq 換頁就加一（晚到的回應靠它判斷）
+  let sub = null, arm = '', subSeq = 0, subKey = '', c1Top = 0
+  const SUBT = { cfg: '🧠 智力與模式', hr: '👔 人事', talk: '🛠 對話' }
+  const SUBH = { home: '⚙ 設定', ...SUBT } // 完整對話右上 ⚙ 進來的那一頁（11-26 定案 A）
+  function openSub(kind) {
+    const card = $('card')
+    if (!sub) c1Top = card.scrollTop
+    sub = { kind, id: picked }; arm = ''; subSeq++; subKey = ''
+    $('c1').hidden = true; $('c2').hidden = false; card.scrollTop = 0
+    if (!RM.matches) { const c2 = $('c2'); c2.classList.remove('c2in'); void c2.offsetWidth; c2.classList.add('c2in') }
+    drawSub()
+  }
+  function closeSub(keepCard) {
+    if (!sub) return
+    sub = null; arm = ''; subSeq++; subKey = ''
+    $('c2').hidden = true; $('c1').hidden = false
+    if (keepCard) { $('card').scrollTop = c1Top; if (!RM.matches) { const c1 = $('c1'); c1.classList.remove('c1back'); void c1.offsetWidth; c1.classList.add('c1back') } }
+  }
+  // 從完整對話的 ⚙ 開的（fromChat）：三頁返回到「設定」，設定再返回＝關卡片、回完整對話
+  let fromChat = false
+  function openSettings(p) {
+    if (!p) return
+    show(p); fromChat = true; $('card').classList.add('overchat')
+    openSub('home')
+  }
+  $('c2back').addEventListener('click', () => { if (fromChat && sub) { if (sub.kind === 'home') show(); else openSub('home') } else closeSub(true) })
+  $('close2').addEventListener('click', () => show())
+
+  // /model、/perm、/effort 要等伺服器確認（1～4 秒）：按的那列顯示「確認中…」、整頁按鈕停用；同時只送一個；回應時頁面換了就只更新資料
+  let cfgPending = '' // 審查 16：員工卡交接、智力與模式、離線（在 App 裡）入口共用這一把；值＝送出中那位的 id
+  const reqLock = id => { if (cfgPending) { toast('上一個還在確認，等一下再按'); return false } cfgPending = id || '1'; return true }
+  const reqUnlock = () => { cfgPending = '' }
+  const reqBusy = () => !!cfgPending
+  async function cfgPost(p, path, body, el) {
+    if (cfgPending) { toast('上一個還在確認，等一下再按'); return }
+    const box = $('c2body'), n0 = subSeq, tip = document.createElement('small'), btns = [...box.querySelectorAll('button, select')]
+    cfgPending = p.id; btns.forEach(b => { b.disabled = true })
+    if (el) { tip.className = 'busy'; tip.textContent = '確認中…'; (el.querySelector('span') || el).appendChild(tip) }
+    let j
+    try { j = await post(path, { id: p.id, ...body }) } finally { cfgPending = ''; btns.forEach(b => { b.disabled = false }); tip.remove() }
+    toast(`${p.plate}：${j.text || j.error || '沒有回應'}`)
+    if (subSeq !== n0 || !sub || sub.id !== p.id) { load(); return }
+    arm = ''; subKey = ''; await load() // 留在這頁，打勾跟著新值移
+  }
+
+  /** 第一層的狀態列：「正在寫・Opus・中・自動・記憶 40%」；待核准、錯誤另起一行警示 */
+  function statLine(p) {
+    const c = cfgNow(p)
+    const parts = [MODE[p.mode] || p.modeText || p.mode, c.model ? c.model.name.split(' ')[0] : p.model ? String(p.model).split(' ')[0] : '', c.effort && c.effort.name, c.perm && c.perm.name, p.ctx != null ? `記憶 ${p.ctx}%` : '']
+    return `<div class="cstat">${esc(parts.filter(Boolean).join('・'))}</div>` +
+      (p.approval ? `<div class="cwarn">待核准：${esc(p.approval)}</div>` : '') +
+      (p.lastError ? `<div class="cwarn err">錯誤：${esc(p.lastError.text)}（${ago(p.lastError.at)}）</div>` : '')
+  }
+
+  // ---------- 第一層的按鈕區（#hr）：⏸ 打斷、💬 完整對話、交給 App／接回後台、三個入口 ----------
+  const hr = $('hr')
+  let hrKey = '', hoAsk = null, hoBusy = '' // hoAsk＝{ id, to }：正在問「要打斷嗎」的那位與方向（審查 15）；hoBusy＝送出中的那位
+  async function hoPost(p, to, interrupt, el) {
+    if (cfgPending) { toast('上一個還在確認，等一下再按'); return }
+    const btns = [...hr.querySelectorAll('button')]
+    const gen0 = cardGen
+    cfgPending = p.id; hoBusy = p.id; btns.forEach(b => { b.disabled = true })
+    const t0 = el && el.textContent; if (el) el.textContent = '確認中…'
+    let j
+    try { j = await post('/codex-handoff', { id: p.id, to, ...(interrupt ? { interrupt: true } : {}) }) }
+    finally { cfgPending = ''; hoBusy = ''; btns.forEach(b => { b.disabled = false }); if (el) el.textContent = t0 }
+    if (picked !== p.id || cardGen !== gen0) { toast(`${p.plate}：${j.text || j.error || (j.need === 'interrupt' ? '他還在做事，沒有交接' : '沒有回應')}`); load(); return } // 等回應時換了人、或關掉又重開：不替新卡片開確認
+    if (j.need === 'interrupt' && !interrupt) { hoAsk = { id: p.id, to }; hrKey = ''; drawHr(); return }
+    hoAsk = null; hrKey = ''
+    toast(`${p.plate}：${j.text || j.error || '沒有回應'}`)
+    await load()
+  }
+  function drawHr() {
+    const p = picked && find(picked)
+    if (!p) { hr.innerHTML = ''; hrKey = ''; closeSub(); return }
+    if (sub && sub.id !== p.id) closeSub()
+    drawSub()
+    const cap = capOf(p), app = talkOnly(p, cap), ho = handoffOf(p)
+    if (hoAsk && (hoAsk.id !== p.id || !ho || ho.to !== hoAsk.to || ho.why)) hoAsk = null // 換人、方向變了、不能交了：確認作廢
+    const key = [p.id, p.kind, JSON.stringify(cap), app, JSON.stringify(ho), JSON.stringify(hoAsk)].join('|')
+    if (key === hrKey || (hoBusy && hoBusy === p.id)) return
+    hrKey = key
+    // App 開的 Codex：第一層只留完整對話（不能打斷，不列灰掉的鈕）；其他人不能打斷時灰掉、點了說原因
+    hr.innerHTML = `<div class="g2${app ? ' one' : ''}">${app ? '' : `<button class="chip"${cap.key ? dk(cap.key) : ' data-k="esc"'}>⏸ 打斷</button>`}<button class="chip prim" data-p="chat">💬 完整對話</button></div>` +
+      (!ho ? '' : hoAsk
+        ? `<div class="hoask"><b>他還在做事，要打斷嗎？</b><span>${ho.to === 'app' ? '交給 App 要等他收尾，最多約半分鐘' : ''}</span></div><div class="g2"><button class="chip red" data-ho-yes>打斷並${ho.to === 'app' ? '交給 App' : '接回後台'}</button><button class="chip" data-ho-no>算了</button></div>`
+        : `<div class="g2 one"><button class="chip ho"${ho.why ? dk(ho.why) : ` data-ho="${ho.to}"`}>${ho.label}</button></div>`) +
+      Object.entries(SUBT).map(([k, t]) => `<button class="hsel" data-sub="${k}"><span class="v">${t}</span></button>`).join('')
+    hr.querySelectorAll('[data-ho]').forEach(b => b.addEventListener('click', () => hoPost(p, b.dataset.ho, false, b)))
+    const askTo = hoAsk && hoAsk.to
+    hr.querySelectorAll('[data-ho-yes]').forEach(b => b.addEventListener('click', () => hoPost(p, askTo, true, b)))
+    hr.querySelectorAll('[data-ho-no]').forEach(b => b.addEventListener('click', () => { hoAsk = null; hrKey = ''; drawHr() }))
+    hr.querySelectorAll('[data-why]').forEach(b => b.addEventListener('click', () => toast(b.dataset.why)))
+    hr.querySelectorAll('[data-sub]').forEach(b => b.addEventListener('click', () => openSub(b.dataset.sub)))
+    hr.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', async () => { const j = await post('/key', { id: p.id, key: b.dataset.k }); toast(j.text || '沒有回應') }))
+    hr.querySelectorAll('[data-p="chat"]').forEach(b => b.addEventListener('click', () => openChat(p)))
+  }
+
+  // ---------- 二級內容 ----------
+  function drawSub() {
+    if (!sub) return
+    const p = find(sub.id)
+    if (!p) { closeSub(); return }
+    if (cfgPending) return // 確認中不重畫（保住「確認中…」）
+    const cap = capOf(p), app = talkOnly(p, cap), claude = !p.kind, cx = p.kind === 'codex'
+    const key = [sub.kind, arm, p.model, p.effort, p.perm, p.switching, p.effortSwitching, p.permSwitching, p.role, p.team, p.title, p.tool, p.agent, p.src, p.host, JSON.stringify(cap), JSON.stringify(handoffOf(p)), people().filter(x => x.role === 'manager').map(x => x.agent + x.id).join(',')].join('|')
+    if (key === subKey) return
+    subKey = key
+    $('c2title').textContent = SUBH[sub.kind].replace(/^\S+\s/, '')
+    const body = $('c2body'), line = t => `<div class="note">${esc(t)}</div>`
+    if (sub.kind === 'home') {
+      body.innerHTML = Object.entries(SUBT).map(([k, t]) => `<button class="hsel" data-sub="${k}"><span class="v">${t}</span></button>`).join('')
+      body.querySelectorAll('[data-sub]').forEach(b => b.addEventListener('click', () => openSub(b.dataset.sub)))
+      return
+    }
+    let h = ''
+    if (sub.kind === 'cfg') {
+      if (app) h = line(whereOf(p) + '，只能傳話')
+      else {
+        const c = cfgNow(p), nm = (l, v) => (l.find(e => e.v === v) || {}).name || v
+        const sw = [p.switching && `模型切換中 → ${p.switching}`, p.effortSwitching && `投入程度切換中 → ${nm(c.o.efforts, p.effortSwitching)}`, p.permSwitching && `模式切換中 → ${nm(c.o.perms, p.permSwitching)}`].filter(Boolean)
+        if (arm === 'manual') {
+          // 切到「手動」前先提醒：Claude 每個動作都停；Codex 照它自己的說明；在哪按允許照後端回報的來源
+          const bg = p.src ? p.src === 'tmux' : p.host === 'tmux' || (cx && p.ctl)
+          const dm = c.o.perms.find(m => m.v === 'default') || {}
+          h = `<div class="mcard warn"><i class="ico warn"></i><div><b>切到「${esc(dm.name || '手動')}」？</b><span>${cx ? esc(dm.desc || '動作會停下來等你按允許') + '。' : '他每個動作都會停下來等你按允許。'}${bg ? '開在電腦背景，可以在手機替他按允許。' : '開在 App 或其他視窗，要到那個視窗按允許。'}</span></div></div>` +
+            `<button class="mbtn go" id="pmyes">確定切換</button><button class="mbtn" id="pmno">算了</button>`
+        } else {
+          h = (sw.length ? sw.map(line).join('') : '') + (claude && cap.model === RELOAD ? line(RELOAD) : '') +
+            `<h3 class="sec">模型</h3>` + c.o.models.map(m => `<button class="mrow mck${ck(c.model && c.model.v === m.v)}"${cap.model ? dk(cap.model) : ` data-mv="${esc(m.v)}"`}><span><b>${esc(m.name)}</b>${claude && MODEL_NOTE[m.v] ? `<small>${MODEL_NOTE[m.v]}</small>` : ''}</span></button>`).join('') +
+            (c.o.efforts.length ? `<h3 class="sec line">投入程度</h3>` + c.o.efforts.map(e => `<button class="mrow mck${ck(c.effort && c.effort.v === e.v)}"${cap.effort ? dk(cap.effort) : ` data-ev="${esc(e.v)}"`}><span><b>${esc(e.name)}</b>${e.desc || EFFDESC[e.v] ? `<small>${esc(e.desc || EFFDESC[e.v])}</small>` : ''}</span></button>`).join('') : '') +
+            (c.o.perms.length ? `<h3 class="sec line">模式${p.perm && !c.perm ? '<small>（目前的設定不在選單裡）</small>' : ''}</h3>` + c.o.perms.map(m => `<button class="mrow mck${ck(c.perm && c.perm.v === m.v)}"${cap.perm ? dk(cap.perm) : ` data-pv="${esc(m.v)}"`}><span><b>${esc(m.name)}</b>${m.desc ? `<small>${esc(m.desc)}</small>` : ''}</span></button>`).join('') : '')
+        }
+      }
+    } else if (sub.kind === 'hr') {
+      const row = (k, v) => v ? `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>` : ''
+      const team = `<select class="v2team" data-team><option value="">調部門　選擇部門</option>${people().filter(x => x.role === 'manager' && x.agent && x.id !== p.id && x.agent !== p.team).map(x => `<option value="${esc(x.agent)}">到 ${esc(x.plate)} 底下</option>`).join('')}${p.team ? '<option value="-">不掛主管</option>' : ''}</select>`
+      // 「接回後台」只給 App 開的 Codex（第一層也有）；終端機視窗的 Codex、agy 都不放（顧問 11-25）
+      const ho = app && p.kind === 'codex' && p.src === 'app' && handoffOf(p), back = ho && ho.to === 'tmux' ? `<button class="mbtn${ho.why ? '' : ' go'}"${ho.why ? dk(ho.why) : ' data-ho2="tmux"'}>${ho.label}</button>${ho.why ? line(ho.why) : ''}` : ''
+      if (app) h = line(whereOf(p) + '，只能傳話、調部門') + team + back // 來源、標題等收掉（顧問 11-25）；調部門只動辦公室座位，照樣能用
+      else h = `<div class="mcard kvs">${row('來源', esc(srcText(p) || '還不知道'))}${row('標題', p.title && esc(p.title))}${row('工具', p.tool && esc(p.tool))}${row('團隊', p.team && esc(p.team))}${row('名稱', p.agent && esc(p.agent))}</div>`
+      if (!app) h += (claude ? '<button class="mrow" data-p="profile"><span><b>員工檔案</b></span></button>' : '') +
+        (p.role === 'manager' ? '<button class="mrow" data-p="demote"><span><b>改回員工</b></span></button>'
+          : p.kind ? `<button class="mrow"${dk('主管只能是 Claude')}><span><b>升為主管</b><small>主管只能是 Claude</small></span></button>` // 使用者 11-24
+          : '<button class="mrow" data-p="promote"><span><b>升為主管</b></span></button>') +
+        team +
+        (cap.fire ? `<button class="mbtn danger"${dk(cap.fire)}>解雇</button>`
+          : arm === 'fire' ? `<div class="mcard warn"><i class="ico warn"></i><div><b>確定刪除 ${esc(p.plate)}？</b><span>${claude ? '對話會結束、Claude app 裡封存、電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）' : 'Codex 會關掉，電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）'}</span></div></div><button class="mbtn danger sure" data-f="yes">確定解雇</button><button class="mbtn" data-f="no">算了</button>`
+          : '<button class="mbtn danger" data-f="ask">解雇</button>')
+    } else {
+      if (app) h = line(whereOf(p) + '，只能傳話')
+      else h = (claude && cap.key === RELOAD ? line(RELOAD) : '') +
+        `<button class="mrow"${cap.key ? dk(cap.key) : ' data-k="compact"'}><span><b>整理記憶</b><small>把舊的對話壓縮成摘要，騰出記憶</small></span></button>` +
+        `<button class="mbtn danger${arm === 'clear' ? ' sure' : ''}"${cap.key ? dk(cap.key) : ' data-k="clear"'}>${arm === 'clear' ? '再按一次確定' + (cx ? '開新對話' : '清空') : cx ? '開新對話' : '清空重來'}</button>`
+    }
+    body.innerHTML = h
+    body.querySelectorAll('[data-why]').forEach(b => b.addEventListener('click', () => toast(b.dataset.why)))
+    body.querySelectorAll('[data-ho2]').forEach(b => b.addEventListener('click', () => hoPost(p, b.dataset.ho2, false, b)))
+    body.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => b.classList.contains('on') ? 0 : cfgPost(p, '/model', { model: b.dataset.mv }, b)))
+    body.querySelectorAll('[data-ev]').forEach(b => b.addEventListener('click', () => b.classList.contains('on') ? 0 : cfgPost(p, '/effort', { effort: b.dataset.ev }, b)))
+    body.querySelectorAll('[data-pv]').forEach(b => b.addEventListener('click', () => b.classList.contains('on') ? 0
+      : b.dataset.pv === 'default' ? (arm = 'manual', subKey = '', drawSub()) : cfgPost(p, '/perm', { perm: b.dataset.pv }, b)))
+    const yes = body.querySelector('#pmyes'), no = body.querySelector('#pmno')
+    if (yes) yes.addEventListener('click', () => cfgPost(p, '/perm', { perm: 'default' }, yes))
+    if (no) no.addEventListener('click', () => { arm = ''; subKey = ''; drawSub() })
+    body.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.k === 'clear' && arm !== 'clear') { arm = 'clear'; subKey = ''; drawSub(); return }
+      arm = ''; subKey = ''
+      const j = await post('/key', { id: p.id, key: b.dataset.k }); toast(j.text || '沒有回應'); drawSub()
+    }))
+    body.querySelectorAll('button[data-p]').forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.p === 'profile') { openProfile(p); return }
+      const j = await post('/staffing', { id: p.id, op: b.dataset.p }); toast(j.text || '沒有回應')
+    }))
+    body.querySelectorAll('select[data-team]').forEach(s => s.addEventListener('change', async () => {
+      if (!s.value) return
+      const j = await post('/staffing', { id: p.id, op: 'team', team: s.value === '-' ? '' : s.value }); toast(j.text || '沒有回應')
+      s.value = ''
+    }))
+    body.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', async () => {
+      const f = b.dataset.f
+      if (f === 'ask') { arm = 'fire'; subKey = ''; drawSub(); return }
+      arm = ''; subKey = ''
+      if (f === 'no') { drawSub(); return }
+      const j = await post('/fire', { id: p.id })
+      toast(j.text || '沒有回應')
+      if (j.ok) show()
+    }))
+  }
+
+  // ---------- 💬 完整對話：整頁顯示，像 Claude app；往上滑載入更早的，開著時每 2 秒拿新的 ----------
+  const cv = $('chat'), clog = $('chlog')
+  let chat = null
+  const hm = t => t ? new Date(t).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : ''
+  const TOOLZH = { Bash: '跑指令', Read: '讀檔', Write: '寫檔', Edit: '改檔', Grep: '搜尋', Glob: '找檔', Skill: '技能', Agent: '子代理', ToolSearch: '載入工具', WebSearch: '上網搜尋', WebFetch: '讀網頁', exec: '跑指令', exec_command: '跑指令', wait: '等結果', apply_patch: '改檔' }
+  function fillResult(det, r) { det.querySelector('.res').textContent = r.text || '（沒有輸出）'; if (r.err) det.classList.add('bad'); det.classList.remove('run') }
+  function itemEl(it) {
+    if (it.k === 'result') { const det = chat.tools.get(it.id); if (det) fillResult(det, it); else chat.orphans.set(it.id, it); return null }
+    const el = document.createElement(it.k === 'tool' ? 'details' : 'div')
+    if (it.k === 'user') {
+      el.className = 'cb me'
+      el.innerHTML = `<div class="tm">我${it.at ? '｜' + hm(it.at) : ''}</div><div class="t">${esc(it.text || '')}${it.img ? `<div class="im">圖片 ×${it.img}</div>` : ''}</div>`
+    } else if (it.k === 'ai') {
+      el.className = 'cb ai'
+      const who = (whoOf(chat.id) || {}).kind === 'codex' ? 'Codex' : 'Claude'
+      el.innerHTML = `<div class="tm">${who}${it.at ? '｜' + hm(it.at) : ''}</div><div class="md">${md(it.text || '')}</div>`
+    } else if (it.k === 'tool') {
+      el.className = 'ct run'
+      el.dataset.tn = it.name
+      el.innerHTML = `<summary>${esc(toolLine(it))}</summary><div class="lab">內容</div><pre class="in"></pre><div class="lab">結果</div><pre class="res">（還在跑…）</pre>`
+      el.querySelector('.in').textContent = it.input || ''
+      chat.tools.set(it.id, el)
+      const r = chat.orphans.get(it.id)
+      if (r) { chat.orphans.delete(it.id); fillResult(el, r) }
+    } else { el.className = 'cn'; el.textContent = it.text || '' }
+    return el
+  }
+  // 工具一行（11-26 定案 B2）：「執行 git status」「讀了 page.html」；同一種工具連著好幾個收成一組「讀了 3 個檔」，點開再看每一個
+  const TOOLVERB = { Bash: ['執行', '跑了 %n 個指令'], exec: ['執行', '跑了 %n 個指令'], exec_command: ['執行', '跑了 %n 個指令'], Read: ['讀了', '讀了 %n 個檔'], Write: ['寫了', '寫了 %n 個檔'], Edit: ['改了', '改了 %n 個檔'], apply_patch: ['改檔', '改了 %n 次檔'], Grep: ['搜尋', '搜尋 %n 次'], Glob: ['找檔', '找檔 %n 次'], WebSearch: ['上網搜尋', '上網搜尋 %n 次'], WebFetch: ['讀網頁', '讀了 %n 個網頁'] }
+  const toolName = n => n.startsWith('mcp__') ? n.split('__').slice(1).join('・') : (TOOLZH[n] || n)
+  function toolLine(it) {
+    let a = it.desc || ''
+    try { const x = JSON.parse(it.input || ''); let v = x && (x.command ?? x.cmd ?? x.file_path ?? x.path ?? x.pattern ?? x.url ?? x.query); if (Array.isArray(v)) v = v.join(' '); if (typeof v === 'string' && v) a = v.replace(/\s+/g, ' ') } catch {}
+    if (/^(Read|Write|Edit)$/.test(it.name)) a = a.split('/').pop()
+    const v = TOOLVERB[it.name]
+    return `${v ? v[0] : toolName(it.name)} ${a}`.trim().slice(0, 140)
+  }
+  /** 照順序放進 box（對話或一批更早的片段）：工具跟前一個同名工具（或同名那組）併成一組 */
+  function addTo(box, it, fresh) {
+    const el = itemEl(it)
+    if (!el) return
+    if (fresh) el.classList.add('po-new')
+    const last = box.lastElementChild
+    if (it.k === 'tool' && last && last.dataset.tn === it.name) {
+      let g = last
+      if (!last.classList.contains('ctg')) {
+        g = document.createElement('details'); g.className = 'ct ctg'; g.dataset.tn = it.name
+        g.innerHTML = '<summary></summary><div class="gl"></div>'
+        last.replaceWith(g); g.querySelector('.gl').appendChild(last)
+      }
+      g.querySelector('.gl').appendChild(el)
+      const n = g.querySelector('.gl').children.length, v = TOOLVERB[it.name]
+      g.querySelector('summary').textContent = v ? v[1].replace('%n', n) : `${toolName(it.name)} ×${n}`
+      return
+    }
+    box.appendChild(el)
+  }
+  function topLine() {
+    let t = clog.querySelector('.ctop')
+    if (!t) { t = document.createElement('div'); t.className = 'ctop'; clog.prepend(t) }
+    t.textContent = chat.start > 0 ? '載入更早的對話' : '— 對話開頭 —'; t.classList.toggle('more', chat.start > 0)
+    t.onclick = () => { if (chat && chat.start > 0) older() }
+  }
+  function demoChat(id, more) {
+    const p = find(id), now = Date.now()
+    return { ok: true, sid: 'demo-' + id, start: 0, end: 5, items: more ? [] : [
+      { k: 'note', text: '— 示意對話：不是真的 session —' },
+      { k: 'user', text: `（示意）${p ? p.plate : ''}，幫我整理今天要做的事`, at: now - 600000 },
+      { k: 'tool', id: 't1', name: 'Read', desc: '示意：讀取行程', input: '示意資料' },
+      { k: 'result', id: 't1', text: '示意結果' },
+      { k: 'ai', text: `（示意回覆）我是 **${p ? p.plate : '示意同事'}**，目前狀態：${p ? MODE[p.mode] || p.mode : '—'}。真資料模式下，這裡會是這個 session 的完整對話。`, at: now - 540000 },
+    ] }
+  }
+  async function getChat(qs) {
+    if (DEMO) return demoChat(chat.id, qs !== '' && !qs.startsWith('&limit'))
+    try { return await (await fetch(`/chat.json?id=${encodeURIComponent(chat.id)}${qs}`, { cache: 'no-store' })).json() } catch { return { ok: false, text: '連不到電腦' } }
+  }
+  async function older(first) {
+    if (!chat || chat.busy || (!first && chat.start <= 0)) return
+    chat.busy = true
+    const me = chat, j = await getChat(first ? '&limit=20' : `&before=${chat.start}`) // 第一頁 20 則（B4：開頁 <1 秒）；往上翻照舊一頁 60
+    me.busy = false // 等的時候卡片可能關了（chat＝null）：清自己那份（0.63.6，e2e 偶發 TypeError）
+    if (chat !== me) return
+    if (!j.ok) { $('chsent').textContent = j.text || '讀不到'; return }
+    if (first) { chat.sid = j.sid; chat.end = j.end; chat.ro = !!j.readOnly; chatStatus() } // readOnly（灰卡、App 裡的 Codex）：只能看
+    chat.start = j.start
+    // 照順序建（工具結果在工具之後才接得上），再整批插到最上面
+    const frag = document.createDocumentFragment()
+    for (const it of j.items) addTo(frag, it)
+    const h = clog.scrollHeight, top = clog.scrollTop, t = clog.querySelector('.ctop')
+    if (t) t.after(frag); else clog.prepend(frag)
+    topLine()
+    clog.scrollTop = first ? clog.scrollHeight : top + (clog.scrollHeight - h)
+    if (first && j.items.length && clog.scrollHeight <= clog.clientHeight + 40) older(false) // 一頁不夠一個畫面：再拿一段
+  }
+  async function newer() {
+    if (!chat || chat.busy || document.hidden) return
+    chat.busy = true
+    const me = chat, j = await getChat(`&after=${chat.end}`)
+    me.busy = false
+    if (chat !== me || !j.ok) return
+    if (j.sid !== chat.sid || j.reset) { reopen(); return } // 清空重來、換了對話紀錄：整個重讀
+    chat.end = j.end
+    if (!j.items.length) return
+    const near = clog.scrollHeight - clog.scrollTop - clog.clientHeight < 80, n0 = clog.childElementCount
+    for (const it of j.items) addTo(clog, it, true)
+    // 在最下面就跟著捲；往上捲在看舊的就不動，浮「↓ 新訊息」（B4）
+    if (near) clog.scrollTop = clog.scrollHeight
+    else if (clog.childElementCount !== n0 || j.items.some(x => x.k !== 'result')) $('chnew').hidden = false
+  }
+  // 頂端狀態列（11-26 定案 B3）：狀態（正在寫／等你／卡在允許）＋打斷鈕；原人物卡那行（模型・投入程度・模式・記憶）；左邊 Q 版大頭
+  // 第二階段（0.63.51 伺服器介面）：caps 有就照它（send／interrupt／handoff…），沒有（舊伺服器）照舊推論
+  const roOf = p => p.away || (p.caps ? p.caps.send === false : p.kind === 'codex' && (p.src === 'app' || (!p.src && !p.ctl))) // 只能看：灰卡、App 裡的 Codex
+  const chatMode = p => p.away ? 'App 裡（已關）' : p.mode === 'waiting' && (p.approval || p.approvalInfo) ? '卡在允許' : p.mode === 'waiting' ? '等你' : MODE[p.mode] || p.modeText || p.mode || ''
+  /** 灰卡（state.codexAway）：不在名冊、只能看完整對話，頂端放「接回後台」 */
+  function awayOf(id) {
+    const a = ((st && st.codexAway) || []).find(x => x.id === id)
+    return a && { id: a.id, plate: a.plate, kind: 'codex', species: 'chatgpt', away: a }
+  }
+  const whoOf = id => find(id) || awayOf(id)
+  function chatStatus() {
+    if (!chat) return
+    const p = whoOf(chat.id), m = $('chmode'), btns = $('chbtns')
+    if (!p) { m.textContent = '已經不在線'; m.className = 'gone'; btns.innerHTML = ''; $('chline').textContent = ''; $('chlive').hidden = true; $('chask').hidden = true; chat.key = ''; return }
+    const ro = roOf(p) || chat.ro
+    $('chcfg').hidden = !!p.away || (ro && !!p.caps && p.caps.cfg === false) // 審查 K-2：唯讀又不能設定（在線 App Codex）也收起，跟灰卡一致
+    const mt = chatMode(p) + (!p.away && p.tool && /^(thinking|typing|reading)$/.test(p.mode) ? ` · ${p.tool}` : '')
+    if (m.textContent !== mt) m.textContent = mt // 有變才改（狀態列是 live region，每秒重設同樣的字會一直唸）
+    m.className = p.away ? 'wait' : p.mode === 'waiting' ? (p.approval || p.approvalInfo ? 'ask' : 'wait') : p.mode === 'blocked' ? 'bad' : /^(thinking|typing|reading)$/.test(p.mode) ? 'busy' : ''
+    if (p.away) {
+      // 灰卡：只有「接回後台」（能不能接照 codexAway 的 resumable／why）
+      const a = p.away
+      $('chline').textContent = ['Codex', a.handedOff ? '從辦公室交過去' : '在 App 新開的'].join('・')
+      const key = ['away', a.id, a.resumable, a.why || '', chat.hoBusy || ''].join('|')
+      if (key !== chat.key) {
+        chat.key = key
+        btns.innerHTML = `<button type="button" class="chip ho"${a.resumable ? ' data-away-go' : dk(a.why || '現在接不回來')}>${chat.hoBusy ? '確認中…' : '🖥 接回後台'}</button>`
+        btns.querySelectorAll('[data-why]').forEach(b => b.addEventListener('click', () => toast(b.dataset.why)))
+        btns.querySelectorAll('[data-away-go]').forEach(b => b.addEventListener('click', async () => {
+          if (chat.hoBusy) return
+          const me = chat; chat.hoBusy = '1'; chat.key = ''; chatStatus()
+          let j; try { j = await post('/codex-handoff', { id: a.id, to: 'tmux' }) } finally { me.hoBusy = '' }
+          toast(`${a.plate}：${j.text || j.error || '沒有回應'}`)
+          if (chat === me) { chat.key = ''; await load(); chatStatus() }
+        }))
+      }
+    } else {
+      const c = cfgNow(p), cap = capOf(p), ho = handoffOf(p)
+      $('chline').textContent = [c.model ? c.model.name.split(' ')[0] : p.model ? String(p.model).split(' ')[0] : '', c.effort && c.effort.name, c.perm && c.perm.name, p.ctx != null ? `記憶 ${p.ctx}%` : '', p.kind ? KIND[p.kind] || p.kind : ''].filter(Boolean).join('・')
+      // 按鈕：能打斷才放打斷（不支援的不顯示；Claude 只是外掛還沒載入新版時灰掉、點了說原因）；Codex 交給 App／接回後台放這裡
+      // 審查 C-1：只有在做事或等你時才放打斷（閒著時送 Esc 可能清掉電腦輸入框打到一半的字）
+      const busy = /^(thinking|typing|reading|waiting)$/.test(p.mode)
+      const canKey = p.caps ? p.caps.interrupt || (!p.kind && cap.key === RELOAD) : !cap.key || (!p.kind && cap.key === RELOAD)
+      const key = [p.id, ro, cap.key, canKey, busy, JSON.stringify(ho), chat.hoAsk || ''].join('|')
+      if (key !== chat.key) {
+        chat.key = key
+        btns.innerHTML = (!ro && canKey && busy ? `<button type="button" class="chip"${cap.key ? dk(cap.key) : ' data-ck="esc"'}>⏸ 打斷</button>` : '') +
+          (ho ? `<button type="button" class="chip ho"${ho.why ? dk(ho.why) : ` data-cho="${ho.to}"`}>${chat.hoAsk === ho.to ? '再按一次：打斷並' + (ho.to === 'app' ? '交給 App' : '接回後台') : ho.label}</button>` : '')
+        btns.querySelectorAll('[data-why]').forEach(b => b.addEventListener('click', () => toast(b.dataset.why)))
+        btns.querySelectorAll('[data-ck]').forEach(b => b.addEventListener('click', async () => { const j = await post('/key', { id: p.id, key: b.dataset.ck }); toast(j.text || '沒有回應') }))
+        btns.querySelectorAll('[data-cho]').forEach(b => b.addEventListener('click', async () => {
+          const to = b.dataset.cho, me = chat, again = chat.hoAsk === to
+          b.disabled = true; b.textContent = '確認中…'
+          const j = await post('/codex-handoff', { id: p.id, to, ...(again ? { interrupt: true } : {}) })
+          if (chat !== me) return
+          chat.hoAsk = j.need === 'interrupt' && !again ? to : ''; chat.key = ''
+          if (!chat.hoAsk) toast(`${p.plate}：${j.text || j.error || '沒有回應'}`)
+          await load(); chatStatus()
+        }))
+      }
+    }
+    // 只能看（灰卡、App 裡的 Codex）：輸入框、照片收起，指向「接回後台」
+    $('chsay').hidden = ro
+    const RO_T = p.away ? '在 App 裡關掉的 Codex 只能看；要從這裡傳話，先按上面的「接回後台」' : 'App 裡開的 Codex 只能看；要從這裡傳話，先按上面的「接回後台」'
+    if (ro && !$('chsent').dataset.err && $('chsent').textContent !== RO_T) $('chsent').textContent = RO_T
+    drawLive(p)
+    if (!p.away) drawAsk(p); else { $('chask').hidden = true; chat.askKey = '' }
+    const sent = $('chsent')
+    const st1 = !ro && p.cmd && Date.now() - p.cmd.at < 10 * 60000 && !sent.dataset.err ? `「${p.cmd.text.slice(0, 30)}」${{ pending: '已送出，等它收', delivered: '它收到了', expired: '10 分鐘沒被收，作廢了' }[p.cmd.state] || ''}` : null
+    if (st1 !== null && sent.textContent !== st1) sent.textContent = st1
+  }
+  // ---------- 正在寫（B1，GET /live.json）：只對開著的這一頁每秒問一次；伺服器同一位 0.7 秒內只擷取一次 ----------
+  // 有半段文字就顯示（最多 2000 字、捲到最後）；沒有 tmux pane（App、agy、終端機）的 writing 是 null，只寫「正在寫…」
+  async function liveTick() {
+    const me = chat
+    if (!me || me.liveBusy || document.hidden) return
+    const p = find(me.id)
+    if (!p || !/^(thinking|typing|reading)$/.test(p.mode)) { me.live = null; return }
+    me.liveBusy = true
+    let j; try { j = await (await fetch(`/live.json?id=${encodeURIComponent(me.id)}`, { cache: 'no-store' })).json() } catch { j = null } finally { me.liveBusy = false }
+    if (chat !== me) return
+    me.live = j && j.ok && (j.state === 'writing' || j.state === 'tool') && j.writing ? j.writing : null
+    drawLive(p)
+  }
+  function drawLive(p) {
+    const box = $('chlive'), on = !p.away && /^(thinking|typing|reading)$/.test(p.mode)
+    box.hidden = !on
+    if (!on) { box.classList.remove('txt'); return }
+    const t = chat.live
+    if (t) {
+      if (box.dataset.t !== t) { box.dataset.t = t; box.textContent = t; box.classList.add('txt'); box.scrollTop = box.scrollHeight }
+    } else {
+      const h = `${MODE[p.mode]}…`
+      if (box.textContent !== h) { box.textContent = h; box.dataset.t = '' }
+      box.classList.remove('txt')
+    }
+  }
+  // ---------- 卡在允許（B5，伺服器工程師B phone-approve）：照 approvalInfo.options 出按鈕 ----------
+  // 一定有「到電腦上看」（只說明、不送）；允許鍵從卡出現（at）算 1 秒後才能按；按下鎖「處理中…」，等卡消失或 nonce 換了才解鎖，5 秒還在就說「還沒處理到」並解鎖
+  // 拒絕可以附原因（選填，最多 300 字）；不做「以後都允許」。舊伺服器只有 approval 字串：照舊只顯示內容、請到電腦上按
+  const APPWHERE = p => p.kind === 'codex' ? 'ChatGPT／Codex App' : p.kind === 'agy' ? 'agy 視窗' : '電腦上的 Claude'
+  function drawAsk(p) {
+    const box = $('chask'), info = p.approvalInfo
+    if (!p.approval && !info) { box.hidden = true; box.innerHTML = ''; chat.askKey = ''; chat.ask = null; return }
+    box.hidden = false
+    const nonce = info ? info.nonce : ''
+    // 按過的那張：卡消失或換了 nonce 就解鎖（上面 return 已處理消失）；同一張超過 5 秒還在＝還沒處理到
+    if (chat.ask && chat.ask.nonce === nonce && chat.ask.at && Date.now() - chat.ask.at > 5000) { chat.ask = null; chat.askKey = ''; toast('還沒處理到，請到電腦上看') }
+    if (chat.ask && chat.ask.nonce !== nonce) chat.ask = null
+    const opts = info && Array.isArray(info.options) ? info.options : []
+    // 允許鍵 1 秒後才能按：從卡出現（at）與這張第一次畫到這頁上，取晚的那個算
+    if (nonce && !(chat.seen || (chat.seen = {}))[nonce]) chat.seen[nonce] = Date.now()
+    const wait = info ? Math.max(0, Math.max(info.at || 0, (chat.seen && chat.seen[nonce]) || 0) + 1000 - Date.now()) : 0
+    const cd = askLeft(info), cdEl = box.querySelector('.askcd')
+    if (cdEl && cdEl.textContent !== cd) cdEl.textContent = cd // 倒數只換這一行，不整塊重畫（拒絕原因、焦點不受影響）
+    const key = [p.approval, JSON.stringify(info || null), chat.ask ? 'busy' : '', wait > 0].join('|')
+    if (key === chat.askKey) return
+    chat.askKey = key
+    if (wait > 0) setTimeout(() => { if (chat) { chat.askKey = ''; chatStatus() } }, wait + 30)
+    const desc = info ? String(info.desc || '') : String(p.approval)
+    const long = desc.length > 160 || desc.split('\n').length > 4
+    const btn = o => {
+      if (chat.ask) return `<button type="button" class="chip" disabled>${chat.ask.key === o.key ? '處理中…' : esc(o.label)}</button>`
+      if (o.key === 'allow' && wait > 0) return `<button type="button" class="chip" disabled>${esc(o.label)}</button>`
+      return `<button type="button" class="chip${o.key === 'allow' ? ' prim' : ''}" data-ak="${esc(o.key)}">${esc(o.label)}</button>`
+    }
+    // 審查 K-1：整塊重畫（冷卻結束、送出失敗、卡片內容更新）前，留住拒絕原因的字、焦點與游標位置，畫完放回
+    const old = box.querySelector('.askwhy'), keep = old && { v: old.value, f: document.activeElement === old, a: old.selectionStart, b: old.selectionEnd }
+    box.innerHTML = `<div class="mcard warn"><i class="ico warn"></i><div><b>等你允許${info && info.tool ? `：${esc(info.tool)}` : ''}</b>` +
+      (long ? `<details class="askd"><summary>${esc(desc.slice(0, 80))}…</summary><pre>${esc(desc)}</pre></details>` : `<span class="askd1">${esc(desc)}</span>`) +
+      (info && info.reason ? `<span class="askr">理由：${esc(info.reason)}</span>` : '') +
+      (cd ? `<span class="askr askcd" role="timer">${cd}</span>` : '') + '</div></div>' +
+      (info && info.why ? `<div class="note">${esc(info.why)}</div>` : '') +
+      (!opts.length && !(info && /請到/.test(info.why || '')) ? `<div class="note">請到 ${APPWHERE(p)} 按</div>` : '') + // why 已經寫「請到電腦按」（已交回電腦、手機核准沒開）就不重複
+      `<div class="g2">${opts.map(btn).join('')}<button type="button" class="chip" data-ak-pc>到電腦上看</button></div>` +
+      (opts.some(o => o.key === 'deny') && !chat.ask ? `<input class="askwhy" maxlength="300" placeholder="拒絕的原因（選填）" aria-label="拒絕的原因（選填）">` : '')
+    const nw = box.querySelector('.askwhy')
+    if (nw && keep) { nw.value = keep.v; if (keep.f) { nw.focus(); try { nw.setSelectionRange(keep.a, keep.b) } catch {} } }
+    // 審查 K-1b：處理中那版沒有輸入框（keep 是空的）：原因另外記在 chat.askWhy（照這張的 nonce），送出失敗重畫時放回
+    else if (nw && chat.askWhy && chat.askWhy.n === nonce) nw.value = chat.askWhy.v
+    if (nw) nw.addEventListener('input', () => { chat.askWhy = { n: nonce, v: nw.value } })
+    box.querySelectorAll('[data-ak-pc]').forEach(b => b.addEventListener('click', () => toast(`請到 ${APPWHERE(p)} 看這張，按完這裡會自己消失`)))
+    box.querySelectorAll('[data-ak]').forEach(b => b.addEventListener('click', async () => {
+      if (chat.ask) return
+      const k = b.dataset.ak, why = (box.querySelector('.askwhy') || {}).value || ''
+      chat.askWhy = { n: nonce, v: why } // K-1b：處理中那版不放輸入框，先記下來
+      const me = chat; chat.ask = { nonce, key: k, at: 0 }; chat.askKey = ''; drawAsk(p)
+      let j; try { j = await post('/approve', { id: p.id, key: k, nonce, ...(k === 'deny' && why.trim() ? { reason: why.trim().slice(0, 300) } : {}) }) } catch { j = { ok: false, text: '連不到電腦' } }
+      toast(j.text || j.error || '沒有回應')
+      if (chat !== me) return
+      if (!j.ok) chat.ask = null; else if (chat.ask) chat.ask.at = Date.now() // 成功：等卡消失（最多 5 秒）
+      chat.askKey = ''; await load(); chatStatus()
+    }))
+  }
+  function reopen() {
+    if (!chat) return
+    const id = chat.id
+    clearInterval(chat.timer)
+    chat = { id, sid: '', start: 0, end: 0, tools: new Map(), orphans: new Map(), busy: false, key: '', askKey: '', hoAsk: '' }
+    clog.innerHTML = ''; $('chnew').hidden = true
+    chat.timer = setInterval(() => { newer(); chatStatus(); liveTick() }, 1000) // 開著那一頁每秒拿新的（B1：1～2 秒內出現）
+    older(true)
+  }
+  function openChat(p) {
+    if (!p) return
+    show()
+    if (chat) clearInterval(chat.timer)
+    chat = { id: p.id }
+    $('chname').textContent = `${p.role === 'manager' ? '★ ' : ''}${p.plate}`
+    $('chsent').textContent = ''; delete $('chsent').dataset.err
+    // Q 版大頭（D）：放大約兩倍，貼狀態列左下、頭探進標題列；名牌與狀態列左邊讓到小人實際寬度
+    const ch = $('chchibi'), cu = window.PO_KV ? window.PO_KV.chibi(p.species) : ''
+    ch.onload = () => { const w = ch.naturalHeight ? Math.min(96, Math.round(100 * ch.naturalWidth / ch.naturalHeight)) : 96; cv.style.setProperty('--kvw', (12 + w + 6) + 'px') }
+    ch.onerror = () => { ch.hidden = true; cv.classList.remove('kvon') }
+    if (cu && ch.getAttribute('src') !== cu) ch.src = cu
+    ch.hidden = !cu; cv.classList.toggle('kvon', !!cu)
+    pop(cv, 'flex')
+    reopen()
+    chatStatus()
+  }
+  function closeChat() { if (chat) clearInterval(chat.timer); chat = null; if (fromChat) show(); unpop(cv, () => { if (!chat) clog.innerHTML = '' }) }
+  $('chback').addEventListener('click', closeChat)
+  $('chcfg').addEventListener('click', () => { const p = chat && find(chat.id); if (p) openSettings(p); else toast(chat && awayOf(chat.id) ? '在 App 裡的 Codex 先接回後台才能設定' : '這位已經不在線') })
+  $('chnew').addEventListener('click', () => { clog.scrollTop = clog.scrollHeight; $('chnew').hidden = true })
+  clog.addEventListener('scroll', () => {
+    if (clog.scrollTop < 60) older(false)
+    if (clog.scrollHeight - clog.scrollTop - clog.clientHeight < 80) $('chnew').hidden = true
+  })
+  const ctext = $('chtext')
+  ctext.addEventListener('input', () => { ctext.style.height = 'auto'; ctext.style.height = Math.min(ctext.scrollHeight, 160) + 'px' })
+  const chSay = t => { $('chsent').textContent = t }
+  $('chsay').addEventListener('submit', async ev => {
+    ev.preventDefault()
+    if (!chat || !ctext.value.trim()) return
+    const btn = $('chsend'), sent = $('chsent'), ctx = chatCtx()
+    if (!sendLock('chat')) return
+    btn.disabled = true
+    let j
+    try { j = await post('/command', { id: ctx.id, text: ctx.text }) } finally { btn.disabled = false; sendUnlock('chat') }
+    if (!chatStill(ctx)) { toast(j.ok ? j.text || '已送出，等它收' : j.unsure ? `不確定有沒有收到：${j.error}` : `沒送出：${j.error || j.text || '連不到電腦'}`); return }
+    if (j.ok) { if (clearIfSame(ctext, ctx)) ctext.style.height = 'auto'; delete sent.dataset.err; sent.textContent = j.text || '已送出，等它收' }
+    else { sent.dataset.err = '1'; sent.textContent = j.unsure ? `不確定有沒有收到：${j.error}` : `沒送出：${j.error || j.text || '連不到電腦'}`; setTimeout(() => delete sent.dataset.err, 5000) }
+  })
+  $('chphoto').addEventListener('click', () => { if (chat) askPhoto(chSay, () => ({ ...chatCtx(), box: ctext }), chatStill, 'chat') })
+
+  // 給 v2/scene.js（場景、人事室、協作桌）用的
+  window.PO = {
+    demo: DEMO, demoN, esc, md, toast, post, choosePhoto, sendLock, sendUnlock, reqLock, reqUnlock, reqBusy, cfgOpts, EFFORTS, PERMS, sheet, sheetId, LOADING, pop, unpop, isOn, RM, closeSheet, show, openChat, openAwayChat: id => { const p = awayOf(id); if (p) openChat(p); else toast('這位已經不在 App 清單上') }, openHire, openQueue, openPay, openShift, openProfile, load,
+    state: () => st, people, find, onState: f => { listeners.push(f); if (st) f(st) },
+  }
+  load()
+  setInterval(load, 1000)
+  document.addEventListener('visibilitychange', load)
+})()
 </script>
+<script src="/v2/scene.js"></script>
 </body>
 </html>

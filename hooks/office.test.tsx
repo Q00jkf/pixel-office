@@ -2,6 +2,9 @@ import { test, expect } from 'claude-code/testing'
 
 import type { Coworker } from '../types'
 import { parseStatus } from './status'
+import { reloadIfIdle, runHr } from './hr'
+import { doneNonces, nextCommand } from './register'
+import { RELOAD_QUIET_MS, RELOAD_RETRY_MS, canReloadNow, newerVersion, shouldReload } from './selfreload'
 import { catPose, catRange, catWalkRows, drawScene, encode, layout, plateName, sceneRows, sceneWidth } from './scene'
 
 const P = (id: string, name: string, mode: Coworker['mode'] = 'idle', isMe = false, role: Coworker['role'] = 'staff'): Coworker => ({
@@ -156,11 +159,13 @@ test('desktop draws the office as an SVG under the size limit, with all buttons'
   const svg = await ui.find({ type: 'Svg' })
   const src = String(svg!.props.source)
   expect(src.startsWith('<svg')).toBe(true)
-  expect(src).toContain('<path')
+  expect(src).toContain('<use href="#V"') // v2（0.62.0）起 Desktop 畫 v2 素材表（hooks/sheetV2.ts）
   expect(src.length).toBeLessThanOrEqual(131072)
   expect(src).toContain('Microsoft JhengHei') // 0.14.0 起 Desktop 畫向量（vector.ts），不是點陣
   expect(String(svg!.props.alt)).toContain('online')
-  for (const key of ['night', 'hit-pet', 'hit-printer', 'hit-corgi']) expect(await ui.find({ key })).toBeDefined()
+  // v2 沒有寵物、柯基（使用者 2026-11-22 決定）；家具選單、點窗戶切夜間照舊
+  for (const key of ['night', 'hit-printer', 'hit-cabinet', 'hit-mailbox', 'hit-vending', 'hit-meeting']) expect(await ui.find({ key })).toBeDefined()
+  for (const key of ['hit-pet', 'hit-corgi']) expect(await ui.find({ key })).toBeUndefined()
   expect(await ui.find({ key: 'role' })).toBeUndefined() // 0.16.0 拿掉升為主管按鈕
   await ui.unmount()
 })
@@ -178,9 +183,9 @@ test('desktop keeps a text line for the head count (old behaviour)', async ($, o
   await ui.unmount()
 })
 
-const MOCKS = (on: any, writes: string[]) => {
+const MOCKS = (on: any, writes: string[], o: { clock?: false } = {}) => {
   on('env.get', () => ({ value: 'C:/Users/tester' }))
-  on('clock.now', () => ({ value: 1_000_000 }))
+  if (o.clock !== false) on('clock.now', () => ({ value: 1_000_000 })) // { clock: false }：測試自己用 mock.clock（要推進時間）
   on('fs.list', () => ({ value: [] }))
   on('fs.write', (_$: any, e: any) => {
     writes.push(e.text)
@@ -357,7 +362,7 @@ test('the system prompt gets one short pixel-office section', async ($, on) => {
   expect(ROLE_SECTION).toContain('roles.md §5')
 })
 
-import { ROLE_SECTION, roleNoteDue } from './register'
+import { MENU_PRESS_MS, ROLE_SECTION, roleNoteDue } from './register'
 test('compose skipped by another mod (Desktop-hosted, 2026-11-14): the first prompt carries the section once; never when compose ran', () => {
   expect(roleNoteDue(false, false)).toBe(true)
   expect(roleNoteDue(false, true)).toBe(false) // 已塞過
@@ -1639,6 +1644,25 @@ test('waiting: the deadline, a broken file or the terminal answering first all g
   expect(await waitForDecision(terminal.io, WANT, 8500)).toBeUndefined()
 })
 
+// 使用者 2026-11-26 接受的已知行為（顧問改版裁示：不用在場驗證，防線改成留證據）：照 approvals 檔抄出四項、
+// 寫進 decisions 檔的 allow 會被採用。這條是回歸測試：哪天改了這個行為，要先回頭問使用者，不是悄悄修掉
+test('known, accepted by the user 2026-11-26: a fully matching "allow" written into the decision file is taken (evidence goes to approve-log instead)', async () => {
+  const h = await textHash('rm -rf ~')
+  const files: Record<string, string> = {}
+  const f = slipIO(files)
+  f.onTick(() => { if (files.decision === TOMBSTONE) files.decision = decided({ session: 's1', toolUseId: 'toolu_9', nonce: 'fresh-nonce', textHash: h }) })
+  expect(await runSlip(f.io as any, { session: 's1', name: 'impl' }, 'toolu_9', 'Bash', 'rm -rf ~', 8500)).toBe('allow')
+})
+
+test('approve-log entry for an adopted decision: time, own session, tool, first 200 chars, allow/deny, source (panel-file or phone)', () => {
+  const long = 'x'.repeat(250)
+  const a = JSON.parse(adoptedEntry({ at: 5, session: 's1', name: 'impl', tool: 'Bash', text: long, decided: { behavior: 'allow' }, phone: false }))
+  expect(a).toEqual({ at: 5, kind: 'adopted', id: 's1', name: 'impl', tool: 'Bash', text: 'x'.repeat(200), behavior: 'allow', via: 'panel-file' })
+  const b = JSON.parse(adoptedEntry({ at: 6, session: 's1', name: 'impl', tool: 'Edit', text: 'a\nb', decided: { behavior: 'deny', message: 'no', via: 'phone' }, phone: true }))
+  expect(b).toMatchObject({ behavior: 'deny', via: 'phone', text: 'a\nb' })
+  expect(adoptedEntry({ at: 7, session: 's', name: 'n', tool: 't', text: 'x', decided: { behavior: 'allow' }, phone: false })).not.toContain('\n') // 一筆一行
+})
+
 test('PermissionRequest with no matching ask (or from a subagent) is left to the terminal untouched', async ($, on) => {
   MOCKS(on, [])
   let reached = 0
@@ -1670,7 +1694,7 @@ const officeFs = (on: any, files: Record<string, string>, writes: { path: string
   on('ui.open', () => ({ value: { isPlaced: true } }) as any)
 }
 
-import { runSlip } from './register'
+import { adoptedEntry, runSlip } from './register'
 
 const slipIO = (files: Record<string, string>, opts: { settledAt?: number } = {}) => {
   let t = 1_000_000
@@ -2009,7 +2033,8 @@ test('scene units to cells: terminal 1×2, desktop 1×2.5 (2026-10-27 measured);
 
 test('desktop: clicking furniture opens its menu beside it, one at a time; choosing sends the prompt and closes; 取消 closes', async ($, on) => {
   const writes: string[] = []
-  MOCKS(on, writes)
+  MOCKS(on, writes, { clock: false })
+  const clock = mock.clock(on, { now: 1_000_000 })
   const ran: any[] = []
   const submitted: any[] = []
   on('command.run', (_$, e: any) => {
@@ -2024,20 +2049,25 @@ test('desktop: clicking furniture opens its menu beside it, one at a time; choos
   const ui = await $.ui.mount(DESKTOP())
   for (const f of ['printer', 'cabinet', 'mailbox', 'calendar', 'clock', 'meeting']) expect(await ui.find({ key: `hit-${f}` })).toBeDefined()
   expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  // 選單美術第三批 P1：選單外觀畫在 v2 的 SVG 裡（字也在 SVG），上面疊看不見的按鈕
+  const scene = async () => String(((await ui.find({ type: 'Svg' })) as any)?.props?.source ?? '')
   await ui.press({ key: 'hit-printer' })
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('Recent mail')
-  expect((await ui.find({ key: 'menu-cancel' }))?.text).toBe('Cancel')
+  expect(await ui.find({ key: 'menu-0' })).toBeDefined()
+  expect(await ui.find({ key: 'menu-cancel' })).toBeDefined()
+  expect(await scene()).toContain('Recent mail')
+  expect(await scene()).toContain('影印機')
   await ui.press({ key: 'hit-mailbox' }) // 換一件：同時只開一個
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('Status')
+  expect(await scene()).toContain('Status')
+  expect(await scene()).not.toContain('Recent mail')
   expect(await ui.find({ key: 'menu-4' })).toBeUndefined()
-  await ui.press({ key: 'menu-0' })
+  await ui.press({ key: 'menu-0' }); await clock.advance(MENU_PRESS_MS + 50)
   expect(submitted.some(e => e.text === 'git status, and summarize it in a sentence or two')).toBe(true)
   expect(await ui.find({ key: 'menu' })).toBeUndefined()
   await ui.press({ key: 'hit-calendar' })
-  await ui.press({ key: 'menu-0' }) // 斜線開頭：當指令跑
+  await ui.press({ key: 'menu-0' }); await clock.advance(MENU_PRESS_MS + 50) // 斜線開頭：當指令跑
   expect(ran.some(e => e.command === 'llm-wiki:wiki-agenda')).toBe(true)
   await ui.press({ key: 'hit-clock' })
-  await ui.press({ key: 'menu-cancel' })
+  await ui.press({ key: 'menu-cancel' }); await clock.advance(MENU_PRESS_MS + 50)
   expect(await ui.find({ key: 'menu' })).toBeUndefined()
   await ui.press({ key: 'hit-meeting' })
   await ui.press({ key: 'hit-meeting' }) // 再點同一件：收起來
@@ -2047,7 +2077,8 @@ test('desktop: clicking furniture opens its menu beside it, one at a time; choos
 
 test('desktop: a user menu from buttons.json replaces the default; old-format entries still draw in the row', async ($, on) => {
   const writes: string[] = []
-  MOCKS(on, writes)
+  MOCKS(on, writes, { clock: false })
+  const clock = mock.clock(on, { now: 1_000_000 })
   on('fs.read', () => ({ value: JSON.stringify([{ object: 'printer', label: '查信', prompt: '查信件' }, { label: '說嗨', prompt: 'hi there' }]) }))
   const submitted: any[] = []
   on('prompt.submit', (_$, e: any) => {
@@ -2059,14 +2090,15 @@ test('desktop: a user menu from buttons.json replaces the default; old-format en
   expect((await ui.find({ key: 'mine-0' }))?.text).toBe('說嗨')
   expect(await ui.find({ key: 'mine-1' })).toBeUndefined() // 家具項目不在底下那排
   await ui.press({ key: 'hit-printer' })
-  expect((await ui.find({ key: 'menu-0' }))?.text).toBe('查信')
+  expect(await ui.find({ key: 'menu-0' })).toBeDefined()
+  expect(String(((await ui.find({ type: 'Svg' })) as any)?.props?.source ?? '')).toContain('查信')
   expect(await ui.find({ key: 'menu-1' })).toBeUndefined()
-  await ui.press({ key: 'menu-0' })
+  await ui.press({ key: 'menu-0' }); await clock.advance(MENU_PRESS_MS + 50)
   expect(submitted.some(e => e.text === '查信件')).toBe(true)
   await ui.unmount()
 })
 
-test('desktop: the hit area covers the whole thing with blank plain buttons; at 48 columns the clock is not drawn and has no menu', async ($, on) => {
+test('desktop: the hit area covers the whole thing with blank plain buttons; at 48 columns the v2 office is scaled down, clock and all, and still clickable', async ($, on) => {
   const writes: string[] = []
   MOCKS(on, writes)
   const ui = await $.ui.mount(DESKTOP())
@@ -2076,9 +2108,11 @@ test('desktop: the hit area covers the whole thing with blank plain buttons; at 
   expect(String(pr.props.label).length).toBeGreaterThanOrEqual(6)
   expect(await ui.find({ key: 'hit-printer-1' })).toBeDefined() // 不只一列
   await ui.unmount()
+  // v2（0.62.0）：窄面板是整張等比例縮小，不像原本的向量版拿掉時鐘；也沒有寵物
   const narrow = await $.ui.mount(DESKTOP(48, 80))
-  expect(await narrow.find({ key: 'hit-clock' })).toBeUndefined()
-  expect(await narrow.find({ key: 'hit-pet' })).toBeDefined()
+  expect(await narrow.find({ key: 'hit-clock' })).toBeDefined()
+  expect(await narrow.find({ key: 'hit-printer' })).toBeDefined()
+  expect(await narrow.find({ key: 'hit-pet' })).toBeUndefined()
   await narrow.unmount()
 })
 
@@ -2198,7 +2232,12 @@ test('desktop: the picture fills the pane height, no hint line, no night button 
   const ui = await $.ui.mount(DESK_PANE(100))
   const tree: any = await ui.drawn()
   expect(tree.children.map((c: any) => c.type)).toEqual(['Box']) // 只剩場景（Svg＋疊上去的按鈕）
-  expect(viewH(String((await ui.find({ type: 'Svg' }))!.props.source))).toBe(250) // 100 列 × 2.5 單位
+  // v2（0.62.0）：SVG 寬 112 欄 × 8 px、高照面板 100 列 × 20 px 撐滿（viewBox 是「格」，比例一樣）
+  const src = String((await ui.find({ type: 'Svg' }))!.props.source)
+  const [, pw, ph] = src.match(/width="(\d+)" height="(\d+)"/)!.map(Number)
+  expect(pw).toBe(112 * 8)
+  expect(ph).toBeGreaterThanOrEqual(100 * 20 - 1)
+  expect(viewH(src)).toBeGreaterThan(250)
   expect(await ui.find({ type: 'Text', text: /buttons\.json/ })).toBeUndefined()
   expect(await ui.find({ type: 'Button', text: /Night mode|Lights on/ })).toBeUndefined()
   await ui.unmount()
@@ -2233,15 +2272,18 @@ test('desktop: a tall pane spreads the extra height between desk clusters, the t
   expect(layout(112, 90).clusters.map(k => k.y)).toEqual(plain) // 畫過 Desktop，測試這邊的版面照舊
 })
 
-test('desktop: the furniture menu is an opaque framed box with a title and dark labels on a light card (Desktop buttons ignore Text color)', async ($, on) => {
+test('desktop: the furniture menu is drawn into the office picture (framed card, Chinese title, gold buttons) with invisible buttons on top (選單美術第三批 P1)', async ($, on) => {
   MOCKS(on, [])
   const ui = await $.ui.mount(DESK_PANE(64))
   await ui.press({ key: 'hit-vending' })
-  const menu: any = await ui.find({ key: 'menu' })
-  expect(menu.props.backgroundColor).toBe('#f4f4f4')
-  expect(menu.props.borderStyle).toBe('round')
-  expect((await ui.find({ type: 'Text', text: /Vending/ }))).toBeDefined()
-  expect((await ui.find({ key: 'menu-0' }))).toBeDefined()
+  expect(await ui.find({ key: 'menu' })).toBeDefined()
+  const src = String(((await ui.find({ type: 'Svg' })) as any)?.props?.source ?? '')
+  expect(src).toMatch(/<g class="menu( menu-in)?">/) // 剛打開那次有滑入（0.62.17）
+  expect(src).toContain('販賣機')
+  expect(src).toContain('取消')
+  const b: any = await ui.find({ key: 'menu-0' })
+  expect(b).toBeDefined()
+  expect(b.props.plain).toBe(true)
   await ui.unmount()
 })
 
@@ -2264,7 +2306,9 @@ test('desktop hit areas reach further out but never into a neighbour’s own are
 
 // ---------- 0.19.0（G4）：claude -p 一次性對話不畫成員工、--name 當名牌、me.json 垃圾檔 ----------
 
-import { launchPlate, oneshotGroups, oneshotText } from './register'
+import { launchPlate, oneshotGroups, oneshotText, v2List } from './register'
+import { assign as assignV2, emptyStore as emptyV2 } from './officeV2'
+import { isCommandName, shortCode, shownName } from './scene'
 
 test('one-shot groups: --name prefix before the first dash, no --name is 一次性, biggest first', () => {
   const o = (id: string, label?: string) => ({ ...P(id, id), oneshot: true, label })
@@ -2276,6 +2320,15 @@ test('one-shot groups: --name prefix before the first dash, no --name is 一次�
 test('--name as the default plate: ASCII only, cut to 12, at least 2 characters', () => {
   expect(launchPlate('API-probe-01-1')).toBe('API-probe-01')
   expect(launchPlate('ofimpl')).toBe('ofimpl')
+  expect(launchPlate('!cat ~/.claude/x')).toBeUndefined() // 美術 A #14：指令當名字不採用
+  expect(launchPlate('/compact')).toBeUndefined()
+  // 審查 ④：伺服器名冊、Desktop 面板、啟動名同一條短代號規則
+  expect(shownName({ name: '!cat ~/.cl', id: 'abcd1234-5678' })).toBe('s-abcd')
+  expect(shownName({ name: '  /compact', id: 'codex-9f8e7d6c' })).toBe('s-9f8e')
+  expect(shownName({ name: 'ofimpl', id: 'abcd1234' })).toBe('ofimpl')
+  expect(isCommandName('!x')).toBe(true)
+  expect(isCommandName('像素工程師')).toBe(false)
+  expect(shortCode('agy-12345678')).toBe('s-1234')
   expect(launchPlate('辦公室實作')).toBeUndefined()
   expect(launchPlate('6a主管')).toBe('6a')
   expect(launchPlate(undefined)).toBeUndefined()
@@ -2718,7 +2771,7 @@ test('every 5 seconds the office follows /rename: own agent and the team of a re
     '.claude/sessions/101.json': JSON.stringify({ sessionId: 'eeee5555', name: '改名後組員', formerNames: [{ name: '改名組員' }] }),
     '.claude/sessions/102.json': JSON.stringify({ sessionId: 'ffff6666', name: '改名後主管', formerNames: [{ name: '改名主管' }] }),
   }
-  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'CLAUDE_CONFIG_DIR' ? undefined : 'C:/Users/tester' })) // 沒設 CLAUDE_CONFIG_DIR：讀 ~/.claude/sessions
   on('fs.list', (_$: any, e: any) => {
     const dir = e.path.split(/[\\/]/).slice(-2).join('/') + '/'
     return { value: Object.keys(files).filter(k => k.startsWith(dir)).map(k => ({ kind: 'file', name: k.split('/').pop() })) }
@@ -2867,6 +2920,11 @@ test('mailbox: a name or a role title receives; claim first, send on the next ti
   expect(mailMatches('客製實作', { agent: 'x', title: '客製實作' })).toBe(true)
   expect(mailMatches('office設計', { agent: 'office設計' })).toBe(true)
   expect(mailMatches('a', { agent: 'b', title: 'c' })).toBe(false)
+  // 0.63.45 成組通知（match=agent）：只認 ListAgents 名稱。A 的職稱剛好是 B 的名稱，A 不能領走給 B 的信
+  expect(mailMatches('工程師B', { agent: '員工A', title: '工程師B' }, 'agent')).toBe(false)
+  expect(mailMatches('工程師B', { agent: '工程師B', title: 'x' }, 'agent')).toBe(true)
+  expect(parseMail({ from: 'a', to: 'b', text: 't', at: 1, match: 'agent' })?.match).toBe('agent')
+  expect(parseMail({ from: 'a', to: 'b', text: 't', at: 1, match: 'title' })?.match).toBeUndefined()
   const m = parseMail({ from: 'boss', to: 'r', text: 'hi', at: 0 })!
   expect(m.state).toBe('pending')
   expect(mailStep(m, 'A', 1000)).toBe('claim')
@@ -3021,4 +3079,875 @@ test('claude -p (no hostSessionId in its CLI record) stays a one-shot, even with
   await ($ as any).session.start({ cwd: 'C:/work/kb', surface: null, isInteractive: false })
   await clock.advance(5000)
   expect(JSON.parse(files['sessions/p9.json']).oneshot).toBe(true)
+})
+
+// ---------- 0.62.2 同桌第一批：同桌名單、桌牌狀態 ----------
+import { assign as v2assign, atTable, emptyStore as v2empty, tableStatus, tablesOut as v2tablesOut } from './officeV2'
+import { roster as roster3 } from './register'
+
+test('table status: working / waiting / blocked counts read at a glance; idle tables say how many, empty says 空桌', () => {
+  expect(tableStatus([{ mode: 'typing' }, { mode: 'thinking' }, { mode: 'reading' }, { mode: 'waiting' }]).text).toBe('3 人工作中・1 位等你')
+  expect(tableStatus([{ mode: 'idle' }, { mode: 'done' }]).text).toBe('2 人閒著')
+  expect(tableStatus([{ mode: 'blocked' }, { mode: 'idle' }]).text).toBe('1 位卡住')
+  expect(tableStatus([]).text).toBe('空桌')
+  expect(tableStatus([{ mode: 'waiting' }]).waiting).toBe(1)
+})
+
+test('tablesOut with the seat map lists who sits at each table (manager first) and its status', () => {
+  const S = v2empty()
+  const people = [
+    { id: 'b', role: 'manager', agent: 'boss', plate: 'boss', mode: 'typing' },
+    { id: 'c', team: 'boss', plate: 'c', mode: 'waiting' },
+    { id: 'a', team: 'boss', plate: 'a', mode: 'idle' },
+    { id: 'z', plate: 'z', mode: 'typing' },
+  ]
+  const { map } = v2assign(S, people, 0)
+  const [t] = v2tablesOut(S, people, map) as any[]
+  expect(t.members[0]).toBe('b')
+  expect([...t.members].sort()).toEqual(['a', 'b', 'c'])
+  expect(t.status).toBe('1 人工作中・1 位等你')
+  expect(t.count).toBe(3)
+  expect(atTable(t.id, people, map).map(p => p.id)).not.toContain('z')
+  expect((v2tablesOut(S, people) as any[])[0].status).toBeUndefined() // 沒給座位表＝舊格式
+})
+
+test('roster: Table column and a Tablemates list with ListAgents names only when someone sits at a table', () => {
+  const P = (id: string, extra: object = {}) => ({ id, name: id, mode: 'idle', tool: '', isMe: false, role: 'staff', ...extra }) as Coworker
+  const crew = [P('m', { role: 'manager', agent: '主管 A', isMe: true }), P('s', { agent: '員工 B', team: '主管 A' }), P('x', { agent: 'X' })]
+  const text = roster3(crew, 0, [], undefined, new Map([['m', 'A 桌'], ['s', 'A 桌']]))
+  expect(text).toContain('| Name | Title | Table | Role |')
+  expect(text).toMatch(/\| ▶ m \| — \| A 桌 \|/)
+  expect(text).toMatch(/\| x \| — \| — \|/)
+  expect(text).toContain('Tablemates')
+  expect(text).toContain('- ▶ A 桌: m (`主管 A`), s (`員工 B`)')
+  const plain = roster3(crew, 0, [], undefined, new Map())
+  expect(plain).not.toContain('Table |')
+  expect(plain).not.toContain('Tablemates')
+})
+
+// ---------- 0.62.3 缺主管 ----------
+import { needsBoss } from './officeV2'
+import { orderInput } from './register'
+
+test('a table needs a manager from 4 people up when nobody sitting there is one', () => {
+  const s = (n: number, boss = false) => Array.from({ length: n }, (_, i) => ({ role: boss && i === 0 ? 'manager' : 'staff' }))
+  expect(needsBoss(s(3))).toBe(false)
+  expect(needsBoss(s(4))).toBe(true)
+  expect(needsBoss(s(6, true))).toBe(false)
+})
+
+test('tablesOut marks noBoss; staff dragged together at 4 are flagged, a manager clears it', () => {
+  const S = v2empty()
+  S.tables.push({ id: 1, name: 'X', size: 6 }); S.nextId = 2
+  const people = ['a', 'b', 'c', 'd'].map(id => ({ id, plate: id, mode: 'idle' }))
+  for (const [i, p] of people.entries()) S.pins[p.id] = `t1.${i}`
+  const { map } = v2assign(S, people, 0)
+  expect((v2tablesOut(S, people, map) as any[])[0].noBoss).toBe(true)
+  const withBoss = people.map((p, i) => (i === 2 ? { ...p, role: 'manager', agent: 'C' } : p))
+  expect((v2tablesOut(S, withBoss, v2assign(S, withBoss, 0).map) as any[])[0].noBoss).toBe(false)
+})
+
+test('personnel orders: role/team applied once per nonce, expired or empty orders ignored', () => {
+  expect(orderInput({ nonce: 'n1', at: 0, role: 'manager' }, 1000)).toEqual({ nonce: 'n1', role: 'manager' })
+  expect(orderInput({ nonce: 'n1', at: 0, team: ' 主管 A ' }, 1000)).toEqual({ nonce: 'n1', team: '主管 A' })
+  expect(orderInput({ nonce: 'n1', at: 0, role: 'manager' }, 1000, 'n1')).toBeUndefined()
+  expect(orderInput({ nonce: 'n1', at: 0, role: 'manager' }, 11 * 60000)).toBeUndefined()
+  expect(orderInput({ nonce: 'n1', at: 0, role: 'boss' }, 1000)).toBeUndefined()
+  expect(orderInput('x', 1000)).toBeUndefined()
+})
+
+test('a personnel order from the phone changes role and team directly (no model turn), once per nonce', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = { 'orders/aaaa1111.json': JSON.stringify({ nonce: 'o1', at: NOW - 1000, role: 'manager', team: '大主管' }) }
+  const submitted: any[] = []
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  const key = (path: string) => path.split(/[\\/]/).slice(-2).join('/')
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => { files[key(e.path)] = e.text; return { value: undefined } })
+  on('prompt.submit', (_$, e: any) => { submitted.push(e); return { text: e.text } as any })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'aaaa1111' }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  const st = JSON.parse(files['sessions/aaaa1111.json'])
+  expect(st.role).toBe('manager')
+  expect(st.team).toBe('大主管')
+  expect(JSON.parse(files['orders/aaaa1111.done.json']).nonce).toBe('o1')
+  expect(submitted).toHaveLength(0)
+  files['sessions/aaaa1111.json'] = JSON.stringify({ ...st, role: 'staff' })
+  await clock.advance(3000)
+  expect(JSON.parse(files['orders/aaaa1111.done.json']).nonce).toBe('o1') // 同一道令不再套一次
+})
+
+// ---------- 0.62.4 桌子聊天室 ----------
+import { CHAT_KEEP_MS, chatTables, firstLine, parseChat } from './officeV2'
+
+test('chat: logged to the tables of sender and recipient, first line shown, expired entries dropped', () => {
+  const map = new Map([['a', 't1.0'], ['b', 't1.3'], ['c', 't2.1'], ['d', 'o0']])
+  expect(chatTables(map, 'a', 'b')).toEqual([1])
+  expect(chatTables(map, 'a', 'c')).toEqual([1, 2])
+  expect(chatTables(map, 'd', 'c')).toEqual([2])
+  expect(chatTables(map, 'd')).toEqual([])
+  expect(firstLine('\n第一行\n第二行')).toEqual({ head: '第一行', more: true })
+  expect(firstLine('短的')).toEqual({ head: '短的', more: false })
+  expect(firstLine('x'.repeat(80)).head.endsWith('…')).toBe(true)
+  const e = { at: 1000, from: { id: 'a', name: 'A' }, to: { name: 'B' }, text: 'hi' }
+  expect(parseChat(JSON.stringify(e), 2000)).toEqual(e)
+  expect(parseChat(JSON.stringify(e), 1000 + CHAT_KEEP_MS + 1)).toBeUndefined()
+  expect(parseChat('{bad', 0)).toBeUndefined()
+})
+
+test('a delivered message to a tablemate is written to that table\'s chat folder', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = {
+    'sessions/bbbb2222.json': JSON.stringify({ instance: 'x', id: 'bbbb2222', name: 'boss', role: 'manager', mode: 'idle', agent: '主管', updatedAt: NOW }),
+  }
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  const key = (path: string) => path.split(/[\\/]/).slice(-2).join('/')
+  on('fs.list', (_$: any, e: any) => ({ value: /sessions$/.test(e.path) ? Object.keys(files).filter(k => k.startsWith('sessions/')).map(k => ({ kind: 'file', name: k.slice(9), mtimeMs: NOW })) : [] }) as any)
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('session.send', () => ({ isDelivered: true }) as any)
+  on('fs.write', (_$: any, e: any) => { files[key(e.path)] = e.text; return { value: undefined } })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'aaaa1111' }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'mcp__pixel-office__office_profile', agent: '員工', team: '主管' } as any)
+  await clock.advance(3000)
+  await ($ as any).session.send({ to: '主管 [abc123]', text: '報價單好了\n細節在共用資料夾' })
+  await clock.advance(1)
+  const logged = Object.keys(files).filter(k => /^t\d+\//.test(k))
+  expect(logged).toHaveLength(1)
+  const c = JSON.parse(files[logged[0]])
+  expect(c.to).toMatchObject({ id: 'bbbb2222' })
+  expect(c.from.id).toBe('aaaa1111')
+  expect(c.text).toBe('報價單好了\n細節在共用資料夾')
+})
+
+// ---------- 0.62.5 自動多開幫手 ----------
+import { helperAsk } from './register'
+
+test('office_helper: managers only, reason and task required; staff are told to ask their manager', () => {
+  const boss = { id: 's1', role: 'manager' as const, agent: '主管', name: 'boss' }
+  expect(helperAsk({ reason: '改很久', task: '跑測試' }, { ...boss, role: 'staff' })).toContain('Only managers')
+  expect(helperAsk({ reason: '', task: 'x' }, boss)).toContain('reason')
+  expect(helperAsk({ reason: 'x'.repeat(61), task: 'x' }, boss)).toContain('reason')
+  expect(helperAsk({ reason: '改很久', task: '' }, boss)).toContain('task')
+  const r = helperAsk({ reason: '改很久', task: '跑測試', name: 'H' }, boss) as any
+  expect(r).toMatchObject({ from: 's1', agent: '主管', plate: 'boss', reason: '改很久', task: '跑測試', name: 'H' })
+  expect(r.id).toMatch(/^[0-9a-f-]{36}$/)
+  expect(r.kind).toBeUndefined()
+  // 0.63.37：kind=codex-art 開 Codex 生圖幫手；其他值擋下
+  expect((helperAsk({ reason: '要參考圖', task: '畫杯子', kind: 'codex-art' }, boss) as any).kind).toBe('codex-art')
+  expect(helperAsk({ reason: '要參考圖', task: '畫杯子', kind: 'gemini' }, boss)).toContain('codex-art')
+})
+
+// ---------- 0.62.6 重開後主管名稱跑掉、桌牌字 ----------
+import { cliSessionsDir } from './register'
+import { tableLabel } from './officeV2'
+
+test('Claude Code session records are read from the session\'s own CLAUDE_CONFIG_DIR (else ~/.claude)', () => {
+  expect(cliSessionsDir('/Users/me/.claude/pixel-office/sessions')).toBe('/Users/me/.claude/sessions')
+  expect(cliSessionsDir('/Users/me/.claude/pixel-office/sessions', '/Users/me/.claude-work/')).toBe('/Users/me/.claude-work/sessions')
+  expect(cliSessionsDir('C:/Users/me/.claude/pixel-office/sessions', 'C:\\Users\\me\\.claude-x')).toBe('C:/Users/me/.claude-x/sessions')
+})
+
+test('table plate: when table name and manager plate contain each other, show the table name', () => {
+  expect(tableLabel('像素辦公室 v2', '像素辦公室 v2 整')).toBe('像素辦公室 v2')
+  expect(tableLabel('像素辦公室 v2 整合團隊', '像素辦公室 v2 整')).toBe('像素辦公室 v2 整合團隊')
+  expect(tableLabel('讀書會', '組長')).toBe('讀書會・組長')
+  expect(tableLabel('X', undefined)).toBe('X')
+})
+
+// ---------- 0.62.8 換主管交接：面板桌牌「交接中」 ----------
+import { handingTables } from './register'
+
+test('panel reads which tables are mid-handover from handovers-<port>.json (done/cancelled ones are not)', () => {
+  expect(handingTables(JSON.stringify({ handovers: [{ table: 1, state: 'handing' }, { table: 2, state: 'done' }, { table: 3, state: 'ask-wait' }, { table: 4, state: 'cancelled' }] }))).toEqual([1, 3])
+  expect(handingTables(undefined)).toEqual([])
+  expect(handingTables('{bad')).toEqual([])
+})
+
+// ---------- 0.62.9 協作桌記協作資料夾 ----------
+import { editTables as v2edit } from './officeV2'
+
+test('a table remembers its collab folder: full paths only, blank clears it, tablesOut passes it on', () => {
+  const S = v2empty()
+  S.tables.push({ id: 2, name: '像素辦公室 v2', size: 6 }); S.nextId = 3
+  expect(v2edit(S, { op: 'edit', id: 2, collab: 'team-v2' }).ok).toBe(false)
+  expect(v2edit(S, { op: 'edit', id: 2, collab: '~/.claude/pixel-office/team-v2/' }).ok).toBe(true)
+  expect(S.tables[0].collab).toBe('~/.claude/pixel-office/team-v2')
+  expect((v2tablesOut(S, []) as any[])[0].collab).toBe('~/.claude/pixel-office/team-v2')
+  expect(v2edit(S, { op: 'edit', id: 2, collab: '' }).ok).toBe(true)
+  expect(S.tables[0].collab).toBeUndefined()
+})
+
+// ---------- 0.62.10 同桌共用筆記、行政 ----------
+import { latestCheckpoints, mdSections, suggestAdmin, tableRows } from './officeV2'
+import { notesLines } from './register'
+
+test('notes: collab.md sections, table rows, latest checkpoint per name, admin suggestion from 6 people', () => {
+  const md = '# 主管\n| a | b |\n|---|---|\n| 主管 A | 報價 |\n# 待使用者裁示\n| # | 事項 | 在哪 | 日 |\n|---|---|---|---|\n| 1 | 含運費嗎 | collab | 11-23 |\n| 2 | 週五交 | | 11-23 |\n# 目標\n週五前交報價\n'
+  const sec = mdSections(md)
+  expect(tableRows(sec.get('待使用者裁示')!).map(r => r[1])).toEqual(['含運費嗎', '週五交'])
+  expect(tableRows(sec.get('主管')!)[0][1]).toBe('報價')
+  expect(sec.get('目標')).toBe('週五前交報價')
+  const cp = latestCheckpoints([{ name: '員工B.md', text: '## 2026-11-22 09:00 員工B\n- 做完：舊\n\n## 2026-11-23 10:00 員工B\n- 做完：新\n' }, { name: '報價.md', text: '## 2026-11-23 08:00 文書助理\n- 做完：x\n' }])
+  expect(cp.get('員工B')!.text).toContain('新')
+  expect(cp.get('文書助理')!.head).toBe('2026-11-23 08:00 文書助理')
+  expect(cp.get('報價')!.file).toBe('報價.md')
+  expect(suggestAdmin(5, false)).toBe(false)
+  expect(suggestAdmin(6, false)).toBe(true)
+  expect(suggestAdmin(6, true)).toBe(false)
+})
+
+test('panel notes (read-only): decisions first and in red, no manager says so, nothing without a snapshot', () => {
+  const l = notesLines(JSON.stringify({ ok: true, decide: [{ text: '含運費嗎' }], auto: [{ plate: 'A', doing: '正在寫' }], progress: [{ plate: 'A', head: 'h', text: '- 做完：初稿' }], asks: ['2026-11-23 09:00 先做報價'], hasBoss: false }))
+  expect(l[0]).toContain('待你決定 1')
+  expect(l[1]).toBe('🔴 含運費嗎')
+  expect(l).toContain('・A：正在寫')
+  expect(l).toContain('主管：這桌還沒有主管')
+  expect(notesLines(undefined)).toEqual([])
+  const t = notesLines(JSON.stringify({ ok: true, hasBoss: true, tasks: { active: [{ title: '報價', progress: '進行中 1/2', parts: [{ who: 'A', stateZh: '完成' }, { who: 'B', stateZh: '進行中' }] }] } }))
+  expect(t).toContain('📋 報價（進行中 1/2）：A 完成、B 進行中')
+})
+
+// ---------- 0.62.11 office_task ----------
+import { taskOp } from './register'
+
+test('office_task: only managers create; parts need who and what; only the owner or the manager updates a part', () => {
+  const boss = { id: 'm1', role: 'manager' as const, agent: '主管', name: 'boss' }
+  const staff = { id: 's1', role: 'staff' as const, agent: 'A', name: 'a' }
+  expect(taskOp({ action: 'create', title: 'x', parts: [{ who: 'A', what: 'y' }] }, staff, 0)).toContain('Only managers')
+  expect(taskOp({ action: 'create', title: 'x', parts: [{ who: 'A' }] }, boss, 0)).toContain('part 1')
+  const c = taskOp({ action: 'create', title: '報價', parts: [{ who: 'A [abc123]', what: '查價' }, { who: 'B', what: '寫', after: [1, 2, 9] }] }, boss, 5) as any
+  expect(c.data.parts).toEqual([{ who: 'A', what: '查價' }, { who: 'B', what: '寫', after: [0] }])
+  const def = c.data
+  expect(taskOp({ action: 'update', id: def.id, part: 1, state: 'done' }, staff, 6, def)).toMatchObject({ file: `${def.id}.0.json`, data: { state: 'done' } })
+  expect(taskOp({ action: 'update', id: def.id, part: 2, state: 'done' }, staff, 6, def)).toContain('belongs to B')
+  expect(taskOp({ action: 'update', id: def.id, part: 2, state: 'stuck', note: '缺資料' }, boss, 6, def)).toMatchObject({ data: { state: 'stuck', note: '缺資料' } })
+  expect(taskOp({ action: 'update', id: def.id, part: 3, state: 'done' }, boss, 6, def)).toContain('part must be')
+  expect(taskOp({ action: 'update', id: 'zz', part: 1, state: 'done' }, boss, 6, undefined)).toContain('No such task')
+})
+
+// ---------- 0.62.12 整桌開會 ----------
+import { tableMeetings } from './register'
+
+test('panel reads which tables are in a table meeting and who joins', () => {
+  expect(tableMeetings(JSON.stringify({ meetings: [{ table: 2, topic: '週會', ids: ['a', 'b'], state: 'on' }, { table: 3, topic: 'x', ids: [], state: 'done' }] }))).toEqual([{ table: 2, topic: '週會', ids: ['a', 'b'] }])
+  expect(tableMeetings(undefined)).toEqual([])
+})
+
+import { menuSvg } from './v2panel'
+test('0.62.17 panel menu: the pressed button is drawn pushed down and darker; slide-in only on the render right after opening, off for reduced motion', () => {
+  const menu = { title: '書櫃', items: ['讀', '寫'], cancel: '取消', at: { x: 10, y: 10, w: 10, h: 10 } }
+  const plain = menuSvg(menu, 4, 200, 120).svg
+  expect(plain).not.toContain('menu-in')
+  const opened = menuSvg({ ...menu, enter: true }, 4, 200, 120).svg
+  expect(opened).toContain('class="menu menu-in"')
+  expect(opened).toContain('prefers-reduced-motion:reduce')
+  const pressed = menuSvg({ ...menu, pressed: 1 }, 4, 200, 120).svg
+  expect(pressed).not.toBe(plain)
+  expect(pressed).toContain('#c9a227"') // 第二顆（米白）按下去變金色
+  expect(menuSvg({ ...menu, pressed: 1 }, 4, 200, 120).hits).toEqual(menuSvg(menu, 4, 200, 120).hits) // 點擊區不跟著動
+})
+
+test('0.62.18: deleting a table asks first when someone online sits there (by who is online, not the hourly seen stamp); the team then sits in the office area instead of getting a new auto table, until the team is offline', () => {
+  const S = v2empty()
+  const boss = { id: 'b', plate: 'B', name: 'B', role: 'manager', agent: '隊長' }, mate = { id: 'm', plate: 'M', name: 'M', role: 'staff', team: '隊長' }
+  let r = v2assign(S, [boss, mate] as any, 1_000_000)
+  const t = S.tables.find(x => x.team === '隊長')!
+  expect(r.map.get('b')).toBe(`t${t.id}.0`)
+  // 兩小時後 seen 還是舊的（一小時才刷新），但人在線：要先問
+  const later = 1_000_000 + 2 * 3600e3
+  expect(v2edit(S, { op: 'delete', id: t.id }, new Set(['b', 'm'])).ok).toBe(false)
+  expect(v2edit(S, { op: 'delete', id: t.id }, new Set()).ok).toBe(true) // 都不在線：直接刪
+  r = v2assign(S, [boss, mate] as any, later)
+  expect(S.tables.length).toBe(0) // 不馬上再開一張
+  expect(r.map.get('b')).toMatch(/^o\d+$/)
+  v2assign(S, [] as any, later + 1) // 這隊都下線：記號清掉
+  expect(S.noAuto?.['隊長']).toBeUndefined()
+  v2assign(S, [boss, mate] as any, later + 2)
+  expect(S.tables.some(x => x.team === '隊長' && x.auto)).toBe(true) // 下次上線照常自動開桌
+})
+
+import { CMD_CONFIRM_MS, CMD_TRIES } from './register'
+function cmdRig(on: any, files: Record<string, string>) {
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  const key = (path: string) => path.split(/[\\/]/).slice(-2).join('/')
+  on('fs.exists', (_$: any, e: any) => ({ value: key(e.path) in files }) as any)
+  on('fs.read', (_$: any, e: any) => ({ value: files[key(e.path)] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => { files[key(e.path)] = e.text; return { value: undefined } })
+  on('tool.call', () => ({ result: 'ok', text: 'done' }) as any)
+  on('turn.complete', () => ({ text: '' }) as any)
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: 'aaaa1111' }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+}
+const startCmd = ($: any) => $.session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+
+test('0.63.56: a refused submit is retried 15 s apart at most 3 times, the error recorded, never marked done and never attached to a tool result', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = { 'commands/aaaa1111.json': JSON.stringify({ nonce: 'n1', text: '請回覆收件', at: NOW - 1000 }) }
+  let tries = 0
+  cmdRig(on, files)
+  on('prompt.submit', () => { tries++; throw new Error('session not accepting input') })
+  await startCmd($)
+  await clock.advance(3000)
+  expect(tries).toBe(1)
+  expect(files['commands/aaaa1111.done.json']).toBeUndefined()
+  expect(JSON.parse(files['commands/aaaa1111.err.json'])).toMatchObject({ nonce: 'n1', tries: 1 })
+  for (let i = 1; i < CMD_TRIES; i++) await clock.advance(CMD_CONFIRM_MS + 1000)
+  expect(tries).toBe(CMD_TRIES)
+  await clock.advance(CMD_CONFIRM_MS * 3)
+  expect(tries).toBe(CMD_TRIES) // 不無限重送
+  const out: any = await $.tool.call({ tool: 'Read', file_path: 'a.md' } as any)
+  expect((out.context ?? []).join('\n')).not.toContain('請回覆收件') // 不再附進 context 重送
+  expect(files['commands/aaaa1111.done.json']).toBeUndefined()
+})
+
+test('0.63.56: two messages to an idle Claude both go in, in order, within seconds; each marked done (via submit) once its submit resolves', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = { 'commands/aaaa1111.json': JSON.stringify({ nonce: 'n2', text: '第二句', at: NOW - 500, items: [{ nonce: 'n1', text: '第一句', at: NOW - 1000 }, { nonce: 'n2', text: '第二句', at: NOW - 500 }] }) }
+  const sent: string[] = []
+  cmdRig(on, files)
+  on('prompt.submit', (_$: any, e: any) => { sent.push(e.text); return { text: e.text } as any })
+  await startCmd($)
+  await clock.advance(4000)
+  expect(sent).toEqual(['📱 第一句', '📱 第二句'])
+  expect(JSON.parse(files['commands/aaaa1111.done.json'])).toMatchObject({ nonce: 'n2', nonces: ['n1', 'n2'], via: 'submit' })
+  await clock.advance(CMD_CONFIRM_MS * 2)
+  expect(sent.length).toBe(2) // 不重送
+})
+
+test('0.63.56: while a submit is still in flight (queued behind a long turn) it is not resent and the next message waits; done once it resolves', async ($, on) => {
+  const NOW = 1_000_000
+  const clock = mock.clock(on, { now: NOW })
+  const files: Record<string, string> = { 'commands/aaaa1111.json': JSON.stringify({ nonce: 'n2', text: 'b', at: NOW, items: [{ nonce: 'n1', text: 'a', at: NOW }, { nonce: 'n2', text: 'b', at: NOW }] }) }
+  const sent: string[] = []
+  let release: (() => void) | undefined
+  cmdRig(on, files)
+  on('prompt.submit', (_$: any, e: any) => { sent.push(e.text); return sent.length === 1 ? new Promise(r => { release = () => r({ text: e.text } as any) }) : ({ text: e.text } as any) })
+  await startCmd($)
+  await clock.advance(CMD_CONFIRM_MS * 3)
+  expect(sent).toEqual(['📱 a'])
+  expect(files['commands/aaaa1111.done.json']).toBeUndefined()
+  release!()
+  await clock.advance(3000)
+  expect(sent).toEqual(['📱 a', '📱 b'])
+  expect(JSON.parse(files['commands/aaaa1111.done.json']).nonces).toEqual(['n1', 'n2'])
+})
+
+test('hr effort op (0.63.9): valid levels are stored per session, others refused', async () => {
+  const saved: Record<string, unknown> = {}
+  const $: any = { store: { set: async (k: string, v: unknown) => { saved[k] = v } }, session: { id: async () => 's1' } }
+  expect(await runHr($, { op: 'effort', effort: 'xhigh' })).toEqual({ ok: true, msg: '下一次回覆起投入程度改成 xhigh' })
+  expect(saved['effort:s1']).toBe('xhigh')
+  expect((await runHr($, { op: 'effort', effort: 'ultra' })).ok).toBe(false)
+})
+
+test('command queue (0.63.17): delivers items in order, skips delivered and expired, reads the old single format', () => {
+  const now = 1_000_000_000
+  const c = { nonce: 'c', text: '三', at: now, items: [{ nonce: 'a', text: '一', at: now }, { nonce: 'b', text: '二', at: now - 11 * 60000 }, { nonce: 'c', text: '三', at: now }] }
+  expect(nextCommand(c, new Set(), now)?.nonce).toBe('a')
+  expect(nextCommand(c, doneNonces({ nonce: 'a', nonces: ['a'] }), now)?.nonce).toBe('c') // b 過期
+  expect(nextCommand(c, doneNonces({ nonce: 'c', nonces: ['a', 'c'] }), now)).toBeUndefined()
+  expect(nextCommand({ nonce: 'x', text: '舊格式', at: now }, doneNonces({ nonce: 'y' }), now)?.text).toBe('舊格式')
+  expect(nextCommand({ nonce: 'x', text: '舊格式', at: now }, doneNonces({ nonce: 'x' }), now)).toBeUndefined()
+})
+
+test('self reload (0.63.25): only for a newer version on disk while idle, at most 3 tries 10 minutes apart', () => {
+  expect(newerVersion('0.63.25', '0.63.9')).toBe(true)
+  expect(newerVersion('0.63.9', '0.63.25')).toBe(false)
+  expect(newerVersion('0.63.25', '0.63.25')).toBe(false)
+  expect(newerVersion('1.0.0', '0.99.99')).toBe(true)
+  const base = { disk: '0.63.26', loaded: '0.63.25', idle: true, now: 1_000_000 }
+  expect(shouldReload(base)).toBe(true)
+  expect(shouldReload({ ...base, idle: false })).toBe(false)
+  expect(shouldReload({ ...base, disk: '0.63.25' })).toBe(false)
+  expect(shouldReload({ ...base, disk: undefined })).toBe(false)
+  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 1, at: base.now - 60e3 } })).toBe(false) // 剛試過
+  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 1, at: base.now - RELOAD_RETRY_MS } })).toBe(true)
+  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 3, at: 0 } })).toBe(false) // 試滿了
+  expect(shouldReload({ ...base, last: { version: '0.63.24', tries: 3, at: base.now } })).toBe(true) // 新的版號重新算
+})
+
+test('reload gate (0.63.26): no turn, no queued message, no approval, empty draft, 5 quiet minutes', () => {
+  const ok = { turnRunning: false, cmdPending: false, approval: false, draft: '', lastActive: 0, now: RELOAD_QUIET_MS }
+  expect(canReloadNow(ok)).toBe(true)
+  expect(canReloadNow({ ...ok, turnRunning: true })).toBe(false)
+  expect(canReloadNow({ ...ok, cmdPending: true })).toBe(false)
+  expect(canReloadNow({ ...ok, approval: true })).toBe(false)
+  expect(canReloadNow({ ...ok, draft: '打到一半' })).toBe(false)
+  expect(canReloadNow({ ...ok, draft: '   ' })).toBe(true)
+  expect(canReloadNow({ ...ok, lastActive: 1 })).toBe(false) // 不到 5 分鐘
+})
+
+test('reloadIfIdle (0.63.27): a failed draft read means no reload, and the answer is an object, never a bare promise', async () => {
+  let ran = 0
+  const $: any = { prompt: { read: async () => { throw new Error('no box') } }, command: { run: async () => { ran++ } } }
+  const r = await reloadIfIdle($)
+  expect(r).toEqual({ ran: false })
+  expect(ran).toBe(0)
+  const $2: any = { prompt: { read: async () => ({ text: '', cursor: 0 }) }, command: { run: async () => { ran++ } } }
+  const r2 = await reloadIfIdle($2) // 剛載入：5 分鐘內有活動，不重載
+  expect(r2).toEqual({ ran: false })
+  expect(ran).toBe(0)
+})
+
+test('art A #14 review: a manager whose name is a command still keeps his team at his table; only the nameplate becomes the short code', () => {
+  const P = (id: string, extra: object = {}) => ({ id, name: id, mode: 'idle', tool: '', isMe: false, role: 'staff', ...extra }) as Coworker
+  const crew = [P('b0ss1234', { name: '/boss', role: 'manager', agent: 'lead' }), P('s1', { name: 'staffA', team: '/boss' }), P('s2', { name: 'staffB', team: '/boss' })]
+  const list = v2List(crew)
+  expect(list.find(p => p.id === 'b0ss1234')!.plate).toBe('s-b0ss') // 名牌：短代號
+  expect(list.find(p => p.id === 'b0ss1234')!.name).toBe('/boss') // 名字照原樣（團隊靠它對）
+  const { map } = assignV2(emptyV2(), list, 0)
+  const table = (id: string) => /^t(\d+)\./.exec(map.get(id) ?? '')?.[1]
+  expect(table('b0ss1234')).toBeDefined()
+  expect(table('s1')).toBe(table('b0ss1234'))
+  expect(table('s2')).toBe(table('b0ss1234'))
+})
+
+import { baseName, claimTables, moveSeat, parseStore, pinSeat, retarget, teamsOf } from './officeV2'
+const v2table = (id: number, team: string | undefined, extra: Record<string, unknown> = {}) => ({ id, name: `桌${id}`, size: 4, ...(team ? { team } : {}), ...extra }) as any
+
+test('0.63.57: a table still named after the old manager goes to the new manager pinned at its head seat; old group cleared; Codex member sits there too', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '主管（接續）', { group: { boss: 'old', team: '主管（接續）', notified: [], at: 0, complete: true } })]
+  S.nextId = 3
+  S.pins = { b: 't2.0', x: 't2.1' }
+  const boss = { id: 'b', plate: 'B', name: 'B', role: 'manager', agent: '主管' }
+  const pinned = { id: 'x', plate: 'X', role: 'staff', team: '主管' }
+  const cx = { id: 'c', plate: 'C', role: 'staff', team: '主管', kind: 'codex' }
+  const r = v2assign(S, [boss, pinned, cx] as any, 0)
+  expect(S.tables).toHaveLength(1) // 沒有另開一張
+  expect(S.tables[0].team).toBe('主管')
+  expect(S.tables[0].group).toBeUndefined()
+  expect(r.dirty).toBe(true)
+  expect(r.map.get('b')).toBe('t2.0')
+  expect(r.map.get('c')).toMatch(/^t2\.[1-3]$/) // Codex 組員（kind=codex）也排進桌
+})
+
+test('0.63.57: the old table is found by where the manager sat last time; a table whose team names his plate is an alias', () => {
+  const S = v2empty()
+  S.tables = [v2table(5, '走掉的主管')]
+  S.nextId = 6
+  S.seats = { b: { key: 't5.0', seen: 0 } }
+  const boss = { id: 'b', plate: 'B', name: 'B', role: 'manager', agent: '主管' }, mate = { id: 'm', plate: 'M', role: 'staff', team: '主管' }
+  const r = v2assign(S, [boss, mate] as any, 0)
+  expect(S.tables.map(t => t.team)).toEqual(['主管'])
+  expect(r.map.get('b')).toBe('t5.0')
+  const A = v2empty()
+  A.tables = [v2table(1, 'B')] // team 寫成名牌
+  A.nextId = 2
+  v2assign(A, [boss, mate] as any, 0)
+  expect(A.tables.map(t => t.team)).toEqual(['主管'])
+})
+
+test('0.63.57: a table whose team is an online manager (even with no members) is never taken; unrelated stale tables are left alone', () => {
+  const S = v2empty()
+  S.tables = [v2table(1, '別的主管'), v2table(2, '沒人的舊隊', { group: { boss: 'z', team: '沒人的舊隊', notified: [], at: 0, complete: true } })]
+  S.nextId = 3
+  S.pins = { b: 't1.0' }
+  const boss = { id: 'b', plate: 'B', name: 'B', role: 'manager', agent: '主管' }, mate = { id: 'm', plate: 'M', role: 'staff', team: '主管' }
+  const other = { id: 'o', plate: 'O', name: 'O', role: 'manager', agent: '別的主管' }
+  v2assign(S, [boss, mate, other] as any, 0)
+  expect(S.tables.find(t => t.id === 1)!.team).toBe('別的主管')
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('沒人的舊隊') // 他沒坐過這桌：不動
+  expect(S.tables.find(t => t.id === 2)!.group).toBeDefined() // team 沒被改，group 不碰
+  expect(S.tables.some(t => t.team === '主管' && t.auto)).toBe(true) // 照舊另開
+  expect(claimTables(S, [boss, mate, other] as any, teamsOf([boss, mate, other] as any))).toBe(false) // 0.63.58：認桌改以桌為主，再跑一次也不動
+})
+
+test('0.63.57: retarget clears the group only when the team really changes', () => {
+  const g = { boss: 'b', team: '主管', notified: [], at: 0, complete: true }
+  const t = v2table(1, '主管', { group: g })
+  expect(retarget(t, '主管')).toBe(false)
+  expect(t.group).toBe(g)
+  expect(retarget(t, '新主管')).toBe(true)
+  expect(t.team).toBe('新主管')
+  expect(t.group).toBeUndefined()
+})
+
+test('0.63.57 T-1: a sub-lead dragged to a non-head seat of the big manager table does not take it while the big manager is briefly offline', () => {
+  const S = v2empty()
+  const g = { boss: 'big', team: '大主管', notified: [], at: 0, complete: true }
+  S.tables = [v2table(2, '大主管', { group: g })]
+  S.nextId = 3
+  S.pins = { sub: 't2.3' }
+  const sub = { id: 'sub', plate: 'S', name: 'S', role: 'manager', agent: '小隊長', team: '大主管' }, mine = { id: 'm', plate: 'M', role: 'staff', team: '小隊長' }
+  v2assign(S, [sub, mine] as any, 0) // 大主管不在名冊
+  const t2 = S.tables.find(t => t.id === 2)!
+  expect(t2.team).toBe('大主管')
+  expect(t2.group).toBe(g)
+})
+
+test('0.63.57 T-2: an alias never takes the table of an online manager', () => {
+  const S = v2empty()
+  S.tables = [v2table(1, '小明')]
+  S.nextId = 2
+  const a = { id: 'a', plate: 'A', name: 'A', role: 'manager', agent: '小明' }
+  const b = { id: 'b', plate: '小明', name: '小明', role: 'manager', agent: 'B隊' }
+  v2assign(S, [a, b, { id: 'x', role: 'staff', team: 'B隊' }] as any, 0)
+  expect(S.tables.find(t => t.id === 1)!.team).toBe('小明')
+})
+
+// ── 0.63.58（顧問裁示）：釘選記來源、team 改了才拉回桌、以桌為主認主管、死掉的釘選清掉 ──
+const mgr = (id: string, agent: string, extra: Record<string, unknown> = {}) => ({ id, plate: id.toUpperCase(), name: id.toUpperCase(), role: 'manager', agent, ...extra })
+const staff = (id: string, team: string, extra: Record<string, unknown> = {}) => ({ id, plate: id.toUpperCase(), role: 'staff', team, ...extra })
+
+test('0.63.58: the whole team pinned to the old table (nobody left to place) still moves the table to the current manager', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '走掉的主管', { group: { boss: 'z', team: '走掉的主管', notified: [], at: 0, complete: true } })]
+  S.nextId = 3
+  S.pins = { b: 't2.0', m: 't2.1' }
+  const r = v2assign(S, [mgr('b', '主管'), staff('m', '主管')] as any, 0)
+  expect(S.tables.map(t => t.team)).toEqual(['主管']) // 沒另開一張
+  expect(S.tables[0].group).toBeUndefined()
+  expect(r.dirty).toBe(true)
+  expect(r.map.get('b')).toBe('t2.0')
+  expect(r.map.get('m')).toBe('t2.1')
+})
+
+test('0.63.58: the first run only records everyone\'s team as the baseline and clears nothing; a real team change (off → boss, A → B) then pulls the office-area pin back to the team table', () => {
+  const S = v2empty()
+  S.pins = { x: 'o0', y: 'o1', c: 'o2' } // 升級前的舊釘選，沒有來源
+  const boss = mgr('b', '主管'), boss2 = mgr('b2', '乙')
+  let r = v2assign(S, [boss, staff('x', '主管'), { id: 'y', role: 'staff' }, staff('c', '主管', { kind: 'codex' })] as any, 0)
+  expect([r.map.get('x'), r.map.get('y'), r.map.get('c')]).toEqual(['o0', 'o1', 'o2']) // 第一次跑：都不動
+  expect(S.joined).toEqual({ b: { team: '' }, x: { team: '主管' }, y: { team: '' }, c: { team: '主管' } })
+  r = v2assign(S, [boss, staff('x', '主管'), { id: 'y', role: 'staff' }, staff('c', '主管', { kind: 'codex' })] as any, 1)
+  expect(r.map.get('x')).toBe('o0') // team 沒變：照舊
+  // y：沒有 → 主管；c（Codex）：主管 → 乙（換主管）
+  r = v2assign(S, [boss, boss2, staff('x', '主管'), staff('y', '主管'), staff('c', '乙', { kind: 'codex' })] as any, 2)
+  const t1 = S.tables.find(t => t.team === '主管')!, t2 = S.tables.find(t => t.team === '乙')!
+  expect(r.map.get('x')).toBe('o0')
+  expect(r.map.get('y')).toMatch(new RegExp(`^t${t1.id}\\.[1-3]$`))
+  expect(r.map.get('c')).toMatch(new RegExp(`^t${t2.id}\\.[1-3]$`))
+  expect(S.pins).toEqual({ x: 'o0' })
+  expect(S.joined!.c).toEqual({ team: '乙' })
+  // team 改成沒有：只記基準，不動釘選
+  S.pins.x = 'o5'
+  v2assign(S, [boss, staff('y', '主管'), { id: 'x', role: 'staff' }] as any, 3)
+  expect(S.pins.x).toBe('o5')
+  expect(S.joined!.x).toEqual({ team: '' })
+})
+
+test('0.63.58: pins carry their source; on a team change hire pins and legacy pins go, a drag goes only if it was made before the change; a briefly-offline manager clears nothing', () => {
+  const S = v2empty()
+  S.pins = { old: 'o0' }
+  pinSeat(S, 'h', 'o1', 'hire', 100)
+  pinSeat(S, 'd1', 'o2', 'drag', 100)
+  pinSeat(S, 'd2', 'o3', 'drag', 100)
+  pinSeat(S, 'tb', 't9.1', 'hire', 100) // 協作桌上的不動（桌子這次不存在也不算 o 開頭）
+  const ids = ['old', 'h', 'd1', 'd2']
+  v2assign(S, ids.map(id => staff(id, '舊隊')) as any, 120) // 基準：舊隊（舊隊主管不在線）
+  // 150：team 改成「主管」，但主管不在線 → 先不清，記下改變時間
+  v2assign(S, ids.map(id => staff(id, '主管')) as any, 150)
+  expect(S.joined!.h).toEqual({ team: '舊隊', next: '主管', at: 150 })
+  expect(Object.keys(S.pins).sort()).toEqual(['d1', 'd2', 'h', 'old', 'tb'])
+  // 180：使用者在 team 改了以後又拖了 d2 一次
+  pinSeat(S, 'd2', 'o3', 'drag', 180)
+  // 200：主管上線、團隊成形 → hire、舊釘選、改變前拖的 d1 清掉；改變後拖的 d2 留著
+  const r = v2assign(S, [mgr('b', '主管'), ...ids.map(id => staff(id, '主管'))] as any, 200)
+  expect(S.pins.h).toBeUndefined()
+  expect(S.pins.old).toBeUndefined()
+  expect(S.pins.d1).toBeUndefined()
+  expect(S.pins.d2).toBe('o3')
+  expect(r.map.get('d2')).toBe('o3')
+  expect(S.pinBy!.d2).toEqual({ by: 'drag', at: 180 })
+  expect(S.joined!.h).toEqual({ team: '主管' })
+})
+
+test('0.63.58: moveSeat records a drag for the person dragged and hire for whoever got swapped out; the new fields survive parseStore', () => {
+  const S = v2empty()
+  S.seats = { a: { key: 'o0', seen: Date.now() }, b: { key: 'o1', seen: Date.now() } }
+  expect(moveSeat(S, 'a', 'o1', new Set(['a', 'b'])).ok).toBe(true)
+  expect(S.pins).toEqual({ a: 'o1', b: 'o0' })
+  expect(S.pinBy!.a.by).toBe('drag')
+  expect(S.pinBy!.b.by).toBe('hire')
+  S.joined = { a: { team: '主管' } }
+  S.bossAt = { m: 5 }
+  const back = parseStore(JSON.stringify(S))
+  expect(back.pinBy).toEqual(S.pinBy)
+  expect(back.joined).toEqual(S.joined)
+  expect(back.bossAt).toEqual(S.bossAt)
+  expect(parseStore(JSON.stringify({ tables: [], seats: {}, pins: {}, nextId: 1 })).pinBy).toBeUndefined() // 舊檔照讀
+})
+
+test('0.63.58: old and new manager online together, names differing only by the bracket suffix: the table goes to the new one, who takes the head seat; no second table', () => {
+  expect(baseName('示範團隊主管（接手）')).toBe('示範團隊主管')
+  expect(baseName('主管 (2)（接續）')).toBe('主管')
+  expect(baseName('（只有括號）')).toBe('')
+  const S = v2empty()
+  S.tables = [v2table(2, '示範團隊主管（接續）'), v2table(3, '示範團隊主管（接手）', { auto: true })] // 0.63.57 已經替新主管另開了一張
+  S.nextId = 4
+  S.pins = { old: 't2.0', cx: 'o0', m3: 't3.1' }
+  S.seats = { old: { key: 't2.0', seen: 0 }, cx: { key: 'o0', seen: 0 }, m3: { key: 't3.1', seen: 0 } }
+  S.joined = { cx: { team: '示範團隊主管' } } // Codex 本來掛舊主管
+  const oldBoss = mgr('old', '示範團隊主管'), newBoss = mgr('new', '示範團隊主管（接手）')
+  const people = [oldBoss, newBoss, staff('m', '示範團隊主管（接手）'), staff('m3', '示範團隊主管（接手）'), staff('cx', '示範團隊主管（接手）', { kind: 'codex' })]
+  const r = v2assign(S, people as any, 0) // 舊主管先登記？同一次看到：帶團隊的、有後綴的優先
+  expect(S.tables.map(t => [t.id, t.team])).toEqual([[2, '示範團隊主管（接手）']]) // 自動桌收掉
+  expect(r.map.get('new')).toBe('t2.0')
+  expect(r.map.get('old')).toMatch(/^o\d+$/)
+  expect(S.pins.old).toBe(r.map.get('old')) // 讓位後的新座位記成 hire（顧問裁示 M-1）
+  expect(S.pinBy!.old.by).toBe('hire')
+  expect(r.map.get('m')).toMatch(/^t2\.[1-3]$/)
+  expect(r.map.get('m3')).toMatch(/^t2\.[1-3]$/)
+  expect(r.map.get('cx')).toMatch(/^t2\.[1-3]$/) // team 換到新主管：Codex 的 o0 清掉、坐進桌 2
+  // 舊主管比較晚登記也一樣：最新登記的才接
+  const A = v2empty()
+  A.tables = [v2table(2, '隊（接續）')]
+  A.nextId = 3
+  A.bossAt = { a: 100, b: 200 }
+  v2assign(A, [mgr('a', '隊（甲）'), mgr('b', '隊（乙）'), staff('x', '隊（甲）')] as any, 300)
+  expect(A.tables.find(t => t.id === 2)!.team).toBe('隊（乙）')
+})
+
+test('0.63.58: a finished handover record wins over names and head seats, even while the old manager is still online', () => {
+  const S = v2empty()
+  S.tables = [v2table(1, '老大')]
+  S.nextId = 2
+  S.pins = { a: 't1.0' }
+  const a = mgr('a', '老大'), n = mgr('n', '新來的'), m = staff('m', '新來的')
+  v2assign(S, [a, n, m] as any, 0)
+  expect(S.tables.find(t => t.id === 1)!.team).toBe('老大') // 沒紀錄：在線主管的桌不搶
+  const H = v2empty()
+  H.tables = [v2table(1, '老大')]
+  H.nextId = 2
+  H.pins = { a: 't1.0' }
+  const r = v2assign(H, [a, n, m] as any, 0, [{ id: 'h1', table: 1, newSid: 'n', oldHandle: '老大', at: 10 }])
+  expect(H.tables.map(t => t.team)).toEqual(['新來的'])
+  expect(r.map.get('n')).toBe('t1.0')
+  expect(r.map.get('m')).toMatch(/^t1\.[1-3]$/)
+})
+
+test('0.63.58 H-1: an old handover record never takes a table back after it was given to another online manager (hire with no boss, promote, team-up)', () => {
+  // 桌 2 交接給 C（done）→ C 暫離 → 桌 2 另聘 D（team 改成 D，D 釘在主管椅）→ C 回來（還是主管、沒有組員）
+  const S = v2empty()
+  S.tables = [v2table(2, 'D隊')]
+  S.nextId = 3
+  pinSeat(S, 'd', 't2.0', 'hire', 0)
+  const rec = [{ id: 'hc', table: 2, newSid: 'c', oldHandle: '老主管', at: 5 }]
+  const c = mgr('c', 'C隊'), d = mgr('d', 'D隊'), m = staff('m', 'D隊')
+  for (const now of [10, 20]) { // 每次輪詢都一樣
+    const r = v2assign(S, [c, d, m] as any, now, rec)
+    expect(S.tables.map(t => [t.id, t.team])).toEqual([[2, 'D隊']])
+    expect(S.pins.d).toBe('t2.0')
+    expect(r.map.get('d')).toBe('t2.0')
+    expect(r.map.get('m')).toMatch(/^t2\.[1-3]$/)
+  }
+  expect(v2assign(S, [c, d, m] as any, 30, rec).dirty).toBe(false) // 不會一直存檔
+  // D 也下線了、桌子對不到在線主管：紀錄才又算數
+  v2assign(S, [c, staff('x', 'C隊')] as any, 40, rec)
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('C隊')
+  // 同一張桌有好幾筆：只看最新的
+  const T = v2empty()
+  T.tables = [v2table(2, '老主管')]
+  T.nextId = 3
+  v2assign(T, [mgr('e', 'E隊'), mgr('c', 'C隊'), staff('y', 'C隊')] as any, 0, [{ id: 'he', table: 2, newSid: 'e', oldHandle: '老主管', at: 9 }, { id: 'hc2', table: 2, newSid: 'c', oldHandle: '更早的', at: 1 }])
+  expect(T.tables.find(t => t.id === 2)!.team).toBe('E隊')
+})
+
+test('0.63.58 H-1: table 7 real case: the done record points at the current boss; nothing changes, and after the table goes to a big manager of a layered team it stays his', () => {
+  const S = v2empty()
+  S.tables = [v2table(7, '資料整理主管')]
+  S.nextId = 8
+  S.pins = { f7: 't7.0' }
+  const rec = [{ id: 'h7', table: 7, newSid: 'f7', oldHandle: '資料庫主管（舊）', at: 1 }]
+  const boss = mgr('f7', '資料整理主管'), mate = staff('w', '資料整理主管')
+  let r = v2assign(S, [boss, mate] as any, 0, rec)
+  expect(S.tables.map(t => t.team)).toEqual(['資料整理主管'])
+  expect(r.map.get('f7')).toBe('t7.0')
+  // 之後用「設成一組」把桌 7 交給大主管，原主管還是 manager（分層團隊的小主管，team 掛大主管）
+  S.tables[0].team = '大主管'
+  pinSeat(S, 'big', 't7.0', 'hire', 2)
+  pinSeat(S, 'f7', 't7.1', 'hire', 2)
+  const big = mgr('big', '大主管'), sub = mgr('f7', '資料整理主管', { team: '大主管' })
+  r = v2assign(S, [big, sub, mate] as any, 3, rec)
+  expect(S.tables.find(t => t.id === 7)!.team).toBe('大主管')
+  expect(r.map.get('big')).toBe('t7.0')
+})
+
+test('0.63.58: a manager of another team with the same base name only takes a table whose team matches no online manager', () => {
+  const S = v2empty()
+  S.tables = [v2table(1, '主管'), v2table(2, '主管（舊）')]
+  S.nextId = 3
+  const live = mgr('a', '主管'), other = mgr('b', '主管(B組)')
+  v2assign(S, [live, other, staff('x', '主管(B組)')] as any, 0)
+  expect(S.tables.find(t => t.id === 1)!.team).toBe('主管') // 在線主管的桌（他沒有組員）不搶
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('主管(B組)') // 對不到在線主管的舊桌才接
+  expect(S.tables).toHaveLength(2)
+})
+
+test('0.63.58: dead pins (id no longer in seats) are dropped; a hire still on the way (under an hour) and a reserved seat stay', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '主管')]
+  S.nextId = 3
+  const now = 10 * 3600e3
+  S.pins = { d1: 't2.0', d2: 't2.1', d3: 'o4', res: 't2.3' }
+  pinSeat(S, 'fresh', 't2.2', 'hire', now - 60e3)
+  S.reserved = { res: 't2.3' }
+  S.seats = { live: { key: 'o0', seen: now } }
+  const r = v2assign(S, [{ id: 'live', role: 'staff' }] as any, now)
+  expect(Object.keys(S.pins).sort()).toEqual(['fresh', 'res'])
+  expect(Object.keys(S.pinBy!)).toEqual(['fresh'])
+  expect(r.dirty).toBe(true)
+})
+
+test('0.63.58 H-1: a handover record is used once (handApplied); after that C coming back never takes the table, even if its team no longer matches anyone online', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '老主管')]
+  S.nextId = 3
+  const rec = [{ id: 'hc', table: 2, newSid: 'c', oldHandle: '老主管', at: 5 }]
+  const c = mgr('c', 'C隊'), m = staff('m', 'C隊')
+  v2assign(S, [c, m] as any, 10, rec)
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('C隊')
+  expect(S.handApplied).toEqual({ hc: 10 })
+  // C 暫離；桌 2 後來給了別人（X），X 也不在線；C 的座位紀錄也沒了
+  S.tables.find(t => t.id === 2)!.team = 'X隊'
+  delete S.seats.c; delete S.seats.m
+  const r = v2assign(S, [c, m] as any, 20, rec)
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('X隊') // 紀錄用過了：不搶回去
+  expect(r.map.get('c')).not.toMatch(/^t2\./)
+  // swapBoss 已經改好的桌：紀錄直接記成用過
+  const T = v2empty()
+  T.tables = [v2table(4, 'C隊')]
+  T.nextId = 5
+  v2assign(T, [c, m] as any, 30, [{ id: 'h4', table: 4, newSid: 'c', oldHandle: '老主管', at: 1 }])
+  expect(T.handApplied).toEqual({ h4: 30 })
+  // 複審 H-1b：紀錄還在檔裡就不忘；沒給紀錄（外掛面板）也不清
+  const day = 24 * 3600e3
+  const h4 = [{ id: 'h4', table: 4, newSid: 'c', oldHandle: '老主管', at: 1 }]
+  v2assign(T, [c, m] as any, 30 + 8 * day, h4)
+  expect(T.handApplied).toEqual({ h4: 30 })
+  v2assign(T, [c, m] as any, 30 + 8 * day)
+  expect(T.handApplied).toEqual({ h4: 30 })
+  // 檔裡一時讀不到（讀成空的）但套用還不到 7 天：不忘
+  v2assign(T, [c, m] as any, 30 + 3 * day, [])
+  expect(T.handApplied).toEqual({ h4: 30 })
+  // 紀錄已經不在檔裡、而且套用超過 7 天：才忘
+  v2assign(T, [c, m] as any, 30 + 8 * day, [])
+  expect(T.handApplied).toEqual({})
+  expect(parseStore(JSON.stringify({ ...T, handApplied: { z: 1 } })).handApplied).toEqual({ z: 1 })
+})
+
+test('0.63.58 H-1b: an applied record 8 days later, owner D offline, C online: the table does not move and nothing is saved', () => {
+  const day = 24 * 3600e3
+  const S = v2empty()
+  S.tables = [v2table(2, '老主管')]
+  S.nextId = 3
+  const rec = [{ id: 'hc', table: 2, newSid: 'c', oldHandle: '老主管', at: 5 }]
+  const c = mgr('c', 'C隊'), cm = staff('cm', 'C隊')
+  v2assign(S, [c, cm] as any, 10, rec) // 套用
+  expect(S.handApplied).toEqual({ hc: 10 })
+  // 之後桌 2 另聘 D，D 帶著組員坐桌
+  S.tables[0].team = 'D隊'
+  delete S.seats.c; delete S.seats.cm
+  pinSeat(S, 'd', 't2.0', 'hire', 20)
+  const d = mgr('d', 'D隊'), dm = staff('dm', 'D隊')
+  v2assign(S, [c, cm, d, dm] as any, 20, rec)
+  // 8 天後：D 和組員都不在線，C 和組員在線；紀錄還在檔裡
+  const later = 10 + 8 * day
+  v2assign(S, [c, cm] as any, later, rec)
+  const r = v2assign(S, [c, cm] as any, later + 1, rec)
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('D隊')
+  expect(S.handApplied).toEqual({ hc: 10 })
+  expect(r.dirty).toBe(false)
+  expect(r.map.get('c')).not.toMatch(/^t2\./)
+})
+
+test('0.63.58 H-1b: a record done more than 7 days ago is never used, even if it was never applied', () => {
+  const day = 24 * 3600e3
+  const S = v2empty()
+  S.tables = [v2table(2, '老主管')]
+  S.nextId = 3
+  v2assign(S, [mgr('c', 'C隊'), staff('cm', 'C隊')] as any, 8 * day, [{ id: 'old', table: 2, newSid: 'c', oldHandle: '老主管', at: 0 }])
+  expect(S.tables.find(t => t.id === 2)!.team).toBe('老主管')
+  expect(S.handApplied).toBeUndefined()
+  // 7 天內的一樣照用
+  const T = v2empty()
+  T.tables = [v2table(2, '老主管')]
+  T.nextId = 3
+  v2assign(T, [mgr('c', 'C隊'), staff('cm', 'C隊')] as any, 6 * day, [{ id: 'new', table: 2, newSid: 'c', oldHandle: '老主管', at: 0 }])
+  expect(T.tables.find(t => t.id === 2)!.team).toBe('C隊')
+})
+
+test('0.63.58 M-1: anyone but the owner on seat 0 gives it up, whatever the pin source: own members move to the nearest free seat at the table, others to the office area; new seats are hire pins', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '新主管', { size: 4 })]
+  S.nextId = 3
+  S.pins = { old: 't2.0' } // 舊主管已經降成員工，沒有來源地釘在主管椅
+  const boss = mgr('b', '新主管'), mate = staff('m', '新主管'), old = { id: 'old', plate: 'OLD', role: 'staff' }
+  let r = v2assign(S, [boss, mate, old] as any, 0)
+  expect(r.map.get('b')).toBe('t2.0')
+  expect(r.map.get('old')).toMatch(/^o\d+$/)
+  expect(S.pinBy!.old).toEqual({ by: 'hire', at: 0 })
+  // 組員被拖到主管椅：讓位到同一桌最近的空位
+  const A = v2empty()
+  A.tables = [v2table(5, '新主管', { size: 4 })]
+  A.nextId = 6
+  pinSeat(A, 'm', 't5.0', 'drag', 0)
+  r = v2assign(A, [boss, mate] as any, 1)
+  expect(r.map.get('b')).toBe('t5.0')
+  expect(r.map.get('m')).toBe('t5.1')
+  expect(A.pins.m).toBe('t5.1')
+  expect(A.pinBy!.m.by).toBe('hire')
+})
+
+test('0.63.58 M-1: while the owner is offline (or pinned somewhere else) nobody on seat 0 is moved', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '新主管')]
+  S.nextId = 3
+  S.pins = { old: 't2.0' }
+  const old = { id: 'old', plate: 'OLD', role: 'staff' }
+  let r = v2assign(S, [old, staff('m', '新主管')] as any, 0) // 主人不在線
+  expect(r.map.get('old')).toBe('t2.0')
+  expect(S.pins.old).toBe('t2.0')
+  pinSeat(S, 'b', 'o7', 'drag', 0) // 主人在線，但使用者把他拖到辦公區
+  r = v2assign(S, [mgr('b', '新主管'), old, staff('m', '新主管')] as any, 1)
+  expect(r.map.get('old')).toBe('t2.0')
+  expect(r.map.get('b')).toBe('o7')
+})
+
+test('0.63.58: a full table (no growing past its size): non-members not dragged there give their seats to the owner\'s members; dragged ones stay', () => {
+  const S = v2empty()
+  S.tables = [v2table(2, '新主管', { size: 4 })]
+  S.nextId = 3
+  S.pins = { o1: 't2.1', o2: 't2.2' } // 舊團隊的人，沒有來源
+  pinSeat(S, 'o3', 't2.3', 'drag', 0) // 使用者特意放的
+  const oldTeam = (id: string) => staff(id, '舊主管')
+  const boss = mgr('b', '新主管'), m1 = staff('m1', '新主管'), m2 = staff('m2', '新主管'), m3 = staff('m3', '新主管')
+  const r = v2assign(S, [boss, m1, m2, m3, oldTeam('o1'), oldTeam('o2'), oldTeam('o3')] as any, 0)
+  expect(S.tables).toHaveLength(1)
+  expect(S.tables[0].size).toBe(4) // 不自動加大
+  expect(r.map.get('b')).toBe('t2.0')
+  expect(r.map.get('o3')).toBe('t2.3')
+  expect([r.map.get('m1'), r.map.get('m2')].sort()).toEqual(['t2.1', 't2.2'])
+  expect(r.map.get('m3')).toMatch(/^o\d+$/) // 沒位子了、也沒人能讓
+  expect(r.map.get('o1')).toMatch(/^o\d+$/)
+  expect(r.map.get('o2')).toMatch(/^o\d+$/)
+  expect(S.pinBy!.o1.by).toBe('hire')
+  expect(S.pinBy!.o3).toEqual({ by: 'drag', at: 0 })
+  // 再跑一次不變、不存檔
+  expect(v2assign(S, [boss, m1, m2, m3, oldTeam('o1'), oldTeam('o2'), oldTeam('o3')] as any, 1).dirty).toBe(false)
 })

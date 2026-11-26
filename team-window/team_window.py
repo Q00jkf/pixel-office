@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -466,7 +467,7 @@ class Api:
             pass
         online = {}
         try:
-            with urllib.request.urlopen(Proxy.office + '/state.json', timeout=5) as r:
+            with OFFICE_OPENER.open(urllib.request.Request(Proxy.office + '/state.json', headers=office_key_header()), timeout=5) as r:
                 for p in json.load(r).get('people', []):
                     where = p.get('role') == 'manager' and session_cwd(p.get('id'))
                     if where:
@@ -652,9 +653,34 @@ class Api:
             stop(t)
 
 
+def office_key_header():
+    """本機金鑰（pixel-office 0.63.56 端點驗證）：辦公室伺服器的資料與寫入要帶 X-PO-Key；讀不到就不帶（伺服器回 401）"""
+    try:
+        with open(os.path.join(os.path.expanduser('~'), '.claude', 'pixel-office', 'local-key'), encoding='utf-8') as f:
+            return {'X-PO-Key': f.read().strip()}
+    except OSError:
+        return {}
+
+
+# 連本機辦公室伺服器不走 http_proxy 等代理（0.63.56，安全審 F-3：不然金鑰會跟著送到代理）
+OFFICE_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+# 這個視窗自己的通行證（0.63.56）：開視窗的網址帶一次，換成 HttpOnly cookie；轉送時只有帶這個 cookie 的請求才幫它加本機金鑰，
+# 本機其他程式打這個轉送埠拿不到金鑰（不然等於繞過端點驗證）
+WINDOW_TOKEN = secrets.token_hex(16)
+
+
 class Proxy(BaseHTTPRequestHandler):
     """/team/* 給這個視窗的頁面；其他轉給 pixel-office 的手機面板伺服器，辦公室頁就跟我們同源、讀得到它點了誰。"""
     office = 'http://127.0.0.1:8767'
+
+    def _ours(self):
+        for part in (self.headers.get('cookie') or '').split(';'):
+            k, _, v = part.strip().partition('=')
+            if k == 'po_t' and secrets.compare_digest(v, WINDOW_TOKEN):
+                return True
+        return False
 
     def log_message(self, *args):
         pass
@@ -667,7 +693,10 @@ class Proxy(BaseHTTPRequestHandler):
             with open(p, 'rb') as f:
                 body = f.read()
             ctype = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css'}.get(os.path.splitext(p)[1], 'application/octet-stream')
-            return self._reply(200, ctype, body)
+            q = self.path.split('?', 1)[1] if '?' in self.path else ''
+            given = dict(x.partition('=')[::2] for x in q.split('&') if x).get('po_t', '')
+            cookie = f'po_t={WINDOW_TOKEN}; Path=/; HttpOnly; SameSite=Strict' if given and secrets.compare_digest(given, WINDOW_TOKEN) else None
+            return self._reply(200, ctype, body, cookie)
         self._forward()
 
     def do_POST(self):
@@ -679,17 +708,22 @@ class Proxy(BaseHTTPRequestHandler):
             req.add_header('content-type', self.headers['content-type'])
         if body is not None:
             req.add_header('origin', self.office)
+        if self._ours():
+            for k, v in office_key_header().items():
+                req.add_header(k, v)
         try:
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with OFFICE_OPENER.open(req, timeout=5) as r:
                 self._reply(r.status, r.headers.get('content-type', ''), r.read())
         except urllib.error.HTTPError as e:
             self._reply(e.code, e.headers.get('content-type', ''), e.read())
         except OSError:
             self._reply(502, 'text/plain; charset=utf-8', b'Office server is not running: ~/.claude/pixel-office/start-remote.bat')
 
-    def _reply(self, code, ctype, body):
+    def _reply(self, code, ctype, body, cookie=None):
         self.send_response(code)
         self.send_header('content-type', ctype)
+        if cookie:
+            self.send_header('set-cookie', cookie)
         self.send_header('cache-control', 'no-store')
         self.send_header('content-length', str(len(body)))
         self.end_headers()
@@ -704,7 +738,7 @@ def main():
     Proxy.office = f'http://127.0.0.1:{office_port()}'
     server = ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    api._window = webview.create_window('Relations' if RELATIONS else 'Pixel Office', f'http://127.0.0.1:{server.server_port}/team/index.html',
+    api._window = webview.create_window('Relations' if RELATIONS else 'Pixel Office', f'http://127.0.0.1:{server.server_port}/team/index.html?po_t={WINDOW_TOKEN}',
                                         js_api=api, width=360 if RELATIONS else 1400, height=240 if RELATIONS else 800, frameless=True,
                                         min_size=(220, 120) if RELATIONS else (200, 100),
                                         easy_drag=False)  # 預設 True＝按住視窗任何地方都在搬視窗；只留標題列（pywebview-drag-region）

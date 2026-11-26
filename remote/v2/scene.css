@@ -1,0 +1,731 @@
+/* 像素辦公室手機版 v2：場景外框、點擊區、名牌、狀態標記、人事室 */
+main { overflow-x: clip; }
+body { background: #6e4326; }
+#v2 { width: 100%; background: #6e4326; }
+#v2wrap { position: relative; margin: 0 auto; touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#v2c { display: block; width: 100%; height: 100%; }
+#v2ov { position: absolute; inset: 0; }
+#v2ov .seat, #v2ov .spot { position: absolute; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; border-radius: 6px; }
+#v2ov .seat:focus-visible, #v2ov .spot:focus-visible { outline: 3px solid #ffcd75; outline-offset: 1px; }
+#v2ov .seat.empty { cursor: copy; }
+#v2ov .seat.picked { outline: 3px dashed #ffcd75; background: #ffcd7533; }
+#v2ov .seat.drop { outline: 3px solid #4ade80; background: #4ade8033; }
+@media (hover: hover) { #v2ov .seat:hover, #v2ov .spot:hover { background: #ffffff22; outline: 2px solid #ffffff88; } }
+#v2ov .tag { position: absolute; transform: translateX(-50%); cursor: pointer; -webkit-tap-highlight-color: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+  font: 600 11px/1.5 system-ui, "Noto Sans TC", sans-serif; color: #3b2412; background: #fff6e6e6; border: 1px solid #b98250; border-radius: 4px; padding: 0 4px; }
+#v2ov .tag.boss::before { content: '★'; color: #fff6c8; margin-right: 1px; }
+/* 主管名牌：金色底（使用者 2026-11-22）；等你回覆／出錯時仍以橘／紅為準，金邊保留 */
+#v2ov .tag.boss { background: linear-gradient(#f3cf5a, #d9a521); border-color: #8a6410; color: #3b2412; box-shadow: 0 0 0 1px #fff3b0 inset; }
+#v2ov .tag.boss.wait { background: #ff9a3c; border-color: #8a6410; color: #fff; }
+#v2ov .tag.boss.err { background: #b13e53; border-color: #8a6410; color: #fff; }
+#v2ov .tag.wait { background: #ff9a3c; border-color: #b85a10; color: #fff; }
+#v2ov .tag.err { background: #b13e53; border-color: #7a1f30; color: #fff; }
+#v2ov .ring { position: absolute; pointer-events: none; border-radius: 50%; border: 3px solid #ff9a3c; transform: translate(-50%, -50%); animation: v2pulse 1.2s ease-out infinite; }
+@keyframes v2pulse { 0% { opacity: .95; transform: translate(-50%, -50%) scale(.6); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); } }
+@media (prefers-reduced-motion: reduce) { #v2ov .ring { animation: none; opacity: .8; } }
+#v2badge { margin-left: 8px; padding: 0 6px; border-radius: 4px; background: #ffcd75; color: #29366f; font-size: 12px; font-weight: 700; white-space: nowrap; }
+#v2demo { position: sticky; top: 37px; z-index: 1; background: #b85a10; color: #fff; text-align: center; font-size: 13px; padding: 4px 12px; }
+#v2ghost { position: fixed; z-index: 7; pointer-events: none; display: none; transform: translate(-50%, -140%); background: #29366f; color: #fff; padding: 4px 10px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 12px #0005; }
+header { flex-wrap: wrap; gap: 4px 8px; }
+/* 第三版：分區標示、協作桌桌牌、協作桌人數按鈕 */
+#v2ov .zone { position: absolute; transform: translateX(-50%); white-space: nowrap; font: 700 12px/1.6 system-ui, "Noto Sans TC", sans-serif; color: #fff6e6; background: #6e4326d9; border: 1px solid #3b2412; border-radius: 10px; padding: 0 10px; }
+#v2ov button.zone { cursor: pointer; }
+#v2ov .zone.add { background: #fff6e6e6; color: #6e4326; border-style: dashed; }
+#v2ov .tplate { position: absolute; transform: translateX(-50%); display: flex; white-space: nowrap; overflow: hidden; cursor: pointer; font: 600 11px/1.5 system-ui, "Noto Sans TC", sans-serif; color: #3b2412; background: #f1e3c2e6; border: 1px solid #b98250; border-radius: 6px; padding: 0 6px; }
+#menu .v2sizes { display: flex; gap: 6px; margin-bottom: 8px; }
+#menu .v2sizes .mbtn { flex: 1; text-align: center; margin: 0; }
+#menu .v2sizes .mbtn.on { background: #29366f; color: #fff; border-color: #29366f; }
+
+/* ---------- 人事室（門沿浮雕版，2026-11-22） ---------- */
+#hrroom { position: fixed; inset: 0; z-index: 2; display: none; justify-content: center; background: #3b2412cc; }
+#card { z-index: 3; }           /* 從人事室點員工開狀態卡：卡片要在人事室上面 */
+#hrroom .hr-wrap { width: 100%; max-width: 600px; height: 100%; display: flex; flex-direction: column; background: #fbf4e8; box-shadow: 0 0 24px #0006; }
+/* 門框：直接用定稿概念圖的頁首（852×202）等比例縮放（使用者 2026-11-22：門框完全照參考圖）；
+   返回、招聘＝疊在圖上對應位置的透明按鈕（座標以概念圖像素換成百分比：返回 35–130 × 60–145、招聘 635–828 × 60–147） */
+#hrroom .hr-head { flex: none; position: relative; padding-top: env(safe-area-inset-top); background: #6b4426; line-height: 0; }
+#hrroom .hr-headimg { display: block; width: 100%; height: auto; image-rendering: auto; }
+#hrroom .hr-back, #hrroom .hr-hire { position: absolute; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 14%; -webkit-tap-highlight-color: transparent; }
+#hrroom .hr-back { left: 4.1%; top: calc(env(safe-area-inset-top) + 29.7%); width: 11.2%; height: 42%; }
+#hrroom .hr-hire { left: 74.5%; top: calc(env(safe-area-inset-top) + 29.7%); width: 22.7%; height: 43%; }
+#hrroom .hr-back:active, #hrroom .hr-hire:active { background: #0000002a; }
+#hrroom .hr-back:focus-visible, #hrroom .hr-hire:focus-visible { outline: 3px solid #ffcd75; outline-offset: 2px; }
+#hrroom .hr-ic { width: 30px; height: 30px; background: url(/v2/assets/hr_icons.png) calc(var(--i) * -30px) 0 / 90px 30px no-repeat; image-rendering: pixelated; flex: none; }
+#hrroom .hr-body { flex: 1; overflow-y: auto; padding: 14px 14px calc(24px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#hrroom .hr-sec h2 { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font: 800 20px/1.3 system-ui, "Noto Sans TC", sans-serif; color: #3b2412; }
+#hrroom .hr-sec h2::before { content: ''; width: 5px; height: 22px; border-radius: 2px; background: #c9662a; }
+#hrroom .hr-sec h2::after { content: ''; flex: 1; height: 1px; background: #d8c3a2; }
+#hrroom .hr-count { font: 700 14px/1 system-ui, sans-serif; color: #fff; background: #c9662a; border-radius: 8px; padding: 4px 8px; }
+#hrroom .hr-count:empty { display: none; }
+#hrroom .hr-total { font: 600 13px/1 system-ui, sans-serif; color: #8a6a4a; }
+#hrroom .hr-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+#hrroom .hr-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 8px 12px 8px 8px; border: 1.5px solid #e3d0b2; border-radius: 14px; background: #fffaf2; color: #3b2412; cursor: pointer; font: inherit; }
+#hrroom .hr-row:active { background: #f6e8d2; }
+#hrroom .hr-av { flex: none; width: 56px; height: 56px; border-radius: 12px; background-color: #f3e4c6; background-repeat: no-repeat; background-size: 150% auto; background-position: 50% 4%; image-rendering: auto; }
+#hrroom .hr-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+#hrroom .hr-txt b { font: 700 17px/1.3 system-ui, "Noto Sans TC", sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hrroom .hr-txt small { font: 500 13px/1.4 system-ui, "Noto Sans TC", sans-serif; color: #8a6a4a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hrroom .hr-chip { font-style: normal; font-weight: 700; color: #b0561c; background: #fde2c4; border-radius: 6px; padding: 1px 6px; }
+#hrroom .hr-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; background: #a99a88; }
+#hrroom .hr-dot.work { background: #2fa65a; } #hrroom .hr-dot.done { background: #3b82c4; } #hrroom .hr-dot.err { background: #d23b4f; } #hrroom .hr-dot.wait { background: #e8892c; }
+#hrroom .hr-star { font-style: normal; color: #c9a227; margin-right: 3px; }
+#hrroom .hr-tag { font-style: normal; font-size: 11px; font-weight: 700; color: #fff; background: #5b6b7a; border-radius: 4px; padding: 0 4px; vertical-align: 2px; }
+#hrroom .hr-go { flex: none; font: 400 28px/1 system-ui, sans-serif; color: #8a6a4a; }
+#hrroom .hr-tools { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; position: sticky; top: -14px; z-index: 1; background: #fbf4e8; padding: 6px 0; }
+#hrroom .hr-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 44px; border: 1.5px solid #d8c3a2; border-radius: 12px; background: #f6ecdd; }
+#hrroom .hr-search input { flex: 1; border: 0; background: none; font: 16px system-ui, "Noto Sans TC", sans-serif; color: #3b2412; outline: none; min-width: 0; }
+#hrroom .hr-quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+#hrroom .hr-quick button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 48px; border: 2px solid #5f9a90; border-radius: 12px; background: #f9f3e7; box-shadow: inset 0 -3px 0 #e8dcc6; color: #3b2412; font: 800 15px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
+/* 入口圖示：從定稿概念圖剪下來的（協作桌、月曆、帳單金幣） */
+#hrroom .hr-quick img.hr-ic { width: auto; height: 32px; display: inline-block; image-rendering: auto; }
+#hrroom .hr-quick img { width: 26px; height: 22px; object-fit: contain; }
+#hrroom .hr-quick span { font-size: 18px; }
+#hrroom .hr-empty { color: #8a6a4a; text-align: center; padding: 20px 0; }
+@media (min-width: 700px) { #hrroom .hr-wrap { margin: 24px 0; height: calc(100% - 48px); border-radius: 16px; overflow: hidden; } }
+
+/* 桌牌狀態（roadmap 第 4 項）：桌名可縮成…，狀態留著；有人等你＝橘、卡住＝紅 */
+#v2ov .tplate .tl { overflow: hidden; text-overflow: ellipsis; min-width: 2em; }
+#v2ov .tplate .ts { flex: none; }
+#v2ov .tplate.wait { background: #ff9a3c; color: #fff; border-color: #b85a10; }
+#v2ov .tplate.err { background: #b13e53; color: #fff; border-color: #7a1f30; }
+
+/* ==========================================================================
+   選單美術（2026-11-23，照 Codex 參考圖 art-inbox/menus-ref、零件 v2/assets/ui_*.png）
+   風格 A：米白底、切角卡片、木紋標題列＋米白名牌、深藍主按鈕、金框次按鈕、紅框危險按鈕、淡金選中。按鈕不放圖示。
+   零件都是 2 倍圖、九宮格切 12 px → CSS 邊寬 6 px。page.html 的 <style> 在這支後面，所以一律加 html body 提高優先
+   ========================================================================== */
+:root { --m-bg: #fff6e6; --m-card: #fffaf0; --m-ink: #3b2412; --m-sub: #765a43; --m-teal: #386d66; --m-red: #b13e53; --m-navy: #29366f; --m-orange: #c9662a; }
+html body { --nine: 6px; }
+/* 九宮格：用法 border-image: url(...) 12 fill / 6px */
+html body .tbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: center; height: 56px; margin: 0 -15px 10px; padding: 0 8px; background: url(/v2/assets/ui_title_bar.png) 0 0 / auto 56px repeat-x; }
+html body .tbar h2, html body #card .tbar h2, html body #menu .tbar h2 { flex: 0 1 260px; min-width: 0; height: 29px; margin: 0; padding: 0 10px; box-sizing: border-box; max-width: calc(100% - 130px); display: flex; align-items: center; justify-content: center; gap: 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_title_plate.png) 12 fill / 6px; font: 400 17px/1 system-ui, "Noto Sans TC", sans-serif; color: var(--m-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #card #close.tclose, html body #menu #mclose.tclose { position: absolute; right: 15px; top: 13px; width: 41px; height: 29px; border: 0; padding: 0; background: url(/v2/assets/ui_btn_close.png) center / 100% 100% no-repeat; cursor: pointer; }
+html body #card #close.tclose:active, html body #menu #mclose.tclose:active { filter: brightness(.9); }
+
+/* 底部選單框（C）與狀態卡（A）：從畫面 40% 處滑上來，上面辦公室變暗 */
+html body #menu, html body #card { top: 40%; bottom: 0; max-height: none; padding: 0 15px calc(16px + env(safe-area-inset-bottom)); background: var(--m-bg); border-top: 0; box-shadow: 0 0 0 100vmax #1e0f0580; color: var(--m-ink); font: 13px/1.55 system-ui, "Noto Sans TC", sans-serif; }
+html body #menu h3.sec, html body #card h3.sec { margin: 14px 0 8px; font: 400 15px/1.3 system-ui, "Noto Sans TC", sans-serif; color: var(--m-ink); }
+html body #menu label { color: var(--m-sub); font-size: 12px; margin: 8px 0 4px; }
+html body #menu .note, html body #card .note { color: var(--m-sub); font-size: 13px; margin: 6px 0; }
+/* 卡片 */
+html body .mcard, html body #info, html body #reply, html body #menu .shift { display: block; margin: 0 0 10px; padding: 6px 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; background: none; border-radius: 0; color: var(--m-ink); }
+html body #menu .shift.off { opacity: 1; border-image-source: url(/v2/assets/ui_card_dim.png); color: var(--m-sub); }
+html body .mcard b { display: block; font-weight: 400; font-size: 14px; }
+html body .mcard b.big { font-size: 16px; }
+html body .mcard small { display: block; color: var(--m-sub); font-size: 12px; }
+html body .mcard small.wait { color: var(--m-orange); }
+html body .mcard .ok { color: var(--m-teal); font-size: 13px; } html body .mcard .bad { color: var(--m-red); font-size: 13px; }
+html body .mcard .md { margin-top: 6px; background: none; padding: 0; max-height: 30vh; overflow-y: auto; }
+/* 清單列（C1）：卡片＋右邊 › */
+html body #menu .mrow, html body #card #c2 .mrow { display: flex; align-items: center; width: 100%; margin: 0 0 8px; padding: 8px 34px 8px 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; background: none; text-align: left; font: inherit; color: var(--m-ink); cursor: pointer; position: relative; }
+html body #menu .mrow::after, html body #hrroom .hr-row::after, html body #card #c2 .mrow::after { content: ''; position: absolute; right: 6px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: url(/v2/assets/ui_icon_chevron.png) center / 100% 100% no-repeat; }
+html body #menu .mrow b, html body #card #c2 .mrow b { display: block; font-weight: 400; font-size: 14px; }
+html body #menu .mrow small, html body #card #c2 .mrow small { display: block; color: var(--m-sub); font-size: 12px; }
+/* 智力／模式選單（2026-11-24）：目前那項打勾，取代箭頭 */
+html body #menu .mrow.mck::after, html body #card #c2 .mrow.mck::after { background: none; }
+html body #menu .mrow.mck.on::after, html body #card #c2 .mrow.mck.on::after { content: '✓'; width: auto; height: auto; margin-top: -11px; right: 10px; color: var(--m-teal); font-size: 18px; line-height: 22px; }
+html body #menu .mrow.mck.on b, html body #card #c2 .mrow.mck.on b { font-weight: 700; }
+html body #menu .mrow small.busy, html body #card #c2 .mrow small.busy { color: var(--m-orange); }
+html body #card #hr .hsel { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 5px 30px 5px 8px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; border-radius: 0; background: none; font: inherit; font-size: 13px; color: var(--m-ink); text-align: left; cursor: pointer; position: relative; }
+html body #card #hr .hsel::after { content: ''; position: absolute; right: 6px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: url(/v2/assets/ui_icon_chevron.png) center / 100% 100% no-repeat; }
+html body #card #hr .hsel .k { flex: none; min-width: 3em; color: var(--m-sub); }
+html body #card #hr .hsel .v { flex: 1; min-width: 0; }
+html body #card #hr .hsel[aria-disabled] { opacity: .5; cursor: not-allowed; }
+html body #card .badge-cfg { font-style: normal; display: inline-block; padding: 1px 4px; border: 5px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 5px; color: var(--m-ink); font-size: 12px; line-height: 1.3; white-space: nowrap; }
+/* 資料表（A、C7）：標籤＋值，A 是兩欄 */
+html body #card #info { display: block; font-size: 13px; padding: 4px 10px; }
+html body #card #info .cstat { color: var(--m-ink); font-size: 14px; }
+html body #card #info .cwarn { color: var(--m-orange); font-size: 12px; } html body #card #info .cwarn.err { color: var(--m-red); }
+html body #info .kv, html body .kvs .kv { display: flex; gap: 10px; min-width: 0; }
+html body #info .kv.wide { grid-column: 1 / -1; }
+html body .kv .k, html body #card .kv .k { flex: none; min-width: 3.5em; color: var(--m-sub); }
+html body #card #info .kv .k { min-width: 3em; }
+html body .kvs .kv .k { min-width: 5em; }
+html body .kv .v { min-width: 0; word-break: break-word; }
+html body .kv.err .v, html body #card .err { color: var(--m-red); }
+html body .kv .path { word-break: break-all; font-size: 13px; }
+html body #menu .mline.team .mbtn { flex: 1; width: auto; min-width: 0; min-height: 44px; } /* 設成一組的取消／確定：320 寬也放得下、手指好按（測試員 BUG-5） */
+html body #menu .mcard .path { word-break: break-all; overflow-wrap: anywhere; } /* 設成一組確認卡的協作路徑（0.63.45）：長而沒有斷點也折行 */
+html body .kvs { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+html body #menu .mcard.ask { display: flex; gap: 14px; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+html body #menu .mcard.ask .when { flex: none; color: var(--m-sub); }
+/* 薪水單長條 */
+html body .mcard.pay .payh { display: flex; justify-content: space-between; gap: 8px; }
+html body .mcard.pay .payh small { display: inline; }
+html body .mcard.pay .num { white-space: nowrap; color: var(--m-sub); }
+html body .mcard .bar { height: 8px; margin: 8px 0 2px; border: 1px solid transparent; border-image: url(/v2/assets/ui_bar_track.png) 2 fill / 1px; }
+html body .mcard .bar i { display: block; height: 100%; border: 1px solid transparent; border-image: url(/v2/assets/ui_bar_fill.png) 2 fill / 1px; box-sizing: border-box; }
+html body .mcard b.big small { display: inline; font-size: 13px; }
+
+/* 按鈕：次按鈕（金框）、主按鈕（深藍 .go／.prim）、危險（紅框 .danger／.red）、危險實心（確認：.sure／.redon）、晶片（人數 .v2size、選中 .on） */
+html body #menu .mbtn, html body .chip, html body #say button, html body #chsay button, html body #card #c2 .mbtn { display: flex; align-items: center; justify-content: center; min-height: 29px; margin: 0; padding: 0 8px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; background: none; color: var(--m-ink); font: 13px/1.3 system-ui, "Noto Sans TC", sans-serif; text-align: center; cursor: pointer; box-sizing: border-box; }
+html body #menu .mbtn, html body #card #c2 .mbtn { width: 100%; margin: 8px 0; min-height: 35px; }
+html body #menu .mbtn small, html body #card #c2 .mbtn small { display: block; color: var(--m-sub); }
+html body #menu .mbtn:active, html body .chip:active, html body #say #photo:active, html body #chsay #chphoto:active, html body #card #c2 .mbtn:active { border-image-source: url(/v2/assets/ui_btn_secondary_down.png); padding-top: 3px; padding-bottom: 1px; }
+html body #menu .mbtn.go, html body .chip.prim, html body #say #send, html body #chsay #chsend, html body #chat #chsay #chsend, html body #card #c2 .mbtn.go { border-image-source: url(/v2/assets/ui_btn_primary.png); color: #fff; }
+html body #menu .mbtn.go:active, html body .chip.prim:active, html body #say #send:active, html body #chsay #chsend:active, html body #card #c2 .mbtn.go:active { border-image-source: url(/v2/assets/ui_btn_primary_down.png); }
+html body #menu .mbtn.danger, html body .chip.red, html body #card #c2 .mbtn.danger { border-image-source: url(/v2/assets/ui_btn_danger.png); color: var(--m-red); }
+html body #menu .mbtn.danger:active, html body .chip.red:active, html body #card #c2 .mbtn.danger:active { border-image-source: url(/v2/assets/ui_btn_danger_down.png); }
+html body #menu .mbtn.danger.sure, html body .chip.redon, html body #card #c2 .mbtn.danger.sure { border-image-source: url(/v2/assets/ui_btn_danger_solid.png); color: #fff; }
+html body #menu .mbtn.danger.sure:active, html body .chip.redon:active, html body #card #c2 .mbtn.danger.sure:active { border-image-source: url(/v2/assets/ui_btn_danger_solid_down.png); }
+html body #menu .mbtn:disabled, html body #menu .mbtn[aria-disabled], html body .chip:disabled, html body .chip[aria-disabled], html body #say button:disabled, html body #card #c2 .mbtn:disabled, html body #card #c2 .mbtn[aria-disabled] { opacity: .5; }
+html body #menu .v2sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 8px; }
+html body #menu .v2sizes .mbtn, html body #card .g4 .chip { margin: 0; min-height: 29px; border-image-source: url(/v2/assets/ui_chip.png); color: var(--m-ink); }
+html body #menu .v2sizes .mbtn.on, html body #card .g4 .chip.on { border-image-source: url(/v2/assets/ui_chip_on.png); background: none; color: var(--m-ink); }
+/* 人事區（A）：智力四顆一列、其他三顆一列、調部門佔兩格 */
+html body #card #hr { margin: 0; padding: 0; border: 0; font-size: 12px; }
+html body #card #hr { display: grid; grid-template-columns: repeat(12, 1fr); gap: 7px 8px; align-items: center; }
+html body #card #hr > * { grid-column: 1 / -1; }
+html body #card #hr > .g4, html body #card #hr > .g3 { display: contents; }
+html body #card #hr .g4 > * { grid-column: span 3; }
+html body #card #hr .g3 > * { grid-column: span 4; }
+html body #card #hr .g3 > .span2 { grid-column: span 8; }
+html body #card #hr .g3 > .warn { grid-column: 1 / -1; }
+html body #card #hr h3.sec { margin: 10px 0 0; }
+html body .mcard .g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 8px; }
+html body .mcard .g3 { margin-top: 8px; }
+html body #hr .warn { color: var(--m-red); font-size: 12px; }
+html body select.chip, html body #menu select:not(.chip), html body #card #c2 select:not(.chip) { -webkit-appearance: none; appearance: none; max-width: none; padding-right: 24px; border-image-slice: 12; background: url(/v2/assets/ui_icon_dropdown.png) right 2px center / 14px 14px no-repeat, #fffaf0; background-clip: padding-box; text-align: center; }
+/* 輸入框 */
+html body #menu select:not(.chip), html body #menu input, html body #menu textarea, html body #say textarea, html body #chsay textarea, html body #card #c2 select:not(.chip) { width: 100%; margin: 0 0 6px; padding: 2px 6px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_input.png) 12 fill / 6px; background-color: transparent; color: var(--m-ink); font: 13px/1.5 system-ui, "Noto Sans TC", sans-serif; outline: none; box-sizing: border-box; }
+html body #menu select:not(.chip), html body #card #c2 select:not(.chip) { text-align: left; background: url(/v2/assets/ui_icon_dropdown.png) right 2px center / 14px 14px no-repeat, #fffdf8; background-clip: padding-box; }
+html body #menu input:focus, html body #menu textarea:focus, html body #menu select:focus, html body #say textarea:focus, html body #chsay textarea:focus, html body #card #c2 select:focus { border-image-source: url(/v2/assets/ui_input_focus.png); }
+html body #menu .mline { display: flex; gap: 8px; align-items: stretch; }
+html body #menu .mline input { flex: 1; margin: 0; }
+html body #menu .mline .mbtn { flex: none; width: 100px; margin: 0; }
+html body #menu .mline #v2sayph { width: 52px; padding: 0; font-size: 18px; } /* 整桌傳照片 */
+html body #menu .mline.q .mbtn.go { flex: 2; width: auto; } html body #menu .mline.q .mbtn:not(.go) { flex: 1; width: auto; }
+/* 狀態卡（A）：最新回覆卡、下方輸入列 */
+html body #reply { margin-top: 10px; padding-top: 6px; border-top-width: 6px; }
+html body #card #reply .head { color: var(--m-ink); font-size: 14px; font-weight: 400; }
+html body #card #reply .md { background: none; padding: 0; margin-top: 4px; font-size: 13px; max-height: none; }
+html body #card #sent { color: var(--m-teal); font-size: 12px; }
+html body #say { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }
+html body #say textarea, html body #chsay textarea { flex: 1; margin: 0; min-height: 36px; resize: none; }
+html body #say button, html body #chsay button { flex: none; padding: 0 12px; }
+html body #say #send, html body #chsay #chsend { padding: 0 20px; }
+html body #card .badge-codex, html body #hrroom .hr-tag { font-style: normal; display: inline-block; padding: 0 4px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_codex.png) 12 fill / 5px; background: none; color: #fff; font-size: 11px; line-height: 1.2; vertical-align: 2px; }
+
+/* 完整對話（B）：整頁米白、木紋標題列（左返回、中名牌）、狀態列青綠字、泡泡 */
+html body #chat { background: var(--m-bg); }
+html body #chat .chhead { margin: 0; padding: calc(env(safe-area-inset-top)) 8px 0; height: calc(56px + env(safe-area-inset-top)); background: url(/v2/assets/ui_title_bar.png) 0 env(safe-area-inset-top) / auto 56px repeat-x, #6e4326; color: var(--m-ink); }
+html body #chat #chback { position: absolute; left: 15px; top: calc(13px + env(safe-area-inset-top)); width: 41px; height: 29px; padding: 0; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_back.png) 12 fill / 6px; box-sizing: border-box; background: none; color: var(--m-ink); font: 13px/1 system-ui, "Noto Sans TC", sans-serif; }
+html body #chat .chwho b { font: inherit; }
+html body #chat #chstat { text-align: center; color: var(--m-teal); font-size: 13px; padding: 4px 12px; opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #chlog { padding: 6px 15px; }
+html body #chlog .ctop { color: var(--m-sub); font-size: 12px; text-align: center; }
+html body #chlog .ctop.more { display: block; width: fit-content; margin: 6px auto 10px; padding: 2px 34px; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; color: var(--m-ink); font-size: 13px; }
+html body #chlog .cb { max-width: 80%; margin: 12px 0; font-size: 13px; }
+html body #chlog .me { margin-left: auto; }
+html body #chlog .me, html body #chlog .ai { padding: 4px 6px 8px; border: 6px solid transparent; border-image: url(/v2/assets/ui_bubble_ai.png) 12 fill / 6px; }
+html body #chlog .me { border-image-source: url(/v2/assets/ui_bubble_me.png); }
+html body #chlog .ai { max-width: 85%; }
+html body #chlog .cb .tm { color: var(--m-sub); font-size: 12px; text-align: left; margin: 0 0 4px; }
+html body #chlog .me .t, html body #chlog .ai .md { background: none; color: var(--m-ink); border-radius: 0; padding: 0; font-size: 13px; }
+html body #chlog .ct { width: fit-content; max-width: 70%; margin: 8px 0; padding: 2px 8px; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; color: var(--m-ink); font-size: 13px; }
+html body #chlog .ct summary { list-style: none; position: relative; padding-right: 20px; }
+html body #chlog .ct summary::after { content: ''; position: absolute; right: 0; top: 50%; width: 12px; height: 12px; margin-top: -6px; background: url(/v2/assets/ui_icon_dropdown.png) center / 100% 100% no-repeat; }
+html body #chlog .ct summary::-webkit-details-marker { display: none; }
+html body #chlog .ct summary b { color: var(--m-ink); font-weight: 600; }
+html body #chlog .ct.bad { border-image-source: url(/v2/assets/ui_btn_danger.png); }
+html body #chlog .ct pre { background: var(--m-card); border: 1px solid #d8c3a2; border-radius: 0; }
+html body #chsay { padding: 8px 15px 4px; background: var(--m-bg); border-top: 0; gap: 8px; }
+html body #chsent { background: var(--m-bg); color: var(--m-teal); }
+
+/* 上方狀態列、示意資料橫幅、提示泡泡（E） */
+html body header { min-height: 52px; padding: 6px 12px; border: 0 solid transparent; border-image: url(/v2/assets/ui_title_bar.png) 28 0 21 0 fill / 13px 0 10px 0 round; background: #6e4326; color: #fff; font-size: 15px; } /* 主畫面頂端改木頭招牌風（2026-11-26 使用者選的）：沿用完整對話頁的木紋橫條 ui_title_bar.png，人數放米白名牌上；iPhone 狀態列一圈 theme-color 改深咖啡 */ /* D-1（0.63.56）：改用 border-image 九宮格，上緣、下緣的木紋各畫一次，中間是平的木色；斷線換成兩、三行時中間不會多一條線 */
+html body header #count { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_title_plate.png) 12 fill / 6px; color: var(--m-ink); font: 400 15px/1 system-ui, "Noto Sans TC", sans-serif; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html body #hrbtn { height: 28px; padding: 0 16px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; box-sizing: border-box; background: none; color: var(--m-ink); font: 14px/1 system-ui, "Noto Sans TC", sans-serif; display: flex; align-items: center; }
+html body #v2demo { top: 48px; margin: 0; padding: 4px 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_banner_demo.png) 12 fill / 6px; background: none; color: var(--m-ink); text-align: left; }
+html body #ptoast { padding: 6px 12px; border: 6px solid transparent; border-image: url(/v2/assets/ui_toast.png) 12 fill / 6px; background: none; border-radius: 0; color: #fff; }
+
+/* 人事室（D）：頁首照舊；清單列用卡片、圓形頭像框、數字徽章、狀態色點；三顆快捷鍵移到最底（參考圖 D） */
+html body #hrroom .hr-wrap { background: var(--m-bg); }
+html body #hrroom .hr-sec h2 { font: 400 15px/1.3 system-ui, "Noto Sans TC", sans-serif; color: var(--m-ink); }
+html body #hrroom .hr-sec h2::before, html body #hrroom .hr-sec h2::after { display: none; }
+html body #hrroom .hr-count { min-width: 31px; padding: 4px 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_badge_count.png) 12 fill / 6px; border-radius: 0; background: none; color: var(--m-ink); font: 500 14px/1 system-ui, sans-serif; text-align: center; }
+html body #hrroom .hr-total { display: none; }
+html body #hrroom .hr-row { padding: 4px 30px 4px 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; border-radius: 0; background: none; position: relative; }
+html body #hrroom .hr-row:active { filter: brightness(.96); }
+html body #hrroom .hr-go { display: none; }
+html body #hrroom .hr-av { width: 30px; height: 30px; margin: 0 6px 0 4px; border-radius: 50%; background-size: 160% auto; background-position: 50% 8%; box-shadow: 0 0 0 2px #6e4326; }
+html body #hrroom .hr-txt b { font-weight: 400; font-size: 15px; }
+html body #hrroom .hr-txt small { color: var(--m-teal); font-size: 12px; }
+html body #hrroom #hrwait .hr-txt small, html body #hrroom .hr-chip { color: var(--m-orange); background: none; padding: 0; font-weight: 400; }
+html body #hrroom .hr-dot { width: 9px; height: 9px; background: url(/v2/assets/ui_dot_gray.png) center / 100% 100%; }
+html body #hrroom .hr-dot.work, html body #hrroom .hr-dot.done { background-image: url(/v2/assets/ui_dot_green.png); }
+html body #hrroom .hr-dot.wait, html body #hrroom .hr-dot.err { background-image: url(/v2/assets/ui_dot_yellow.png); }
+html body #hrroom .hr-star { color: var(--m-ink); }
+html body #hrroom .hr-tools { position: static; background: none; padding: 0; }
+html body #hrroom .hr-search { height: auto; padding: 2px 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_input.png) 12 fill / 6px; border-radius: 0; background: none; }
+html body #hrroom .hr-search span { display: none; }
+html body #hrroom .hr-search input { font-size: 13px; }
+html body #hrroom .hr-quick { margin-top: 18px; }
+html body #hrroom .hr-quick button { flex-direction: column; height: 74px; gap: 6px; border-radius: 0; font-weight: 500; }
+html body #chat #chsay #chphoto, html body #card #say #photo { border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; background: none; color: var(--m-ink); padding: 0 10px; }
+html body #chat #chsay #chsend { border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_primary.png) 12 fill / 6px; background: none; color: #fff; }
+/* 下拉：九宮格不填中間（不然箭頭被蓋掉），底色另外鋪在框內 */
+html body #menu select:not(.chip), html body #card #c2 select:not(.chip) { border-image-slice: 12; }
+html body #menu select:not(.chip), html body #menu input, html body #card #c2 select:not(.chip) { padding-top: 0; padding-bottom: 0; min-height: 30px; }
+
+/* 整桌等你回覆（第 7 項）：先套選單美術的通用零件（卡片、按鈕、輸入框），第二批再照參考圖 */
+html body #menu .v2wcard { margin: 8px 0; padding: 6px 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; background: none; border-radius: 0; }
+html body #menu .v2wcard.done { border-image-source: url(/v2/assets/ui_card_dim.png); color: var(--m-sub); }
+html body #menu .v2wcard.perm .v2wname { color: var(--m-orange); }
+html body #menu .v2wname { font-size: 14px; margin-bottom: 4px; }
+html body #menu .v2wtag { display: inline-block; padding: 0 4px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_codex.png) 12 fill / 5px; color: #fff; font-size: 11px; line-height: 1.2; }
+html body #menu .v2wsaid { font-size: 13px; color: var(--m-ink); white-space: pre-wrap; margin-bottom: 6px; }
+html body #menu .v2wsaid.more { cursor: pointer; }
+html body #menu .v2wfull { display: none; font-size: 13px; white-space: pre-wrap; margin-bottom: 6px; }
+html body #menu .v2wtext { width: 100%; box-sizing: border-box; }
+html body #menu .v2wbtns { display: flex; gap: 8px; }
+html body #menu .v2wbtns .mbtn { flex: 1; margin: 0; }
+html body #menu .v2wdone { color: var(--m-teal); margin: 8px 0; }
+html body #menu .v2wall { padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px dashed #d8c3a2; }
+html body #menu .v2wbtns .mbtn.v2wsend, html body #menu #v2wallgo { border-image-source: url(/v2/assets/ui_btn_primary.png); color: #fff; }
+
+/* 招聘：身分與坐哪（第 6 項）：套選單美術的通用零件（.mbtn、輸入框、label 的字色） */
+html body #menu .v2hrole { display: flex; gap: 8px; margin: 0 0 8px; }
+html body #menu .v2hrole label { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; min-height: 29px; border: 6px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 6px; color: var(--m-ink); font-size: 14px; }
+html body #menu .v2hrole label:has(input:checked) { border-image-source: url(/v2/assets/ui_chip_on.png); }
+html body #menu .v2hrole input { width: auto; margin: 0; min-height: 0; padding: 0; border: 0; }
+html body #menu .v2hnote { color: var(--m-sub); font-size: 13px; margin: 0 0 6px; min-height: 1em; }
+html body #menu .v2hcheck { display: flex; align-items: flex-start; gap: 6px; margin: 2px 0 8px; color: var(--m-ink); font-size: 13px; line-height: 1.35; }
+html body #menu .v2hcheck input { width: auto; margin: 2px 0 0; min-height: 0; padding: 0; flex: none; }
+
+/* ==========================================================================
+   選單美術第二批（2026-11-23，照 Codex art-inbox/menus-ref2、零件 ui_*.png 第二批）
+   F1 桌牌選單、F2 缺主管、F3 聊天室、F4 回覆等你的人、F5 招聘、F6 通知列、F7 場景桌牌
+   ========================================================================== */
+/* 小圖示（40×40 兩倍圖） */
+html body .ico { display: inline-block; flex: none; width: 20px; height: 20px; vertical-align: -4px; margin-right: 6px; background: center / 100% 100% no-repeat; image-rendering: pixelated; }
+html body .ico.chat { background-image: url(/v2/assets/ui_icon_chat.png); }
+html body .ico.megaphone { background-image: url(/v2/assets/ui_icon_megaphone.png); }
+html body .ico.warn { background-image: url(/v2/assets/ui_icon_warn.png); }
+html body .ico.hourglass { background-image: url(/v2/assets/ui_icon_hourglass.png); }
+html body .ico.check { background-image: url(/v2/assets/ui_icon_check.png); }
+html body .ico.helper { background-image: url(/v2/assets/ui_icon_helper.png); }
+html body .ico.alarm { background-image: url(/v2/assets/ui_icon_alarm.png); }
+html body .ico.pencil { background-image: url(/v2/assets/ui_icon_pencil.png); }
+/* 區塊小標＋上方細線（F1、F4） */
+html body #menu h3.sec.line, html body #card #c2 h3.sec.line { display: flex; align-items: center; margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid #d8c3a2; }
+html body #menu h3.sec.line small, html body #card #c2 h3.sec.line small { margin-left: 4px; color: var(--m-sub); font-size: 13px; }
+/* 清單列加圖示（回覆等你的人、聊天室） */
+html body #menu .mrow.ic, html body #card #c2 .mrow.ic { padding-left: 8px; }
+html body #menu .mrow.ic b, html body #card #c2 .mrow.ic b { display: inline; }
+/* 警告卡（F2 缺主管、F4 等待允許）、整桌傳話卡（F3） */
+html body .mcard.warn { display: flex; gap: 4px; border-image-source: url(/v2/assets/ui_card_warn.png); }
+html body .mcard.warn > div > b { display: block; color: var(--m-red); font-size: 15px; }
+html body .mcard.warn > div > span { display: block; font-size: 13px; }
+html body .mcard.warn > .ico { margin-top: 2px; }
+html body .mcard.amber { border-image-source: url(/v2/assets/ui_card_amber.png); }
+/* 同桌名單：一人一列（頭像框＋名字＋狀態點・名稱＋›；缺主管時右邊「升主管」） */
+html body #menu .prow { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 2px 8px 2px 4px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; position: relative; }
+html body #menu .prow:not(.boss)::after { content: ''; position: absolute; right: 2px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: url(/v2/assets/ui_icon_chevron.png) center / 100% 100% no-repeat; }
+html body #menu .pbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; font: inherit; color: var(--m-ink); text-align: left; cursor: pointer; }
+html body .pav { flex: none; width: 33px; height: 33px; border-radius: 50%; background: #f3e4c6 50% 8% / 160% auto no-repeat; box-shadow: 0 0 0 2px #6e4326; }
+html body .pt { min-width: 0; display: flex; flex-direction: column; }
+html body .pt b { font-weight: 400; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body .pt small { color: var(--m-sub); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body .pt small.wait { color: var(--m-orange); }
+html body .pdot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; background: url(/v2/assets/ui_dot_gray.png) center / 100% 100%; }
+html body .pdot.g { background-image: url(/v2/assets/ui_dot_green.png); } html body .pdot.y { background-image: url(/v2/assets/ui_dot_yellow.png); }
+html body #menu .prow .pboss { flex: none; width: 40%; max-width: 160px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #menu .mline textarea { flex: 1; margin: 0; min-height: 30px; resize: none; }
+/* F3 聊天室：一則一張卡 */
+html body #menu .v2msg { cursor: default; }
+html body #menu .v2msg.more { cursor: pointer; }
+html body #menu .v2msg small { font-size: 11px; }
+html body #menu .v2msg b { display: flex; align-items: center; margin: 2px 0 4px; font-size: 15px; }
+html body #menu .v2msg .v2head, html body #menu .v2msg .v2full { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+html body #menu .v2more, html body #menu .v2wmore { float: right; margin-left: 8px; padding: 0 14px; border: 5px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 5px; font-size: 12px; color: var(--m-ink); }
+html body #menu .v2wmore { border: 0; padding: 0; color: var(--m-sub); }
+/* F4 回覆等你的人 */
+html body #menu .v2wcard .v2wname { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+html body #menu .v2wcard.done .v2wname { justify-content: space-between; margin: 0; color: var(--m-sub); font-size: 15px; }
+html body #menu .v2wcard .v2wtag { padding: 2px 10px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_count.png) 12 fill / 5px; color: var(--m-ink); font-size: 12px; }
+html body #menu .v2wcard .v2wtext { margin: 4px 0 8px; min-height: 30px; resize: none; }
+html body #menu .v2wbtns .mbtn:first-child { flex: 0.9; }
+html body #menu .v2wbtns .mbtn:last-child { flex: 1.2; }
+html body #menu .v2wall { border: 0; padding: 0; margin: 0; }
+html body #menu .v2wall h3.sec.line { margin-top: 0; }
+html body #menu .v2wall textarea { min-height: 30px; resize: none; margin-bottom: 8px; }
+html body #menu .v2wall .mbtn { margin: 0; }
+html body #menu .v2wsure { margin: 4px 0 0; color: var(--m-red); font-size: 13px; }
+html body #menu .v2wperm b { display: block; }
+html body #menu .v2wdone { margin: 18px 0 6px; text-align: center; color: var(--m-teal); font-weight: 400; }
+/* F5 招聘：身分兩格切換（晶片／選中）、坐哪警告 */
+html body #menu .v2hrole { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 6px; }
+html body #menu .v2hrole label { display: flex; align-items: center; justify-content: center; min-height: 29px; margin: 0; border: 6px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 6px; color: var(--m-ink); font-size: 13px; cursor: pointer; }
+html body #menu .v2hrole label:has(input:checked) { border-image-source: url(/v2/assets/ui_chip_on.png); }
+html body #menu .v2hrole label { position: relative; }
+html body #menu .v2hrole input { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); margin: 0; opacity: 0; cursor: pointer; }
+html body #menu .v2hnote { color: var(--m-sub); font-size: 13px; margin: 0 0 6px; }
+html body #menu .v2hnote.warn { display: flex; align-items: center; color: var(--m-red); }
+/* F6 通知列：深棕外框、「辦公室通知」＋收起、一則一張卡 */
+html body #v2help { padding: 4px 6px 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_notice_panel.png) 12 fill / 6px; box-shadow: 0 4px 14px #0004; max-height: calc(100vh - 140px); overflow-y: auto; color: var(--m-ink); font-size: 13px; }
+html body #v2help .nhead { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 6px 4px; }
+html body #v2help .nhead b { font-weight: 400; font-size: 15px; }
+html body #v2help .nhead .mbtn { width: 74px; min-height: 26px; margin: 0; }
+html body #v2help .ncard { margin: 0 0 6px; padding: 6px 8px 8px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; }
+html body #v2help .nt { display: flex; align-items: center; }
+html body #v2help .nt b { font-weight: 400; font-size: 15px; }
+html body #v2help .nd { margin: 6px 0 8px; color: var(--m-sub); font-size: 13px; }
+html body #v2help .nd code { font-size: 12px; word-break: break-all; user-select: all; }
+html body #v2help .nb { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+html body #v2help .nb > span:first-child:empty + .mbtn { justify-self: end; width: 50%; grid-column: 2; }
+html body #v2help .nb .mbtn { margin: 0; min-height: 29px; }
+html body #v2help .nb .nopts { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+html body #v2help .nb .nopts .mbtn { text-align: left; padding: 4px 10px; white-space: normal; word-break: break-word; }
+html body #v2help .nb .nopts ~ .mbtn { grid-column: 2; }
+/* F7 場景桌牌：四種底＋左邊小圖示 */
+#v2ov .tplate { align-items: center; gap: 0; padding: 0 4px; border: 4px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_tplate.png) 8 fill / 4px; background: none; color: #3b2412; line-height: 1.35; }
+#v2ov .tplate.wait { border-image-source: url(/v2/assets/ui_tplate_wait.png); background: none; color: #3b2412; }
+#v2ov .tplate.err { border-image-source: url(/v2/assets/ui_tplate_warn.png); background: none; color: #3b2412; }
+#v2ov .tplate.ho { border-image-source: url(/v2/assets/ui_tplate_handover.png); background: none; color: #3b2412; }
+#v2ov .tplate .ico { width: 1.15em; height: 1.15em; margin-right: 0.3em; vertical-align: 0; }
+/* 通知列不在 #menu 裡：按鈕另外套零件 */
+html body #v2help .mbtn { display: flex; align-items: center; justify-content: center; width: 100%; padding: 0 8px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; background: none; color: var(--m-ink); font: 13px/1.3 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; box-sizing: border-box; }
+html body #v2help .mbtn:active { border-image-source: url(/v2/assets/ui_btn_secondary_down.png); }
+html body #v2help .mbtn.go { border-image-source: url(/v2/assets/ui_btn_primary.png); color: #fff; }
+html body #v2help .mbtn.go:active { border-image-source: url(/v2/assets/ui_btn_primary_down.png); }
+html body #v2help .mbtn:disabled { opacity: .5; }
+
+/* 共用筆記（第 11 項）、建議加行政：套通用零件，只補排版 */
+html body #menu .v2dot { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--m-red); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+html body #menu .v2npre { white-space: pre-wrap; word-break: break-word; font-size: 13px; color: var(--m-ink); }
+html body #menu .v2nrow { font-size: 13px; padding: 2px 0; }
+html body #menu .v2nrow.hot { color: var(--m-orange); }
+html body #menu .v2ndecide strong { color: var(--m-red); }
+#v2ov .tplate .tsug { text-decoration: underline; }
+
+/* 任務卡片（第 10 項） */
+html body #menu .v2tpart { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 13px; padding: 3px 0; border-top: 1px dashed #d8c3a2; }
+html body #menu .v2tst { flex: none; color: var(--m-sub); }
+html body #menu .v2tpart.doing .v2tst { color: var(--m-teal); }
+html body #menu .v2tpart.stuck .v2tst { color: var(--m-red); }
+html body #menu .v2tpart.done { color: var(--m-sub); }
+html body #menu .v2tnote { flex-basis: 100%; color: var(--m-red); font-size: 12px; }
+html body #menu .v2tdone summary { color: var(--m-sub); font-size: 13px; margin: 6px 0; }
+/* 招聘身分三個（員工／主管／行政，0.62.10） */
+html body #menu .v2hrole { grid-template-columns: repeat(3, 1fr); }
+
+/* 整桌開會（第 9 項） */
+html body #menu .v2mrow { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 14px; color: var(--m-ink); }
+html body #menu .v2mrow input { width: auto; min-height: 0; margin: 0; }
+html body #menu .mrow[disabled], html body #card #c2 .mrow[disabled] { opacity: .5; }
+html body #menu .v2meetlog summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+
+/* ==========================================================================
+   選單美術第三批（2026-11-23，照 Codex art-inbox/menus-ref3）
+   H1 共用筆記、H2 桌牌選單新入口、H3 開會設定、H4 結論頁、H5 場景開會、H6 招聘行政、H7 排班；新圖示 ui_icon_notes/meeting/admin/task/minutes；
+   四種任務狀態徽章、開會中桌牌底由前兩批零件換色（ui_badge_*.png、ui_tplate_meet.png）
+   ========================================================================== */
+html body .ico.notes { background-image: url(/v2/assets/ui_icon_notes.png); }
+html body .ico.meeting { background-image: url(/v2/assets/ui_icon_meeting.png); }
+html body .ico.admin { background-image: url(/v2/assets/ui_icon_admin.png); }
+html body .ico.task { background-image: url(/v2/assets/ui_icon_task.png); }
+html body .ico.minutes { background-image: url(/v2/assets/ui_icon_minutes.png); }
+/* 紅點數字（待你決定）、進行中小藥丸 */
+html body #menu .v2dot { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; margin-left: 10px; padding: 0 6px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_stuck.png) 12 fill / 5px; background: none; border-radius: 0; color: var(--m-red); font-size: 12px; font-weight: 400; box-sizing: border-box; }
+html body #menu .v2pill { display: inline-flex; align-items: center; margin-left: 10px; padding: 0 8px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_doing.png) 12 fill / 5px; color: var(--m-navy); font-size: 12px; }
+/* 清單列：淡琥珀（開會中）、變灰（沒主管不能開會）、展開列 */
+html body #menu .mrow.amber, html body #card #c2 .mrow.amber { border-image-source: url(/v2/assets/ui_card_amber.png); }
+html body #menu .mrow:disabled, html body #card #c2 .mrow:disabled { opacity: .6; cursor: default; }
+html body #menu .mrow small, html body #card #c2 .mrow small { display: block; }
+html body #menu details > summary.mrow { list-style: none; }
+html body #menu details > summary.mrow::-webkit-details-marker { display: none; }
+html body #menu details[open] > summary.mrow::after { transform: rotate(90deg); }
+html body #menu details.v2meetlog, html body #menu details.v2tdone { margin: 0; padding: 0; border: 0; background: none; }
+/* H1 共用筆記 */
+html body #menu .mcard.warn > div > b, html body #card #c2 .mcard.warn > div > b { font-size: 14px; }
+html body #menu .v2nask .v2nrow { padding: 2px 0 6px; font-size: 13px; }
+html body #menu .v2nask .v2nrow.dim { color: var(--m-sub); }
+html body #menu .v2nask .mline { margin-top: 4px; }
+html body #menu .v2nask input { background-color: transparent; }
+html body #menu .v2task .v2tpart { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid #e3d0b2; font-size: 13px; }
+html body #menu .v2task .v2tpart:first-of-type { margin-top: 6px; }
+html body #menu .v2task .v2tw { min-width: 0; }
+html body #menu .v2task .v2tnote { display: block; color: var(--m-sub); font-size: 12px; }
+html body #menu .v2tst { flex: none; min-width: 64px; padding: 0 8px; border: 5px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 5px; text-align: center; font-size: 12px; color: var(--m-ink); }
+html body #menu .v2tst.done { border-image-source: url(/v2/assets/ui_badge_done.png); color: #2f6b45; }
+html body #menu .v2tst.doing { border-image-source: url(/v2/assets/ui_badge_doing.png); color: var(--m-navy); }
+html body #menu .v2tst.wait { border-image-source: url(/v2/assets/ui_badge_wait.png); color: #a0551f; }
+html body #menu .v2tst.stuck { border-image-source: url(/v2/assets/ui_badge_stuck.png); color: var(--m-red); }
+html body #menu .v2nrow2 { margin: 0 0 6px; padding: 4px 10px; border: 5px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 5px; color: var(--m-sub); font-size: 13px; }
+html body #menu .v2nrow2.wait { border-image-source: url(/v2/assets/ui_card_amber.png); }
+html body #menu .v2nrow2.stuck { border-image-source: url(/v2/assets/ui_card_warn.png); }
+html body #menu .v2prog .v2ph { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+html body #menu .v2prog .v2ph b { font-size: 15px; }
+html body #menu .v2npre { white-space: pre-wrap; word-break: break-word; font-size: 13px; color: var(--m-sub); margin: 2px 0 6px; }
+html body #menu .mcard > b + .v2npre, html body #menu .mcard b { color: var(--m-ink); }
+html body #menu .v2path { margin: 0 0 8px; padding: 2px 8px; border: 6px solid transparent; border-image: url(/v2/assets/ui_input.png) 12 fill / 6px; color: var(--m-sub); font-size: 13px; word-break: break-all; }
+/* H3 開會設定：參與者列（頭像、名字、主持人標籤、切角勾選框）、確認卡 */
+html body #menu .v2mrow { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; padding: 4px 8px 4px 4px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; color: var(--m-ink); font-size: 15px; cursor: pointer; }
+html body #menu .v2mrow .v2mname { flex: 1; min-width: 0; }
+html body #menu .v2mrow .v2mhost { padding: 0 12px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_doing.png) 12 fill / 5px; color: var(--m-navy); font-size: 12px; }
+html body #menu .v2mrow input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; width: 28px; height: 28px; margin: 0; border: 5px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 5px; background: none; position: relative; cursor: pointer; }
+html body #menu .v2mrow input[type=checkbox]:checked { border-image-source: url(/v2/assets/ui_chip_on.png); }
+html body #menu .v2mrow input[type=checkbox]:checked::after { content: ''; position: absolute; left: 4px; top: -1px; width: 6px; height: 11px; border: solid #3f7a6e; border-width: 0 3px 3px 0; transform: rotate(40deg); }
+html body #menu .v2mrow input[type=checkbox]:disabled { cursor: default; }
+html body #menu .v2msure { display: flex; gap: 4px; margin-top: 10px; }
+html body #menu .v2msure b { display: block; color: #a0551f; font-size: 15px; }
+html body #menu .v2msure span { display: block; font-size: 13px; }
+html body #menu #v2msure .mline .mbtn.go { flex: 2.4; width: auto; } html body #menu #v2msure .mline .mbtn:not(.go) { flex: 1; width: auto; }
+/* H4 結論頁 */
+html body #menu .v2mres .md { margin-top: 8px; font-size: 13px; }
+html body #menu .v2mres .md h1, html body #menu .v2mres .md h2, html body #menu .v2mres .md h3 { font-size: 14px; margin: 10px 0 4px; }
+html body #menu .v2mres .md ul { padding-left: 1.2em; list-style: square; color: var(--m-sub); }
+/* H6 招聘：三格身分、行政說明 */
+html body #menu .v2hrole { grid-template-columns: repeat(3, 1fr); }
+html body #menu .v2hnote.admin { display: flex; align-items: flex-start; color: var(--m-sub); }
+html body #menu .v2hnote.admin .ico { margin-top: 2px; }
+/* H7 排班：一排切換鈕（下拉留著當資料來源，看不見） */
+html body #menu select.v2segsel, html body #card #c2 select.v2segsel { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; pointer-events: none; }
+html body #v2ov .tapp.up { transform: translate(-50%, -110%); } /* 近側名牌在桌牌上面：標籤改放名牌上方，不壓桌牌 */
+html body #menu .v2seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; margin: 0 0 6px; }
+html body #menu .v2seg .mbtn { margin: 0; min-height: 29px; border-image-source: url(/v2/assets/ui_chip.png); }
+html body #menu .v2seg .mbtn.on { border-image-source: url(/v2/assets/ui_chip_on.png); }
+/* H5 場景桌牌：第五種（開會中）、建議加行政小標籤、題目也會縮 */
+#v2ov .tplate.meet { border-image-source: url(/v2/assets/ui_tplate_meet.png); background: none; color: #3b2412; }
+#v2ov .tplate .tm { overflow: hidden; text-overflow: ellipsis; min-width: 2em; }
+#v2ov .tsugbtn { display: flex; align-items: center; padding: 0 3px; border: 4px solid transparent; border-image: url(/v2/assets/ui_badge_wait.png) 12 fill / 4px; background: none; color: #3b2412; font: 600 inherit; font-size: inherit; line-height: 1.35; cursor: pointer; }
+#v2ov .tsugbtn .ico { width: 1.15em; height: 1.15em; margin-right: 0.3em; vertical-align: 0; }
+#v2ov .tplate .tsug { display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
+html body #menu [hidden], html body #v2help [hidden] { display: none !important; } /* 按鈕是 display:flex，會蓋掉 hidden */
+/* 桌牌＋「建議加行政」並排：外層一個容器置中，桌牌先縮（桌名、題目各自縮），標籤保留自己的寬度（ref3-H5） */
+#v2ov .tpwrap { position: absolute; transform: translateX(-50%); display: flex; gap: 3px; white-space: nowrap; }
+#v2ov .tpwrap .tplate { position: static; transform: none; min-width: 0; max-width: none; flex: 0 1 auto; font-size: inherit; }
+#v2ov .tpwrap .tsugbtn { flex: none; }
+
+/* ================= 動畫（2026-11-23，第 2、4 段：馬上有反應、其他動畫） =================
+   原則：約 0.2 秒、不花俏；用 translate／scale 個別屬性，不蓋掉元素原本的 transform；系統「減少動態效果」全部關掉
+   開關由 page.html 的 pop()／unpop() 加 po-in／po-out（關的動畫跑完 0.18 秒才真的藏起來） */
+html body #poscrim { position: fixed; inset: 0; z-index: 3; display: none; background: #1a1c2c73; -webkit-tap-highlight-color: transparent; }
+html body #menu { z-index: 4; }
+@keyframes po-up { from { translate: 0 100%; } to { translate: 0 0; } }
+@keyframes po-down { from { translate: 0 0; } to { translate: 0 100%; } }
+@keyframes po-from-right { from { translate: 100% 0; } to { translate: 0 0; } }
+@keyframes po-to-right { from { translate: 0 0; } to { translate: 100% 0; } }
+@keyframes po-from-top { from { translate: 0 -14px; opacity: 0; } to { translate: 0 0; opacity: 1; } }
+@keyframes po-to-top { from { translate: 0 0; opacity: 1; } to { translate: 0 -14px; opacity: 0; } }
+@keyframes po-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes po-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes po-next { from { translate: 28px 0; opacity: 0; } to { translate: 0 0; opacity: 1; } }
+@keyframes po-pop { 0% { scale: 1; } 40% { scale: 1.14; } 100% { scale: 1; } }
+@keyframes po-drop { from { translate: 0 -6px; opacity: 0; clip-path: inset(0 0 100% 0); } to { translate: 0 0; opacity: 1; clip-path: inset(0 0 0 0); } }
+@keyframes po-lift { from { translate: 0 0; opacity: 1; clip-path: inset(0 0 0 0); } to { translate: 0 -6px; opacity: 0; clip-path: inset(0 0 100% 0); } }
+@keyframes po-dots { from { width: 0; } to { width: 1.3em; } }
+@keyframes po-blink { 50% { opacity: .45; } }
+/* 底部選單、狀態卡：從下方滑上來；關掉滑下去。後面變暗 */
+html body #menu.po-in, html body #card.po-in { animation: po-up .2s cubic-bezier(.2, .8, .2, 1); }
+html body #menu.po-out, html body #card.po-out { animation: po-down .18s ease-in forwards; }
+html body #poscrim.po-in { animation: po-fade-in .2s ease-out; }
+html body #poscrim.po-out { animation: po-fade-out .18s ease-in forwards; }
+/* 換頁：完整對話、人事室從右邊滑進來；選單開著又換一頁，內容從右邊滑進來 */
+html body #chat.po-in, html body #hrroom.po-in { animation: po-from-right .2s cubic-bezier(.2, .8, .2, 1); }
+html body #chat.po-out, html body #hrroom.po-out { animation: po-to-right .18s ease-in forwards; }
+html body #mbody.po-next { animation: po-next .2s ease-out; }
+/* 通知列、提示訊息：從上方滑入 */
+html body #v2help.po-in, html body #ptoast.po-in { animation: po-from-top .2s ease-out; }
+html body #v2help.po-out, html body #ptoast.po-out { animation: po-to-top .18s ease-in forwards; }
+/* 聊天室新訊息淡入 */
+html body #chlog .po-new { animation: po-from-top .25s ease-out; }
+/* 點桌牌彈一下 */
+html body #v2ov .tplate.po-pop, html body #v2ov .tsugbtn.po-pop { animation: po-pop .22s steps(4, end); }
+/* 可展開的列（已完成、會議紀錄、工具紀錄、聊天室長訊息）：展開往下滑出、收合往上收（收合由 scene.js 先加 po-closing） */
+html body details[open] > :not(summary) { animation: po-drop .2s ease-out; }
+html body details.po-closing > :not(summary) { animation: po-lift .16s ease-in forwards; }
+/* 按下去馬上有回饋：沒有 _down 零件的（選單列、人事室列、桌牌、名牌、人事室捷徑）下沉 1px、稍暗 */
+html body #menu .mrow:active, html body #hrroom .hr-row:active, html body #hrroom .hr-quick button:active, html body #v2ov .tplate:active, html body #v2ov .tag:active, html body #v2ov .tsugbtn:active, html body #chat #chback:active, html body #card #c2 .mrow:active { translate: 0 1px; filter: brightness(.93); }
+/* 送出中：按下的那顆先變「處理中」（變淡、慢慢閃），不等伺服器 */
+html body .po-busy { pointer-events: none; animation: po-blink .8s steps(2, end) infinite; }
+/* 讀取中：先開選單，資料回來再補 */
+html body #menu .po-load { padding: 18px 0; text-align: center; font-size: 14px; }
+html body #menu .po-load::after { content: '...'; display: inline-block; width: 0; overflow: hidden; vertical-align: bottom; animation: po-dots 1s steps(4, end) infinite; }
+html body #menu .po-err { padding: 18px 0; text-align: center; color: #b13e53; }
+@media (prefers-reduced-motion: reduce) {
+  html body .po-in, html body .po-out, html body .po-next, html body .po-new, html body .po-pop, html body .po-busy, html body details[open] > :not(summary), html body details.po-closing > :not(summary) { animation: none !important; }
+  html body #menu .po-load::after { animation: none; width: auto; }
+html body #menu .mrow:active, html body #hrroom .hr-row:active, html body #v2ov .tplate:active, html body #v2ov .tag:active, html body #card #c2 .mrow:active { translate: none; }
+}
+html body #menu .v2msg .v2full { animation: po-drop .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { html body #menu .v2msg .v2full { animation: none; } }
+
+/* ================= 通知列收合（0.62.17）：平常一行小條，點開才展開；展開最高 40vh 可捲 ================= */
+html body #v2help { max-height: 40vh; }
+html body #v2help .nmini { display: none; }
+html body #v2help.mini { right: auto !important; max-height: none; padding: 0; border: 0; border-image: none; background: none; box-shadow: none; overflow: visible; }
+html body #v2help.mini > :not(.nmini) { display: none; }
+html body #v2help.mini .nmini { display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 8px 0 6px; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; background: none; color: var(--m-ink); font: 13px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; box-shadow: 0 2px 6px #0003; animation: po-from-top .2s ease-out; }
+html body #v2help.mini .nmini:active { border-image-source: url(/v2/assets/ui_btn_secondary_down.png); translate: 0 1px; }
+html body #v2help.mini .nmini .ico { margin-right: 2px; }
+html body #v2help.mini .nmini .v2dot { margin-left: 2px; }
+html body #v2help .nchev { display: inline-block; width: 12px; height: 12px; margin-left: 2px; background: url(/v2/assets/ui_icon_dropdown.png) center / 100% 100% no-repeat; image-rendering: pixelated; }
+/* 從小條展開：內容往下滑出 */
+html body #v2help:not(.mini) > .nhead, html body #v2help:not(.mini) > .ncard { animation: po-drop .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { html body #v2help.mini .nmini, html body #v2help:not(.mini) > .nhead, html body #v2help:not(.mini) > .ncard { animation: none; } html body #v2help.mini .nmini:active { translate: none; } }
+html body #v2help .v2dot { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border: 5px solid transparent; border-image: url(/v2/assets/ui_badge_stuck.png) 12 fill / 5px; color: var(--m-red); font-size: 12px; box-sizing: border-box; }
+
+/* 員工卡兩層（2026-11-25）：二級從右邊滑進來、左上「‹ 返回」；回覆先三行 */
+html body #card #c2 .tbar { justify-content: center; }
+html body #card #c2back { position: absolute; left: 15px; top: 13px; height: 29px; padding: 0 8px; border: 5px solid transparent; border-image: url(/v2/assets/ui_chip.png) 12 fill / 5px; background: none; font: inherit; font-size: 13px; color: var(--m-ink); cursor: pointer; }
+html body #card #close2.tclose { position: absolute; right: 15px; top: 13px; width: 41px; height: 29px; border: 0; padding: 0; background: url(/v2/assets/ui_btn_close.png) center / 100% 100% no-repeat; cursor: pointer; }
+html body #card #c2 .kvs { display: grid; gap: 2px; font-size: 12px; }
+html body #card #c2 select.v2team { width: 100%; margin: 0 0 8px; }
+html body #card .c2in { animation: po-slide-in .22s cubic-bezier(.2, .8, .2, 1); }
+html body #card .c1back { animation: po-slide-back .18s ease-out; }
+@keyframes po-slide-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes po-slide-back { from { transform: translateX(-25%); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { html body #card .c2in, html body #card .c1back { animation: none !important; } }
+html body #card #reply { cursor: pointer; }
+html body #card #reply .md.clamp { max-height: calc(3 * 1.55em); overflow: hidden; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+html body #card #reply .more { margin-top: 2px; color: var(--m-sub); font-size: 12px; }
+html body #card #hr .g2 { display: contents; }
+html body #card #hr .g2 > * { grid-column: span 6; }
+html body #card #hr .g2.one > * { grid-column: 1 / -1; }
+html body #card #hr { margin-top: 10px; }
+
+/* Codex 交給 App／接回後台（2026-11-25）：第一層一整排次要按鈕、要打斷時的確認、名牌「在 App 裡」 */
+html body #card #hr .hoask { grid-column: 1 / -1; padding: 6px 10px; border: 6px solid transparent; border-image: url(/v2/assets/ui_card_amber.png) 12 fill / 6px; color: var(--m-ink); font-size: 13px; }
+html body #card #hr .hoask span { display: block; color: var(--m-sub); font-size: 12px; }
+html body #v2ov .tapp { position: absolute; z-index: 1; transform: translate(-50%, 115%); padding: 0 4px; border-radius: 3px; background: #29366fd9; color: #fff; font-size: .8em; line-height: 1.35; white-space: nowrap; pointer-events: none; }
+html body #v2ov .tag.ghost { opacity: .7; border-style: dashed; }
+/* 0.63.48 乙案：在 App 裡關掉的 Codex（沒有座位的）：畫面最下面一條灰卡，不佔座位；選單、卡片（z-index 3）蓋在它上面 */
+html body #v2away { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 1; display: flex; gap: 6px; overflow-x: auto; pointer-events: none; scrollbar-width: none; }
+html body #v2away .awcard { pointer-events: auto; flex: 0 0 auto; display: flex; flex-direction: column; justify-content: center; min-height: 44px; max-width: 70vw; padding: 3px 10px; border: 1.5px dashed #8a8f99; border-radius: 6px; background: #e9ebeee6; color: #4a4f59; font: 12px/1.3 system-ui, "Noto Sans TC", sans-serif; text-align: left; opacity: .92; box-shadow: 0 1px 4px #0002; cursor: pointer; }
+html body #v2away .awcard b { font-size: 13px; color: #3a3f48; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #v2away .awcard small { white-space: nowrap; color: #6b707a; }
+
+/* 美術 A #1：桌牌兩行——第一行「桌名（N人）」、第二行狀態；放不下先縮字（scene.js fitPlates），桌名還放不下才換行，不硬截 */
+#v2ov .tplate { flex-direction: column; align-items: center; }
+#v2ov .tplate .tline { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-align: center; }
+#v2ov .tplate .tline .ico { display: inline-block; vertical-align: -0.15em; }
+#v2ov .tplate .tline .tl { display: inline; overflow: visible; text-overflow: clip; min-width: 0; }
+#v2ov .tplate .tline .tn { display: inline; white-space: nowrap; }
+#v2ov .tplate .tline.wrap { white-space: normal; overflow: visible; line-height: 1.25; }
+#v2ov .tplate .ts { display: flex; max-width: 100%; white-space: nowrap; overflow: hidden; font-weight: 500; font-size: .92em; }
+#v2ov .tplate .ts .tm { overflow: hidden; text-overflow: ellipsis; min-width: 2em; }
+/* 角色主視覺（0.63.46）：員工卡標題列左邊的 Q 版小人（右邊是關閉鈕，名牌置中，左側本來空著）；招聘表單「誰來做」下面的大站姿 */
+html body #card .tbar .kvchibi { position: absolute; left: 15px; bottom: 2px; height: 50px; width: auto; max-width: 48px; object-fit: contain; object-position: bottom; pointer-events: none; }
+html body #card .tbar .kvchibi[hidden] { display: none; }
+html body #menu .v2hkv { display: flex; justify-content: center; margin: 6px 0 2px; }
+html body #menu .v2hkv[hidden] { display: none; }
+html body #menu .v2hkv img { display: block; height: min(32vh, 220px); max-width: 100%; object-fit: contain; object-position: bottom; -webkit-mask-image: linear-gradient(#000 72%, transparent); mask-image: linear-gradient(#000 72%, transparent); } /* 站姿原稿下緣是硬切（下身截掉）：底部 28% 淡出 */
+/* 320 寬（測試員 KV-2）：Codex 10 字名＋徽章時名牌左緣壓到 Q 版小人 → 有小人時標題列左右各留 70px（小人 15～63px、關閉鈕右側 15～56px），名牌在中間縮、照舊省略號 */
+html body #card .tbar.kvon { padding: 0 70px; }
+html body #card .tbar.kvon h2 { max-width: 100%; }
+/* 窄螢幕的招聘站姿縮小，表單下面的欄位早點看得到 */
+@media (max-width: 360px) { html body #menu .v2hkv img { height: min(24vh, 140px); } }
+
+/* ==========================================================================
+   完整對話當第一層（11-26 定案 A＋B＋D）：點人物直接進來
+   標題列：名牌（左邊讓 Q 版）＋右上 ⚙ 設定、×；底下狀態列兩行：狀態＋打斷、模型・投入程度・模式・記憶
+   Q 版大頭 100px 高，腳貼狀態列下緣，頭探進標題列；名牌、狀態列左邊讓到小人實際寬度（--kvw，page.html 照圖比例算）
+   ========================================================================== */
+html body #chat { --kvw: 12px; }
+html body #chat.kvon { --kvw: 112px; }
+html body #chat .chhead { position: relative; display: flex; align-items: center; justify-content: center; padding-left: 8px; padding-right: 8px; }
+html body #chat.kvon .chhead { padding-left: var(--kvw); }
+html body #chat .chhead { padding-right: 108px; } /* × 在右側 15～56px、⚙ 在 62～103px */
+html body #chat .chwho { flex: 0 1 auto; min-width: 0; max-width: 100%; height: 29px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 6px solid transparent; border-image: url(/v2/assets/ui_title_plate.png) 12 fill / 6px; font: 400 17px/1 system-ui, "Noto Sans TC", sans-serif; color: var(--m-ink); white-space: nowrap; overflow: hidden; }
+html body #chat .chwho b { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html body #chat #chback.tclose { position: absolute; left: auto; right: 15px; top: calc(13px + env(safe-area-inset-top)); width: 41px; height: 29px; border: 0; padding: 0; background: url(/v2/assets/ui_btn_close.png) center / 100% 100% no-repeat; border-image: none; font-size: 0; cursor: pointer; }
+html body #chat #chcfg { position: absolute; right: 62px; top: calc(13px + env(safe-area-inset-top)); width: 41px; height: 29px; padding: 0; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; box-sizing: border-box; background: none; color: var(--m-ink); font: 17px/1 system-ui, sans-serif; cursor: pointer; }
+html body #chat #chcfg::before { content: '⚙'; }
+html body #chat #chcfg:active, html body #chat #chback.tclose:active { filter: brightness(.9); }
+html body #chat #chstat { display: flex; flex-direction: column; justify-content: center; gap: 2px; height: 56px; box-sizing: border-box; padding: 4px 15px 4px var(--kvw); text-align: left; color: var(--m-ink); border-bottom: 2px solid #d8c3a2; background: var(--m-card); }
+html body #chat:not(.kvon) #chstat { padding-left: 15px; }
+html body #chat #chstat .cs1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+html body #chat #chmode { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--m-teal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #chat #chmode.wait { color: var(--m-orange); } html body #chat #chmode.ask, html body #chat #chmode.bad, html body #chat #chmode.gone { color: var(--m-red); }
+html body #chat #chbtns { flex: none; display: flex; gap: 6px; }
+html body #chat #chbtns .chip { min-height: 27px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
+html body #chat #chstat .cs2 { font-size: 12px; color: var(--m-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #chat #chchibi.kvchibi { position: absolute; z-index: 2; left: 12px; top: calc(env(safe-area-inset-top) + 12px); height: 100px; width: auto; max-width: 96px; object-fit: contain; object-position: bottom; pointer-events: none; }
+html body #chat #chchibi[hidden] { display: none; }
+html body #chat .chbody { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+html body #chat .chbody #chlog { flex: 1; min-height: 0; }
+html body #chat #chnew { position: absolute; left: 50%; bottom: 8px; translate: -50% 0; z-index: 1; padding: 2px 14px; border: 6px solid transparent; border-image: url(/v2/assets/ui_btn_primary.png) 12 fill / 6px; background: none; color: #fff; font: 13px/1.4 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
+html body #chat #chnew[hidden], html body #chat #chlive[hidden], html body #chat #chask[hidden], html body #chat #chsay[hidden] { display: none; }
+html body #chat #chlive { padding: 2px 15px; color: var(--m-teal); font-size: 13px; }
+html body #chat #chlive::after { content: ''; display: inline-block; width: 1.2em; }
+html body #chat #chask { padding: 4px 15px 0; }
+html body #chat #chask .mcard { margin: 0 0 6px; }
+html body #chat #chask .mcard span { display: block; font-size: 13px; word-break: break-word; }
+html body #chat #chask .note { margin: 0 0 4px; color: var(--m-red); font-size: 13px; }
+html body #chat #chask .g2 { display: flex; gap: 8px; } html body #chat #chask .g2 .chip { flex: 1; min-height: 35px; }
+/* 工具一組：「讀了 3 個檔」，點開是每一個工具（各自再點開看內容、結果） */
+html body #chlog .ctg > .gl { padding: 4px 0 2px 8px; }
+html body #chlog .ctg > .gl > .ct { margin: 4px 0; max-width: 100%; }
+html body #chlog .ct > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 從完整對話 ⚙ 開的設定：卡片蓋在完整對話上面 */
+html body #card.overchat { z-index: 6; }
+/* 辦公室通知列（z 50、場景上方）在完整對話整頁時收起，不蓋到狀態列和對話；關掉對話就回來 */
+html body:has(#chat[style*="display: flex"]) #v2help { display: none !important; }
+/* 審查 C-2：⚙、×、打斷的點擊範圍擴到 44px 高（外觀不變：用透明的 ::after 往外撐） */
+html body #chat #chback.tclose::after { content: ''; position: absolute; inset: -9px -2px; }
+html body #chat #chcfg::after { content: ''; position: absolute; inset: -15px -8px; } /* ⚙ 有 6px 九宮格邊框，::after 從 padding box 算：多撐 6px */
+html body #chat #chbtns .chip { position: relative; }
+html body #chat #chbtns .chip::after { content: ''; position: absolute; inset: -16px -9px; } /* .chip 有 6px 邊框：從 padding box 往外撐到 44px 高 */
+
+/* ==========================================================================
+   人事室兩層（11-26 定案 C）：第一層總覽一頁看完（390×844、46 人不捲）；第二層從右滑進、左上返回
+   ========================================================================== */
+#hrroom .hr-l1 .hr-list { gap: 6px; margin-bottom: 12px; }
+#hrroom .hr-l1 .hr-row { padding: 5px 10px 5px 6px; }
+#hrroom .hr-l1 .hr-av { width: 44px; height: 44px; border-radius: 10px; }
+#hrroom .hr-l1 .hr-sec h2 { margin: 2px 0 8px; font-size: 18px; }
+#hrroom .hr-more { display: block; width: 100%; padding: 8px 12px; border: 1.5px dashed #d8c3a2; border-radius: 12px; background: #fffaf0; color: #b0561c; font: 700 15px/1.3 system-ui, "Noto Sans TC", sans-serif; text-align: right; cursor: pointer; }
+#hrroom .hr-ents { display: flex; flex-direction: column; gap: 8px; }
+#hrroom .hr-ent { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 12px 6px 10px; border: 2px solid #5f9a90; border-radius: 14px; background: #fff; color: #3b2412; text-align: left; cursor: pointer; }
+#hrroom .hr-ent:active { background: #e9f3f1; }
+#hrroom .hr-ent .hr-ei, #hrroom .hr-ent img.hr-ic { flex: none; width: 36px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 24px; line-height: 1; object-fit: contain; background: none; image-rendering: auto; }
+#hrroom .hr-ent .hr-txt b { font-size: 17px; }
+#hrroom .hr-ent .hr-txt small { color: #386d66; }
+#hrroom .hr-l2bar { position: sticky; top: -14px; z-index: 2; display: flex; align-items: center; gap: 10px; margin: -14px -14px 10px; padding: 10px 14px; background: #fbf4e8; border-bottom: 1px solid #e3d3b8; }
+#hrroom .hr-l2back { flex: none; height: 36px; padding: 0 12px; border: 1.5px solid #d8c3a2; border-radius: 10px; background: #fff; color: #3b2412; font: 600 15px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
+#hrroom .hr-l2title { flex: 1; min-width: 0; margin: 0; font: 800 19px/1.3 system-ui, "Noto Sans TC", sans-serif; color: #3b2412; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hrroom .hr-l2 .hr-tools { top: 42px; }
+#hrroom .hr-grp { margin: 0 0 10px; }
+#hrroom .hr-gh { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 4px; border: 0; border-bottom: 1px solid #d8c3a2; background: none; color: #3b2412; text-align: left; cursor: pointer; }
+#hrroom .hr-gh b { flex: 0 1 auto; min-width: 0; font: 800 16px/1.3 system-ui, "Noto Sans TC", sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hrroom .hr-gh small { flex: 1; color: #8a6a4a; font-size: 13px; white-space: nowrap; }
+#hrroom .hr-gc { flex: none; color: #8a6a4a; font-size: 16px; }
+#hrroom .hr-gl { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+#hrroom .hr-l2.c2in { animation: po-slide-in .22s cubic-bezier(.2, .8, .2, 1); }
+#hrroom .hr-l1.c1back { animation: po-slide-back .18s ease-out; }
+#hrroom .hr-body { overflow-x: hidden; }
+@media (prefers-reduced-motion: reduce) { #hrroom .hr-l2.c2in, #hrroom .hr-l1.c1back { animation: none !important; } }
+/* 辦公室通知列（z 50、top 56px）會蓋到人事室第二層的「‹ 返回」：人事室開著時也收起，回到辦公室就出來 */
+html body:has(#hrroom[style*="display: flex"]) #v2help { display: none !important; }
+/* 第二階段：正在寫的半段文字（/live.json）、允許卡片（approvalInfo） */
+html body #chat #chlive.txt { max-height: 28vh; overflow-y: auto; margin: 0 15px 4px; padding: 6px 8px; border: 1px solid #d8c3a2; background: var(--m-card); color: var(--m-ink); font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+html body #chat #chcfg[hidden] { display: none; }
+html body #chat #chask .askd1, html body #chat #chask .askr { display: block; font-size: 13px; word-break: break-word; }
+html body #chat #chask .askr { color: var(--m-sub); font-size: 12px; margin-top: 2px; }
+html body #chat #chask .askd summary { font-size: 13px; cursor: pointer; word-break: break-all; }
+html body #chat #chask .askd pre { max-height: 24vh; overflow: auto; margin: 4px 0 0; padding: 4px 6px; background: var(--m-card); border: 1px solid #d8c3a2; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+html body #chat #chask .g2 { flex-wrap: wrap; }
+html body #chat #chask .g2 .chip { min-width: 30%; }
+html body #chat #chask .askwhy { width: 100%; box-sizing: border-box; margin: 6px 0 2px; padding: 6px 8px; border: 1px solid #d8c3a2; border-radius: 6px; background: #fff; font: 15px/1.3 system-ui, "Noto Sans TC", sans-serif; }
+/* 審查 H-3：320 寬人事室第一層也一頁看完（320×568：可視約 492px）。窄螢幕：入口的名稱與數字擠成一行、等你回覆的列與間距縮小 */
+@media (max-width: 360px) {
+  #hrroom .hr-body { padding-top: 8px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  #hrroom .hr-l1 .hr-sec h2 { margin: 0 0 6px; font-size: 16px; }
+  #hrroom .hr-l1 .hr-sec h2::before { height: 18px; }
+  #hrroom .hr-l1 .hr-list { gap: 2px; margin-bottom: 6px; }
+  #hrroom .hr-l1 .hr-wt { display: none; } /* 等你回覆列的職稱：窄螢幕放不下就不顯示（名字、等多久留著） */
+  #hrroom .hr-l1 .hr-row { gap: 8px; padding: 3px 8px 3px 4px; }
+  #hrroom .hr-l1 .hr-av { width: 34px; height: 34px; border-radius: 8px; }
+  #hrroom .hr-l1 .hr-txt { gap: 0; }
+  #hrroom .hr-l1 .hr-txt b { font-size: 15px; }
+  #hrroom .hr-l1 .hr-txt small { font-size: 12px; }
+  #hrroom .hr-l1 .hr-go { font-size: 22px; }
+  #hrroom .hr-more { padding: 2px 10px; font-size: 14px; }
+  #hrroom .hr-ents { gap: 2px; }
+  #hrroom .hr-ent { min-height: 44px; gap: 8px; padding: 2px 10px 2px 8px; }
+  #hrroom .hr-ent .hr-ei, #hrroom .hr-ent img.hr-ic { width: 28px; height: 26px; font-size: 20px; }
+  #hrroom .hr-ent .hr-txt { flex-direction: row; align-items: baseline; gap: 8px; }
+  #hrroom .hr-ent .hr-txt b { flex: none; font-size: 15px; }
+  #hrroom .hr-ent .hr-txt small { flex: 1; min-width: 0; text-align: right; }
+}

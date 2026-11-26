@@ -68,6 +68,8 @@ export type Coworker = {
   label?: string
   /** 不是 Claude Code：agy＝Antigravity CLI（agy/agy_office.py 寫的狀態檔），SendMessage 送不到，改用 agy_office.py send */
   kind?: 'agy' | 'codex'
+  /** 這位的外掛載入的版號（0.63.25；Claude 的外掛寫，Codex／agy 沒有） */
+  ver?: string
 }
 
 /** 個人按鈕（~/.claude/pixel-office/buttons.json）：prompt 送給這個視窗，url 用瀏覽器開 */

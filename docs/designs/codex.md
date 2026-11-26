@@ -17,14 +17,30 @@
 - 事件：SessionStart（`source`：startup／resume／clear／compact／fork）、UserPromptSubmit（`prompt`、`turn_id`）、PostToolUse（`tool_name`、`tool_input`、`tool_response`）、Stop（`last_assistant_message`、`stop_hook_active`）、SessionEnd。共通欄位 `session_id`、`cwd`、`transcript_path`、`model`。
 - SessionStart／UserPromptSubmit 的純文字 stdout 會當成上下文；Stop 在 exit 0 時 stdout 必須是 JSON。
 - 🔴 hook 要在 Codex 裡用 `/hooks` 信任，沒信任的**不跑也不報錯**。
-- 外掛會複製到 `~/.codex/plugins/cache/`：改了 `codex/` 要重裝才生效。所以看守程式和 Claude 端寄信都跑 `~/.claude/pixel-office/codex/codex_office.py` 那份（hook 每次跑都同步過去）。
+- （改版前紀錄，codex-trust 以前）外掛會複製到 `~/.codex/plugins/cache/`：改了 `codex/` 要重裝才生效。所以看守程式和 Claude 端寄信都跑 `~/.claude/pixel-office/codex/codex_office.py` 那份（hook 每次跑都同步過去）。
 - 🔴 elevated sandbox 裡 AI 跑的指令讀不到 `~/.codex`；hook 本身在 sandbox 外跑，不受影響。
-- 安裝與信任都會改使用者的 Codex 設定，由使用者自己做：
+- 🔴 信任綁什麼（2026-11-25 實測，試驗 CODEX_HOME）：`config.toml` 的 `[hooks.state."pixel-office@pixel-office-codex:hooks/hooks.json:<事件>:0:0"]` 存兩個雜湊。
+  - `trusted_hash` 只跟 hook 定義有關（指令字串、事件、matcher、timeout），跟安裝路徑無關。
+  - `trusted_content_hash` 是**整個外掛資料夾的內容**：改任何一個檔、多一個檔、改版號，五個 hook 全變 modified，要重新信任。
+- 所以 Codex 外掛拆成 `codex-stub/`：五個檔（marketplace、plugin.json 版號固定 1.0.0、hooks.json、.mcp.json、`po_launch.py`），**永遠不改**。
+  - `remote/codex-stub.spec.ts` 釘住檔案清單與每個檔的 sha256。
+  - `po_launch.py` 只跑 `<主目錄>/.claude/pixel-office/release/codex/codex_office.py`（主目錄用帳號資料 `pwd.getpwuid`，不吃 `$HOME`）。
+    - 從 `/` 逐層用 O_NOFOLLOW 開，每層都要是 root 或自己的、群組與其他人不能寫；程式檔要是自己的一般檔。
+    - 對同一個開著的檔 fstat、讀內容，再用那份內容 compile／exec，不讓路徑被換掉。
+    - 不在、不安全、任何例外（含 SystemExit）都安靜 exit 0；hook 模式在子程序跑，父程序 9 秒到就砍（硬期限）。
+    - 只限 macOS／Linux：Windows 上轉接程式與 MCP 啟動指令都安靜結束，Windows 維持舊外掛。
+  - 狀態檔共用鎖：`<狀態檔>.flock`（核心 flock，程序結束自動放）。hook、看守、MCP 工具都在鎖裡重讀再寫；hr.ts 寫 owner 呼叫一小段 Python 拿同一把鎖。
+    - hook 與 MCP 都用 `python -I -B`（隔離模式、不寫 .pyc：`__pycache__` 一出現在外掛資料夾，內容雜湊就變了）。MCP 綁固定的 `1.0.0/po_launch.py`，不掃 cache 猜版號。
+  - 真正的程式在 `codex/codex_office.py`，升版只換上線資料夾，不用重裝、不用再信任。
+- 安裝與信任都會改使用者的 Codex 設定，由使用者自己做（只要一次）：
   ```
-  codex plugin marketplace add "<pixel-office>/codex"
+  codex plugin marketplace remove pixel-office-codex
+  codex plugin marketplace add ~/.claude/pixel-office/release/codex-stub
+  codex plugin remove pixel-office@pixel-office-codex
   codex plugin add pixel-office@pixel-office-codex
   ```
-  然後開 Codex、`/hooks` 信任。`python codex_office.py install` 會印出這兩行。
+  然後開 Codex，選一次 Trust all。`python codex_office.py install` 會印出這幾行。
+- 🔴 這次信任的範圍：Codex 只看得到 `codex-stub/` 沒變，看不到上線資料夾（release）的程式換了。按 Trust all 等於同意之後 release 更新的程式都直接跑。所以上線資料夾的權限（只有自己能寫）就是信任範圍的一部分。
 
 ## 設計
 
@@ -37,15 +53,15 @@
 ## 實機紀錄（2026-11-08～09，Codex CLI 0.167.0，Windows）
 
 - `${PLUGIN_ROOT}` 對；SessionEnd 的 `reason` 是 `other`；祖先找得到 `codex.exe`（互動視窗是 `codex.exe --no-daemon`）。
-- 🔴 信任：`/hooks` 畫面寫「N hooks need review before they can run」，要逐個事件點進去、看 Source 是 `pixel-office@pixel-office-codex` 再信任（5 個：PostToolUse、SessionStart、SessionEnd、UserPromptSubmit、Stop）。只安裝不信任：hook 不跑也不報錯，`codex exec` 也不警告。帶 `--dangerously-bypass-hook-trust` 的執行會跑（payload 的 `permission_mode` 是 `bypassPermissions`），別拿它當「已信任」的證據。
-- 信任存在 `~/.codex/config.toml` 的 `[hooks.state."<外掛>@<市集>:hooks/hooks.json:<事件>:0:0"]`，內容是 `trusted_hash = "sha256:…"`（信任前那裡什麼都沒有）。綁的是 hook 定義的雜湊：外掛重裝、`hooks.json` 或指令改了就要重新 review。
-- 升版一定要重新信任（2026-11-09 實測 0.57.0→0.58.0，`hooks.json` 沒改也要；雜湊含展開後帶版號的路徑或版號本身）。不用進 `/hooks` 逐個點：升版後開 Codex 會跳「N hooks are new or changed」，選 **2. Trust all and continue** 一鍵就好。jacky：這樣就夠，不另外做「升版免信任」（試過固定指令字串，沒做完就停）。
+- （改版前紀錄）🔴 信任：`/hooks` 畫面寫「N hooks need review before they can run」，要逐個事件點進去、看 Source 是 `pixel-office@pixel-office-codex` 再信任（5 個：PostToolUse、SessionStart、SessionEnd、UserPromptSubmit、Stop）。只安裝不信任：hook 不跑也不報錯，`codex exec` 也不警告。帶 `--dangerously-bypass-hook-trust` 的執行會跑（payload 的 `permission_mode` 是 `bypassPermissions`），別拿它當「已信任」的證據。
+- （改版前紀錄）信任存在 `~/.codex/config.toml` 的 `[hooks.state."<外掛>@<市集>:hooks/hooks.json:<事件>:0:0"]`，內容是 `trusted_hash = "sha256:…"`（信任前那裡什麼都沒有）。綁的是 hook 定義的雜湊：外掛重裝、`hooks.json` 或指令改了就要重新 review。
+- （改版前紀錄：codex-trust 之後升版不用重新信任，見上面「信任綁什麼」）升版一定要重新信任（2026-11-09 實測 0.57.0→0.58.0，`hooks.json` 沒改也要；雜湊含展開後帶版號的路徑或版號本身）。不用進 `/hooks` 逐個點：升版後開 Codex 會跳「N hooks are new or changed」，選 **2. Trust all and continue** 一鍵就好。使用者：這樣就夠，不另外做「升版免信任」（試過固定指令字串，沒做完就停）。
 - 本機市集的外掛：版號沒變時 `codex plugin add` 不會更新 cache；`codex plugin marketplace upgrade` 只管 Git 市集。
 - 名牌：工作資料夾全是中文時預設 `codex`，跟名牌叫 codex 的 Claude session 撞名就變 `codex01a1`。
 
 ## MCP 與在線判斷（2026-11-09 實機）
 
-- 🔴 `.mcp.json` 裡的 `${PLUGIN_ROOT}` **不會展開**（hook 的會）：`codex mcp list` 看得到參數原封不動，伺服器起不來，Codex 說沒有這些工具。改成 `python -c` 去 `~/.codex/plugins/cache/pixel-office-codex/pixel-office/*/` 找最新那份來跑。
+- 🔴 `.mcp.json` 裡的 `${PLUGIN_ROOT}` **不會展開**（hook 的會；codex-trust 起改成固定的 `1.0.0/po_launch.py`，下面掃 cache 的做法是改版前紀錄）：`codex mcp list` 看得到參數原封不動，伺服器起不來，Codex 說沒有這些工具。改成 `python -c` 去 `~/.codex/plugins/cache/pixel-office-codex/pixel-office/*/` 找最新那份來跑。
 - 🔴 MCP 的 stdin 要用 UTF-8 讀：Windows 預設 cp950，中文參數變亂碼或解碼失敗讓整支結束，Codex 只看到「工具連線中斷」。
 - 呼叫者：tools/call 的 `_meta` 帶 `sessionId`／`threadId`（還有 `x-codex-turn-metadata.session_id`），直接用，不猜。
 - 在線判斷：終端機的 `codex`（沒加 `--no-daemon`）和桌面 App 都經過背景常駐程式（app-server），很多對話共用一個行程、而且它不會結束，看行程活著會留下關掉的對話。改看 `~/.codex/thread-writer-locks/<session_id>.lock`：開著的對話鎖住，關掉的放掉或刪掉（實機比對 4 個都對）。經常駐程式的對話關掉後，常駐程式約過 1 分鐘才放鎖，這段時間名牌還在（2026-11-09 實測：關窗後不到 1 分鐘鎖放掉、標離開，沒有 SessionEnd）。看不到鎖（非 Windows）才退回看行程、共用的 30 分鐘沒事件當離開。

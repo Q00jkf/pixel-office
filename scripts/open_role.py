@@ -41,6 +41,12 @@ HOST_NAMES = ('ANTHROPIC_BASE_URL',)
 KEEP_ENV = ('CLAUDE_CONFIG_DIR',)  # 多公司：開出的視窗沿用同一套設定
 
 
+
+def cli_sessions_dir():
+    """Claude Code 自己的 sessions 資料夾：CLAUDE_CONFIG_DIR 底下，沒設才是 ~/.claude（2026-11-23，跟外掛 0.62.6、takeover.py 同一個修法）"""
+    cfg = os.environ.get('CLAUDE_CONFIG_DIR', '').strip()
+    return os.path.join(os.path.expanduser(cfg) if cfg else os.path.join(os.path.expanduser('~'), '.claude'), 'sessions')
+
 def persistent_env_names():
     """登錄檔裡使用者層與系統層的環境變數名稱（大寫）；不是 Windows 回 None"""
     if sys.platform != 'win32':
@@ -104,7 +110,7 @@ def live_sessions(session_id):
     """正在跑這個 session 的程序：[(pid, 名稱)]。~/.claude/sessions/<pid>.json 強制結束時會留下，所以另外確認 pid 還活著。
     兩筆以上＝同一份對話開在兩個視窗（--resume 接到開著的對話，2026-10-31 團隊視窗實測）"""
     out = []
-    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+    for p in glob.glob(os.path.join(cli_sessions_dir(), '*.json')):
         try:
             with open(p, encoding='utf-8') as f:
                 j = json.load(f)
@@ -120,7 +126,7 @@ def sessions_named(name, cwd, since_ms=0):
     只比編號就抓不到「同一個角色又開了一份」（2026-11-04 實測：team json 記 5b0e6c1e，程序已是 3d5446f6）"""
     want = os.path.normcase(os.path.abspath(cwd))
     out = []
-    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+    for p in glob.glob(os.path.join(cli_sessions_dir(), '*.json')):
         try:
             with open(p, encoding='utf-8') as f:
                 j = json.load(f)

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "pixel_office": {
+      "command": "python",
+      "args": [
+        "-I",
+        "-B",
+        "-c",
+        "import os,runpy,sys\ntry:\n import pwd\nexcept ImportError:\n sys.exit(0)\nh=os.environ.get('CODEX_HOME') or os.path.join(pwd.getpwuid(os.getuid()).pw_dir,'.codex')\nf=os.path.join(h,'plugins','cache','pixel-office-codex','pixel-office','1.0.0','po_launch.py')\nos.path.isfile(f) or sys.exit(0)\nsys.argv=[f,'mcp'];runpy.run_path(f,run_name='__main__')"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 30,
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}

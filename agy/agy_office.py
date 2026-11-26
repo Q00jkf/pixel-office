@@ -185,10 +185,47 @@ def deliver(to: str, text: str, frm: str) -> str:
         return f"Put in {s.get('name')}'s inbox: delivered on its next action (the user types, or its current turn ends); an idle agy cannot be woken"
     COMMANDS.mkdir(parents=True, exist_ok=True)
     reply = f"python \"{CLI}\" send {frm} \"<reply>\" --from <your ListAgents name>"
-    save(COMMANDS / f"{s['id']}.json", {
+    enqueue_command(str(s["id"]), {
         "nonce": uuid.uuid4().hex, "at": now_ms(), "from": f"{frm} (Antigravity, not the user)",
         "text": f"{text}\n(Reply with {reply}; the sender waits about 90 s for a reply, after that it arrives on its next action)"})
     return f"Sent to {s.get('agent') or s.get('name')}: its plugin picks it up every second; discarded if not picked up in 10 minutes"
+
+
+def enqueue_command(cid: str, item: dict) -> str:
+    """commands/<id>.json 是佇列（0.63.17，複驗 D；跟 remote/server.ts enqueueCommand 同一套）：拿掉收過的、過期的，新的接在後面。
+    寫的人共用一把鎖（0.63.22，最後複驗第 1 項）：commands/<id>.lock 資料夾，搶到才寫，5 秒以上的當成留下來的清掉。
+    滿 20 則丟 ValueError（不靜默丟舊的）"""
+    COMMANDS.mkdir(parents=True, exist_ok=True)
+    lock = COMMANDS / f"{cid}.lock"
+    got = False
+    for _ in range(40):
+        try:
+            lock.mkdir()
+            got = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 5:
+                    shutil.rmtree(lock, ignore_errors=True)
+                    continue
+            except OSError:
+                pass
+            time.sleep(0.05)
+    if not got:
+        raise ValueError("The recipient's inbox is busy, try again shortly")
+    try:
+        f = COMMANDS / f"{cid}.json"
+        c, d = load(f), load(COMMANDS / f"{cid}.done.json")
+        done = set(x for x in (d.get("nonces") or []) if isinstance(x, str)) | {d.get("nonce")}
+        items = c.get("items") if isinstance(c.get("items"), list) else ([{k: c[k] for k in ("nonce", "text", "at", "from") if k in c}] if isinstance(c.get("nonce"), str) else [])
+        now = int(time.time() * 1000)
+        keep = [i for i in items if isinstance(i, dict) and i.get("nonce") not in done and now - (i.get("at") or 0) < 10 * 60 * 1000]
+        if len(keep) >= 20:
+            raise ValueError(f"The recipient still has {len(keep)} unread messages; wait for it to catch up before sending more")
+        save(f, {**item, "items": keep + [item]})
+        return item["nonce"]
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
 
 
 def take_mail(cid: str) -> str:
@@ -203,6 +240,10 @@ def take_mail(cid: str) -> str:
         try:
             m = json.loads(ln)
         except Exception:
+            continue
+        if m.get("src") == "phone":  # 使用者從手機面板傳來的（remote/server.ts deliverAgy）：是使用者本人，不是別的 AI，也沒有對象可回信
+            lines.append(f"📱 Message from the user, sent from the pixel-office phone panel: {m.get('text', '')}\n"
+                         "Answer in your normal reply; the user reads it on the phone panel.")
             continue
         frm = m.get("from") or "unsigned"
         lines.append(f"📨 Pixel office message from {frm} (another AI session, not the user): {m.get('text', '')}\n"

@@ -11,7 +11,8 @@ export function parseStatus(s: any, now: number): Coworker | undefined {
     mode: s.mode as OfficeMode,
     tool: String(s.tool ?? ''),
     isMe: false,
-    role: s.role === 'manager' ? 'manager' : 'staff',
+    // 主管只能是 Claude（使用者 2026-11-24 決定，0.63.14 審查第 5 項）：agy／Codex 的狀態檔就算寫了 manager 也當員工
+    role: s.role === 'manager' && s.kind !== 'agy' && s.kind !== 'codex' ? 'manager' : 'staff',
     agent: typeof s.agent === 'string' ? s.agent : undefined,
     ref: typeof s.ref === 'string' ? s.ref : undefined,
     title: typeof s.title === 'string' ? s.title : undefined,
@@ -39,5 +40,6 @@ export function parseStatus(s: any, now: number): Coworker | undefined {
     newTokens: typeof s.newTokens === 'number' && s.newTokens > 0 ? s.newTokens : undefined,
     compacts: typeof s.compacts === 'number' && s.compacts > 0 ? s.compacts : undefined,
     kind: s.kind === 'agy' || s.kind === 'codex' ? s.kind : undefined,
+    ver: typeof s.ver === 'string' ? s.ver.slice(0, 20) : undefined, // 外掛載入的版號（0.63.25：名冊看得到誰還沒換新版）
   }
 }
