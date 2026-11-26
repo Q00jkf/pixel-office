@@ -1331,6 +1331,80 @@
       toast(r.text || r.error || '沒有回應')
     }))
   }
+  // ---------- 關係（設計 windows-hire 5.）：底部「辦公室｜關係」兩個分頁；關係＝用狀態裡的 role、team、agent 畫樹（主管 → 部門主管 → 員工），不加新資料 ----------
+  // 點節點＝開那人的狀態卡（跟點辦公室裡的人一樣），長按空白或按「開專案」＝開專案。畫法參考團隊視窗的關係圖，不共用程式（那邊是滑鼠、這邊是觸控）
+  const bareAgent = a => String(a || '').split(' [')[0]
+  /** people → { roots, kids }：team＝某位在線主管的 agent 就掛在他底下；同名主管有幾位時挑坐同一張協作桌的，沒有才掛第一位；找不到主管或成環的當根 */
+  const tableOfSeat = s => (/^t(\d+)\./.exec(s || '') || [])[1]
+  function relTree(people) {
+    const boss = new Map()
+    for (const p of people) if (p.role === 'manager' && p.agent) boss.set(bareAgent(p.agent), [...(boss.get(bareAgent(p.agent)) || []), p])
+    const up = p => {
+      const l = (p.team && boss.get(bareAgent(p.team)) || []).filter(b => b.id !== p.id), t = tableOfSeat(p.seat)
+      return (t && l.find(b => tableOfSeat(b.seat) === t)) || l[0]
+    }
+    const kids = new Map(), roots = []
+    for (const p of people) {
+      let b = up(p), seen = new Set([p.id])
+      for (let q = b; q; q = up(q)) { if (seen.has(q.id)) { b = undefined; break } seen.add(q.id) } // 成環（互相掛）：當根
+      if (b) kids.set(b.id, [...(kids.get(b.id) || []), p]); else roots.push(p)
+    }
+    const order = (a, b) => (b.role === 'manager') - (a.role === 'manager') || String(a.plate).localeCompare(String(b.plate))
+    for (const l of kids.values()) l.sort(order)
+    return { roots: roots.sort(order), kids }
+  }
+  const REL_DOT = { typing: 'work', thinking: 'work', reading: 'work', done: 'done', blocked: 'err', waiting: 'wait' }
+  const relNode = (p, kids, depth) => {
+    const k = kids.get(p.id) || []
+    return `<li><button class="rnode${p.role === 'manager' ? ' boss' : ''}" data-id="${esc(p.id)}"><span class="rav" style="background-image:url('${src(faceOf(p) + '_front')}')"></span>` +
+      `<span class="rtxt"><b>${p.role === 'manager' ? '<i class="rstar">★</i>' : ''}${esc(p.plate)}${p.kind === 'codex' ? ' <i class="rtag">Codex</i>' : ''}</b>` +
+      `<small><em class="rdot ${REL_DOT[p.mode] || 'idle'}"></em>${esc(ZH[p.mode] || p.mode || '')}${p.title && p.title !== p.plate ? '・' + esc(p.title) : ''}${k.length ? `・${k.length} 人` : ''}</small></span></button>` +
+      (k.length && depth < 8 ? `<ul>${k.map(c => relNode(c, kids, depth + 1)).join('')}</ul>` : '') + '</li>'
+  }
+  const rel = document.createElement('div'); rel.id = 'relroom'; rel.setAttribute('role', 'region'); rel.setAttribute('aria-label', '關係')
+  rel.innerHTML = '<div class="rwrap"><div class="rhead"><b>關係</b><small>誰在誰底下；長按空白開專案</small><button class="mbtn" id="relproj">開專案</button></div><div id="reltree"></div></div>'
+  const tabs = document.createElement('nav'); tabs.id = 'v2tabs'; tabs.setAttribute('aria-label', '畫面')
+  tabs.innerHTML = '<button data-tab="office" class="on">辦公室</button><button data-tab="rel">關係</button>'
+  document.body.append(rel, tabs)
+  let relOn = false, relKey = ''
+  function relRender() {
+    if (!relOn || !st) return
+    const people = st.people || [], key = people.map(p => [p.id, p.plate, p.role, p.team, p.agent, p.mode, p.title].join('\u0001')).join('\u0002')
+    if (key === relKey) return
+    relKey = key
+    const { roots, kids } = relTree(people)
+    const top = roots.filter(p => p.role === 'manager' || kids.has(p.id)), loose = roots.filter(p => !top.includes(p))
+    document.getElementById('reltree').innerHTML = !people.length ? '<div class="note">辦公室現在沒有人</div>'
+      : (top.length ? `<ul class="rtree">${top.map(p => relNode(p, kids, 0)).join('')}</ul>` : '') +
+        (loose.length ? `<h3 class="rsec">沒掛主管</h3><ul class="rtree flat">${loose.map(p => relNode(p, kids, 0)).join('')}</ul>` : '')
+  }
+  function setTab(t) {
+    relOn = t === 'rel'; relKey = ''
+    const hd = document.querySelector('header'); if (hd) rel.style.top = Math.round(hd.getBoundingClientRect().bottom) + 'px' // 標題列會折行，高度不固定
+    rel.classList.toggle('on', relOn)
+    tabs.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-pressed', String(b.dataset.tab === t)) })
+    relRender()
+  }
+  tabs.addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab) })
+  ready.then(() => PO().onState && PO().onState(() => relRender()))
+  let relPress = null
+  rel.addEventListener('click', e => {
+    if (relPress && relPress.fired) { relPress = null; return }
+    if (e.target.closest('#relproj')) { openCardsV2('project'); return }
+    const n = e.target.closest('.rnode'); if (!n) return
+    const p = (st && st.people || []).find(x => x.id === n.dataset.id)
+    if (!p) { toast('這位已經不在線'); return }
+    if (PO().show) PO().show(p)
+  })
+  // 長按空白（不是節點、不是按鈕）約 0.6 秒＝開專案
+  rel.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return
+    const x = e.clientX, y = e.clientY
+    relPress = { x, y, fired: false, timer: setTimeout(() => { if (relPress) { relPress.fired = true; try { navigator.vibrate && navigator.vibrate(20) } catch {} openCardsV2('project') } }, 600) }
+  })
+  rel.addEventListener('pointermove', e => { if (relPress && !relPress.fired && Math.hypot(e.clientX - relPress.x, e.clientY - relPress.y) > 10) { clearTimeout(relPress.timer); relPress = null } })
+  ;['pointerup', 'pointercancel'].forEach(t => rel.addEventListener(t, () => { if (relPress && !relPress.fired) { clearTimeout(relPress.timer); relPress = null } }))
+  window.PO_REL = { relTree } // 給測試
   ready.then(() => { if (window.PO) { window.PO.openHire = openHireV2; window.PO.openShift = openShiftV2; window.PO.openSummon = p => openCardsV2('member', p); window.PO.openProjects = () => openCardsV2('project') } })
   // 狀態一拿到就接（通知列不用等圖）；場景等第一批圖到了才畫（render 自己會擋），到了馬上畫一次
   manifest.then(() => { PO().onState(j => { st = j; trackMail(j); render(); trackTrips(j); renderHelp(j) }) })

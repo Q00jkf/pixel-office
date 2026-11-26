@@ -216,7 +216,7 @@ test('0.63.60 access log: every write is logged; reads once per (via, exe, paren
 })
 
 test('0.63.60 high risk: /perm, /stuck, /hire, /helper always; /tables only for delete and edit; never for GET', () => {
-  for (const p of ['/perm', '/stuck', '/hire', '/helper']) expect(highRisk('POST', p)).toBe(true)
+  for (const p of ['/perm', '/stuck', '/hire', '/summon', '/helper']) expect(highRisk('POST', p)).toBe(true)
   expect(highRisk('POST', '/tables', 'delete')).toBe(true)
   expect(highRisk('POST', '/tables', 'edit')).toBe(true)
   expect(highRisk('POST', '/tables', 'add')).toBe(false)
