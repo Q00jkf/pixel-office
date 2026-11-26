@@ -1,7 +1,7 @@
 // bun test remote：辦公室裡按允許（0.63.51）的純函式：單、Claude 的決定、Codex 畫面（v0.171 實測）、心跳
 import { expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { HANDED_BACK, TOMBSTONE, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPrompt, parseSlip, phoneBeat, type Slip } from './approve'
+import { HANDED_BACK, HOOK_BLOCKED_TEXT, TOMBSTONE, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPrompt, parseSlip, phoneBeat, type Slip } from './approve'
 
 const slip = (o: Partial<Slip> = {}): Slip => ({ state: 'waiting', session: 's1', name: '像素工程師', toolUseId: 'toolu_1', tool: 'Bash', text: 'git push origin main', nonce: 'n1', at: 1000, deadline: 121000, ...o })
 
@@ -114,4 +114,17 @@ test('phone approval off: every card loses its buttons and says why; a Claude wa
   expect(phoneOffCard({ mode: 'waiting' }, undefined, 9)).toBeUndefined()
   expect(phoneOffCard({ mode: 'typing', tool: 'Bash' }, undefined, 9)).toBeUndefined()
   expect(phoneOffCard({ kind: 'codex', mode: 'waiting', tool: 'exec' }, undefined, 9)).toBeUndefined() // Codex 的卡另外讀畫面
+})
+
+test('測試 #8：名冊 hookBlocked 的人，允許卡不給按鈕、寫安全設定；有 JWT（手機核准開著）也一樣', () => {
+  const info = claudeApproval(slip(), 'tmux')
+  const b = 'cc-plugin-sec-default'
+  for (const why of [undefined, '只有經 Cloudflare Access 登入的手機頁能按']) { // undefined＝JWT 驗過、手機核准開著
+    const noSlip = phoneOffCard({ mode: 'waiting', tool: 'Bash', src: 'tmux', hookBlocked: b }, why, 9)!
+    expect(noSlip).toMatchObject({ kind: 'claude', tool: 'Bash', options: [], where: 'tmux', why: HOOK_BLOCKED_TEXT(b) })
+    expect(noSlip.why).toContain('安全設定')
+    const slipped = phoneOffCard({ approvalInfo: info, hookBlocked: b }, why, 9)!
+    expect(slipped.options).toEqual([]) // 有單也不給按鈕（掛點被擋，按了沒用）
+    expect(slipped.why).toBe(HOOK_BLOCKED_TEXT(b))
+  }
 })

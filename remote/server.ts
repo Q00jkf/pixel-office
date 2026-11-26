@@ -10,7 +10,7 @@
 //   座位與協作桌在 office.ts、人事室（招聘、換模型、解雇、排班、完整對話…）在 hr.ts；/scene.svg（向量圖）照舊提供
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import type { Coworker } from '../types'
 import { MIN_ROWS, assignSeats, isDeptLead, layout, setSpread, shownName } from '../hooks/scene'
@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -403,6 +403,8 @@ export function roster(now = Date.now()) {
       tool: c.tool || undefined,
       since: c.since,
       approval: c.approval?.tool,
+      // 核准被擋（設計 windows-hire 7.）：Claude 在等、外掛卻沒收到權限單，而且對話紀錄寫著外掛的 PermissionRequest 被別的 plugin 跳過
+      ...(!c.kind && c.mode === 'waiting' && !c.approval ? (b => (b ? { hookBlocked: b } : {}))(hookSkipOf(c.id)) : {}),
       lastError: c.lastError,
       ctx: c.ctxPct,
       // 傳話（SendMessage）：手機畫紙飛機用；收件人在伺服器這邊對好（agent 或通訊位址），手機只拿 id
@@ -451,6 +453,7 @@ export function roster(now = Date.now()) {
     codexModels: codexModels(),
     efforts: EFFORTS, perms: PERMS, codexEfforts: CODEX_EFFORTS, codexPerms: CODEX_PERMS, // 投入程度＋模式（0.63.9）
     hireDirs: cfg.hireDirs.map(d => ({ name: d.name, path: d.path, ...(d.default ? { default: true } : {}) })),
+    ...(process.platform === 'win32' ? { noCodexHire: CODEX_WIN_TEXT } : {}), // Windows 招聘不能選 Codex（設計 windows-hire 3.）
   }
   if (bossBack) try { saveStore(officeFile(), S) } catch {}
   return out
@@ -877,7 +880,7 @@ export function officeOfDir(dir: string): string {
   if (hit && Date.now() - hit.at < 10 * 60e3) main = hit.top
   else {
     try {
-      const r = Bun.spawnSync(['git', '-C', dir, 'rev-parse', '--show-toplevel'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
+      const r = spawnSyncW(['git', '-C', dir, 'rev-parse', '--show-toplevel'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
       if (r.exitCode === 0) main = r.stdout.toString().trim() || dir
     } catch {}
     gitTop.set(dir, { top: main, at: Date.now() })
@@ -1192,20 +1195,25 @@ export function hireAt(b: any, now = Date.now(), hireFn: (b: any, opts?: { addDi
 export const newBossHandle = (people: { id: string; agent?: string }[], h: { newSid: string; newName: string }) =>
   people.find(p => p.id === h.newSid)?.agent || h.newName
 
+/** 換主管要下的令（純函式，給測試）：新主管升主管、team 接舊主管的上層（舊主管沒有上層＝off 清空，測試 #9）；舊主管降員工掛新主管；同桌其他人掛新主管 */
+export const swapOrders = (h: { newSid: string; oldId: string; oldTeam?: string }, atIds: string[], handle: string): [string, { role?: 'manager' | 'staff'; team?: string }][] => [
+  [h.newSid, { role: 'manager', team: h.oldTeam || 'off' }],
+  [h.oldId, { role: 'staff', team: handle }],
+  ...atIds.filter(id => id !== h.newSid && id !== h.oldId).map(id => [id, { team: handle }] as [string, { team: string }]),
+]
+
 export function swapBoss(h: Handover, now = Date.now()): string {
   const j = roster(now), S = office()
   const map = new Map(j.people.filter(p => p.seat).map(p => [p.id, p.seat as string]))
   const at = atTable(h.table, j.people, map)
   const order = (id: string, o: { role?: 'manager' | 'staff'; team?: string }) => {
     const p = j.people.find(x => x.id === id)
-    if (!takesOrders(p ?? { id })) sendCommand(id, `（人事命令，來自手機像素辦公室）請用 office_profile 工具${o.role ? `把 role 設成 ${o.role}` : ''}${o.role && o.team ? '、' : ''}${o.team ? `把 team 設成「${o.team}」` : ''}，設好回一句就好`, now)
+    if (!takesOrders(p ?? { id })) sendCommand(id, `（人事命令，來自手機像素辦公室）請用 office_profile 工具${o.role ? `把 role 設成 ${o.role}` : ''}${o.role && o.team ? '、' : ''}${o.team === 'off' ? '把 team 設成 off（清空，你上面沒有主管）' : o.team ? `把 team 設成「${o.team}」` : ''}，設好回一句就好`, now)
     else writeOrder(id, o, now)
   }
   // 桌子歸屬與組員的 team 用新主管在名冊上的 agent（ListAgents 名；0.63.57）：排座位用 agent 找桌，寫招聘時的名字會對不到
   const handle = newBossHandle(j.people, h)
-  order(h.newSid, { role: 'manager', ...(h.oldTeam ? { team: h.oldTeam } : {}) })
-  order(h.oldId, { role: 'staff', team: handle })
-  for (const p of at) if (p.id !== h.newSid && p.id !== h.oldId) order(p.id, { team: handle })
+  for (const [id, o] of swapOrders(h, at.map(p => p.id), handle)) order(id, o)
   const t = S.tables.find(x => x.id === h.table)
   if (t) { retarget(t, handle); t.auto = false }
   if (map.get(h.newSid) || S.pins[h.newSid]) {
@@ -1727,6 +1735,71 @@ function serverKey(): string | undefined {
  * 沒指定就用 default。要 auto、acceptEdits 等回 403（要使用者在手機上招）。手機頁照舊
  */
 const SAFE_PERMS = new Set(['default', 'plan', 'read-only'])
+// ---------- 手機叫角色、開專案（設計 windows-hire 4.）：清單由 scripts/cards.py 算（跟團隊視窗的關係圖同一份）----------
+// 手機只拿到卡名、說明、分組與代號（卡路徑的雜湊），不拿卡的全文、路徑；/summon 只收這次重算出的清單裡有的代號
+const CARDS_PY = join(import.meta.dir, '..', 'scripts', 'cards.py')
+export type CardsRun = (args: string[], stdin?: string) => any
+let cardsRun: CardsRun = (args, stdin) => {
+  const r = spawnSyncW([Bun.which('python') ?? Bun.which('py') ?? 'python', '-X', 'utf8', '-I', CARDS_PY, ...args], { stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe', timeout: 20000, killSignal: 'SIGKILL' })
+  if (r.exitCode !== 0) return
+  try { return JSON.parse(r.stdout.toString().trim().split('\n').pop() ?? '') } catch { return }
+}
+/** 測試換成假的 cards.py（回傳原本的） */
+export function _setCardsRun(f: CardsRun): CardsRun { const o = cardsRun; cardsRun = f; return o }
+export const cardCode = (file: string) => new Bun.CryptoHasher('sha256').update(file).digest('hex').slice(0, 12)
+export type CardPick = { code: string; name: string; desc: string; group: string; file: string; project: string; managers?: string[] }
+const pick = (c: any, group: string, project: string, extra: Partial<CardPick> = {}): CardPick | undefined =>
+  typeof c?.file === 'string' && typeof c?.name === 'string' ? { code: cardCode(c.file), name: c.name.slice(0, 40), desc: String(c.desc ?? '').slice(0, 80), group, file: c.file, project, ...extra } : undefined
+const dedupe = (l: (CardPick | undefined)[]) => { const seen = new Set<string>(); return l.filter((c): c is CardPick => !!c && !seen.has(c.code) && !!seen.add(c.code)) }
+/** 被點的人所在專案的第 1 層卡＋小隊（小隊有專案版的卡就用專案版，分組寫「小隊・組名」） */
+export function memberCards(id: string): { ok: true; project: string; list: CardPick[] } | { ok: false; text: string } {
+  const j = cardsRun(['roster', '--session', id])
+  if (!j) return { ok: false, text: '讀不到角色卡（scripts/cards.py 沒有回應）' }
+  if (!j.project_dir || !j.from_session) return { ok: false, text: '查不到他在哪個專案（電腦上的 sessions 紀錄找不到他）' }
+  const proj = String(j.project_dir)
+  const list = [...(j.project ?? []).map((c: any) => pick(c, '專案', proj))]
+  for (const sq of j.squads ?? []) {
+    if (sq.options?.length) for (const o of sq.options) list.push(...(o.roles ?? []).map((c: any) => pick(c, `${sq.name}${o.lead ? '・' + o.lead : ''}`, proj)))
+    else list.push(...(sq.roles ?? []).map((c: any) => pick(c, String(sq.name), proj)))
+  }
+  return { ok: true, project: basename(proj), list: dedupe(list) }
+}
+/** 有主管卡的專案：每張主管卡一項，分組＝專案名；在線的主管寫在 managers */
+export function projectCards(): { ok: true; list: CardPick[] } | { ok: false; text: string } {
+  const j = cardsRun(['projects', '--people-stdin'], JSON.stringify(crew().people.map(p => ({ id: p.id, role: p.role, agent: p.agent, plate: shownName(p) }))))
+  if (!j) return { ok: false, text: '讀不到專案（scripts/cards.py 沒有回應）' }
+  return { ok: true, list: dedupe((j.projects ?? []).flatMap((p: any) => (p.roles ?? []).map((c: any) => pick(c, String(p.name), String(p.project_dir), p.managers?.length ? { managers: p.managers.map(String) } : {})))) }
+}
+const pubCards = (l: CardPick[]) => l.map(({ code, name, desc, group, managers }) => ({ code, name, desc, group, ...(managers ? { managers } : {}) }))
+const bare = (agent?: string) => (agent ?? '').split(' [')[0]
+/** 這個角色名已經有人在線（session 名稱、名牌、職稱）：回那人的名牌 */
+export function onlineAs(name: string): string | undefined {
+  const k = name.toLowerCase()
+  const p = crew().people.find(c => [bare(c.agent), c.name, c.title, shownName(c)].some(x => (x ?? '').toLowerCase() === k))
+  return p && shownName(p)
+}
+/** POST /summon：kind=member（id＝被點的人）或 project；code＝清單上的代號 */
+export function summonAt(b: any): { ok: boolean; text: string; sid?: string; need?: string; online?: boolean } {
+  const code = String(b?.code ?? '')
+  const member = b?.kind === 'member'
+  if (!member && b?.kind !== 'project') return { ok: false, text: 'kind 要是 member 或 project' }
+  const who = member ? online(String(b?.id ?? '')) : undefined
+  if (member && !who) return { ok: false, text: '這位已經不在線' }
+  if (who?.kind) return { ok: false, text: '只有 Claude 的對話能叫他的團隊成員' }
+  const all = member ? memberCards(who!.id) : projectCards()
+  if (!all.ok) return all
+  const c = all.list.find(x => x.code === code)
+  if (!c) return { ok: false, text: '不在清單上的角色卡' }
+  const on = onlineAs(c.name)
+  if (on) return { ok: false, online: true, text: `${c.name} 已經在線（${on}）：改傳話給他` }
+  const L = cardsRun(['launch', '--card', c.file, '--project', c.project]) ?? {}
+  const ready = typeof L.ready === 'string' ? L.ready : undefined
+  // 小隊成員：卡上有可用的啟動位置才照卡，否則開在叫的人的資料夾（同團隊視窗 summon_role）；開專案：啟動位置→卡上的退路→專案
+  const cwd = member ? (L.has_start && ready) || (profileOf(who!.id) as { cwd?: string }).cwd || c.project : ready || (typeof L.fallback === 'string' ? L.fallback : undefined) || c.project
+  if (!cwd) return { ok: false, text: '找不到要開在哪個資料夾' }
+  return summonRole({ name: c.name, card: c.file, cwd, team: member ? bare(who!.agent) || shownName(who!) : undefined, manager: !member, b })
+}
+
 export function hirePerm(b: any, jwtOk: boolean): { ok: true; b: any } | { ok: false; text: string } {
   if (jwtOk) return { ok: true, b }
   const perm = b?.perm === undefined || b?.perm === null || b?.perm === '' ? 'default' : String(b.perm)
@@ -1883,7 +1956,7 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
     if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: head })
     return new Response(Bun.file(p), { headers: { 'content-type': ({ png: 'image/png', webp: 'image/webp', json: 'application/json' } as Record<string, string>)[asset[2]], ...head } })
   }
-  if (req.method === 'POST' && ['/command', '/upload', '/move', '/tables', '/table-say', '/table-reply', '/table-note', '/table-meet', '/table-meet-end', '/handover', '/table-boss', '/table-team', '/helper', '/helper-keep', '/stuck', '/effort', '/perm', '/codex-handoff', '/approve', '/hire', '/model', '/key', '/fire', '/staffing', '/schedule'].includes(url.pathname)) {
+  if (req.method === 'POST' && ['/command', '/upload', '/move', '/tables', '/table-say', '/table-reply', '/table-note', '/table-meet', '/table-meet-end', '/handover', '/table-boss', '/table-team', '/helper', '/helper-keep', '/stuck', '/effort', '/perm', '/codex-handoff', '/approve', '/hire', '/summon', '/model', '/key', '/fire', '/staffing', '/schedule'].includes(url.pathname)) {
     if (!sameOrigin(req)) return new Response('forbidden', { status: 403 })
     // 審查 photo ④：讀 body 時就限大小（照片的 base64 約 8 MB×4/3），不先整包解析 JSON 再查
     const photoPath = url.pathname === '/upload' || url.pathname === '/table-say'
@@ -1978,12 +2051,20 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
       if (!hp.ok) return json({ ok: false, error: hp.text, text: hp.text }, 403)
       b = hp.b
       if (b.agent !== 'codex') return json(hireAt(b, Date.now(), hire))
+      if (process.platform === 'win32') return json({ ok: false, text: CODEX_WIN_TEXT })
       // Codex 一開就結束（設定檔壞了、沒登入…）要回失敗，附畫面最後幾行和結束碼（0.63.56）
       let cxp: string | undefined
       const r = hireAt(b, Date.now(), (bb, o) => { const x = hireCodex(bb, { ...o, hold: true }); cxp = x.sid; return x })
       if (!r.ok || !cxp) return json(r)
       const st = await codexStarted(`po-${cxp}`)
       return json(st.ok ? r : { ok: false, text: st.text })
+    }
+    // 手機叫角色、開專案（設計 windows-hire 4.）：門檻同招聘（手機預設 auto、本機程式預設手動）
+    if (url.pathname === '/summon') {
+      const hp = hirePerm(b, !!jwt?.ok)
+      if (!hp.ok) return json({ ok: false, error: hp.text, text: hp.text }, 403)
+      const r = summonAt(hp.b)
+      return json(r, r.ok || r.need || r.online ? 200 : 400)
     }
     if (url.pathname === '/schedule' && (b.op !== 'add' || (b.table !== undefined && b.table !== null && b.table !== ''))) return json(editShift(b))
     // 辦公室裡按允許（0.63.51）：只有手機頁（Cloudflare Access 的使用者）能按
@@ -2050,7 +2131,7 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
     if (who.kind) return json({ ok: false, text: 'agy 不能從這裡換智力、打斷或解雇' })
     if (url.pathname === '/model') return json(await withPane(id, () => setModel(id, String(b.model ?? ''))))
     if (url.pathname === '/key') return json(await withPane(id, () => pressKey(id, String(b.key ?? ''))))
-    const fr = await fire(id)
+    const fr = b.keep === true ? await closeSession(id) : await fire(id) // keep＝關掉（可 --resume，設計 windows-hire 6.）
     if (fr.ok) unseat(id)
     return json(fr)
   }
@@ -2065,6 +2146,17 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
   if (url.pathname === '/table-chat.json') {
     const n = url.searchParams.get('demo'), t = Number(url.searchParams.get('table'))
     return json(n !== null ? demoChatOf(Math.max(0, Math.min(400, Math.floor(Number(n)) || 0)), t) : tableChat(t))
+  }
+  if (url.pathname === '/cards.json') {
+    const who = online(url.searchParams.get('id') ?? '')
+    if (!who) return json({ ok: false, text: '這位已經不在線' })
+    if (who.kind) return json({ ok: false, text: '只有 Claude 的對話能叫他的團隊成員' })
+    const r = memberCards(who.id)
+    return json(r.ok ? { ok: true, project: r.project, cards: pubCards(r.list) } : r)
+  }
+  if (url.pathname === '/projects.json') {
+    const r = projectCards()
+    return json(r.ok ? { ok: true, cards: pubCards(r.list) } : r)
   }
   if (url.pathname === '/profile.json') {
     const who = online(url.searchParams.get('id') ?? '')

@@ -155,7 +155,14 @@ export const approveChatLine = (who: string, tool: string, key: 'allow' | 'deny'
  * 每張卡都不給按鈕、寫清楚「手機核准還沒開，請到電腦按」和原因；外掛沒送單但正在等允許的 Claude（mode waiting＋tool）也給一張這樣的卡，
  * 不會只是灰掉、也不會什麼都沒有。手機核准開著：有單的原樣回傳；沒單卻在等允許的給「已交回電腦」卡（0.63.56）
  */
-export function phoneOffCard(p: { kind?: string; mode?: string; tool?: string; src?: string; host?: string; approvalInfo?: ApprovalInfo }, why: string | undefined, now: number): ApprovalInfo | undefined {
+/** 安全設定擋住外掛權限掛點時（名冊 hookBlocked，設計 windows-hire 7.）的說明：狀態卡（page.html）與允許卡同一句 */
+export const HOOK_BLOCKED_TEXT = (b: string) => `這台電腦的安全設定（${b}）擋住了外掛的權限掛點：他可能停在允許畫面，手機收不到，請到電腦上按`
+export function phoneOffCard(p: { kind?: string; mode?: string; tool?: string; src?: string; host?: string; approvalInfo?: ApprovalInfo; hookBlocked?: string }, why: string | undefined, now: number): ApprovalInfo | undefined {
+  // 掛點被擋：手機核准開不開、有沒有 JWT 都一樣，按鈕按了也沒用 → 不給按鈕，寫安全設定（測試 #8）
+  if (p.hookBlocked) {
+    const where = p.src === 'app' || p.host === 'app' ? 'app' : p.src === 'tmux' || p.host === 'tmux' ? 'tmux' : 'other'
+    return { ...(p.approvalInfo ?? { kind: 'claude', tool: p.tool ?? '', desc: '（指令全文手機看不到）', nonce: '', at: now, where }), options: [], why: HOOK_BLOCKED_TEXT(p.hookBlocked) }
+  }
   if (why && p.approvalInfo) return { ...p.approvalInfo, options: [], why: `手機核准還沒開，請到電腦按（${why}）` }
   if (p.approvalInfo || p.kind || p.mode !== 'waiting' || !p.tool) return p.approvalInfo
   const where = p.src === 'app' || p.host === 'app' ? 'app' : p.src === 'tmux' || p.host === 'tmux' ? 'tmux' : 'other'

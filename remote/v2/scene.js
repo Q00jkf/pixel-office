@@ -1030,6 +1030,8 @@
       `<div class="nhead"><b>辦公室通知</b><button id="v2helpx" class="mbtn" aria-label="收起">收起</button></div>` +
       // 0.63.4：畫面上解析得出選項的，列成按鈕，點了由伺服器替他按（只送這些選項）；解析不出來的照舊只提醒
       sk.map(s => { const op = s.options || []
+        if (s.win) return card('warn', `新員工 ${esc(s.name)} 開了但還沒進辦公室`, `可能停在確認畫面（例如信任資料夾、權限）。請到電腦上找 ${esc(s.session)} 的視窗${s.dir ? `（資料夾 ${esc(s.dir)}；如果停在信任詢問，標題可能顯示 claude）` : '（如果停在信任詢問，標題可能顯示 claude）'}`,
+          `<span></span><button class="mbtn" data-stuckok="${esc(s.id)}">知道了</button>`, ' hstuck')
         return card('warn', `新員工 ${esc(s.name)} 卡在電腦上的確認畫面`,
           `畫面：${esc(s.title)}。${op.length ? '在這裡選一項，辦公室替他按；或' : '請'}到電腦上執行 <code>tmux attach -t ${esc(s.session)}</code> 處理`,
           (op.length ? `<div class="nopts">${op.map(o => `<button class="mbtn${/^\d\./.test(o.label) ? '' : ' sub'}" data-stuckid="${esc(s.id)}" data-stuckopt="${esc(o.id)}" data-stucklabel="${esc(o.label)}">${esc(o.label)}</button>`).join('')}</div>` : '<span></span>') +
@@ -1179,7 +1181,8 @@
     // 0.62.20：誰來做（Claude／Codex）；Codex 開在電腦背景的 tmux，會花 ChatGPT 的用量，先只能當員工或行政
     const cxm = s0.codexModels || []
     sheet('招聘新員工',
-      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex">Codex</label></div>` +
+      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex"${s0.noCodexHire ? ' disabled' : ''}>Codex</label></div>` +
+      (s0.noCodexHire ? `<div class="v2hnote">${esc(s0.noCodexHire)}</div>` : '') +
       `<div id="hagentnote" class="v2hnote" style="display:none"></div>` +
       `<label>名字</label><input id="hname" maxlength="20" placeholder="輸入員工名字（也是 Claude app 裡的對話名稱）">` +
       // 選的角色的大站姿（0.63.46）：Claude→Claude、Codex→ChatGPT。放在名字欄下面（測試員：320 寬放上面會把名字欄擠出第一屏）；
@@ -1240,16 +1243,18 @@
       else if (adm) n.innerHTML = '<i class="ico admin"></i><span>' + esc(n.textContent) + '</span>' // ref3-H6：行政的說明前面放夾板圖示
       $('hgo').dataset.sure = ''; $('hgo').textContent = '招聘'
     }
-    $('hseat').addEventListener('change', note); document.querySelectorAll('input[name="hrole"]').forEach(r => r.addEventListener('change', note))
+    $('hseat').addEventListener('change', note); if ($('hdir')) $('hdir').addEventListener('change', note); document.querySelectorAll('input[name="hrole"]').forEach(r => r.addEventListener('change', note))
     document.querySelectorAll('input[name="hagent"]').forEach(r => r.addEventListener('change', agentSync)); note()
+    const sure = () => ($('hgo').dataset.sure || '').split(' ').filter(Boolean)
     $('hgo').addEventListener('click', async ev => {
       const name = $('hname').value.trim()
       if (!name) { toast('先取個名字'); return }
-      const body = { name, agent: agent(), role: role(), seat: $('hseat').value, model: $('hmodel').value, effort: ($('heffort') || {}).value || undefined, perm: ($('hperm') || {}).value, dir: ($('hdir') || {}).value, task: $('htask').value, chrome: agent() === 'claude' && $('hchrome').checked, replace: ev.target.dataset.sure === 'replace' }
+      const body = { name, agent: agent(), role: role(), seat: $('hseat').value, model: $('hmodel').value, effort: ($('heffort') || {}).value || undefined, perm: ($('hperm') || {}).value, dir: ($('hdir') || {}).value, task: $('htask').value, chrome: agent() === 'claude' && $('hchrome').checked, replace: sure().includes('replace'), trustOk: sure().includes('trust') }
       ev.target.disabled = true
       const j = await PO().post('/hire', body)
       ev.target.disabled = false
-      if (j.need === 'replace') { ev.target.dataset.sure = 'replace'; ev.target.textContent = `${j.text} 按這裡確定`; return }
+      // 主管換人（replace）、Windows 上資料夾還沒信任過（trust，設計 windows-hire 2.）：先說明，再按一次才開
+      if (j.need === 'replace' || j.need === 'trust') { ev.target.dataset.sure = [...sure(), j.need].join(' '); ev.target.textContent = `${j.text} ${j.need === 'trust' ? '還是要開就按這裡' : '按這裡確定'}`; return }
       if (j.ok) closeSheet()
       toast(j.text || j.error || '沒有回應')
     })
@@ -1300,7 +1305,109 @@
       if (j.ok) { await PO().load(); openShiftV2() }
     })
   }
-  ready.then(() => { if (window.PO) { window.PO.openHire = openHireV2; window.PO.openShift = openShiftV2 } })
+  // ---------- 叫角色、開專案（設計 windows-hire 4.）：清單由伺服器從角色卡算（/cards.json、/projects.json），點一張就開 ----------
+  // kind=member：p＝被點的人，開出來掛在他底下；kind=project：開那個專案的主管。已在線的回「改傳話」；資料夾沒信任過先說明、再按一次才開
+  async function openCardsV2(kind, p) {
+    const title = kind === 'member' ? `叫 ${p.plate} 的團隊成員` : '開專案'
+    if (PO().demo) { PO().toast('示意資料：這裡會列出角色卡，點了在電腦上開出那個角色'); return }
+    const sid = PO().sheet(title, PO().LOADING)
+    let j; try { j = await (await fetch(kind === 'member' ? `/cards.json?id=${encodeURIComponent(p.id)}` : '/projects.json', { cache: 'no-store' })).json() } catch {}
+    if (PO().sheetId() !== sid) return // 等的時候關掉或換了別的選單
+    if (!j || !j.ok) { PO().sheet(title, `<div class="note">${esc((j && j.text) || '連不到電腦')}</div>`, true); return }
+    const groups = new Map()
+    for (const c of j.cards || []) groups.set(c.group, [...(groups.get(c.group) || []), c])
+    const models = (st && st.models) || {}
+    PO().sheet(title,
+      `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}</div>` +
+      (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
+      // 在線主管是「這個專案」的，不是某張卡的人：放在專案分組標題那一行（測試 #7）
+      ([...groups].map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
+        return `<h3 class="sec line">${esc(g)}${on.length ? `・在線主管：${on.map(esc).join('、')}` : ''}</h3>` + list.map(c =>
+        `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('') }).join('')
+        || '<div class="note">沒有找到角色卡</div>'), true)
+    document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
+      const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
+      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })
+      if (r.need === 'trust') { b.dataset.sure = 'trust'; b.querySelector('b').textContent = `${r.text} 還是要開就再按一次`; return }
+      if (r.ok) PO().closeSheet()
+      toast(r.text || r.error || '沒有回應')
+    }))
+  }
+  // ---------- 關係（設計 windows-hire 5.）：底部「辦公室｜關係」兩個分頁；關係＝用狀態裡的 role、team、agent 畫樹（主管 → 部門主管 → 員工），不加新資料 ----------
+  // 點節點＝開那人的狀態卡（跟點辦公室裡的人一樣），長按空白或按「開專案」＝開專案。畫法參考團隊視窗的關係圖，不共用程式（那邊是滑鼠、這邊是觸控）
+  const bareAgent = a => String(a || '').split(' [')[0]
+  /** people → { roots, kids }：team＝某位在線主管的 agent 就掛在他底下；同名主管有幾位時挑坐同一張協作桌的，沒有才掛第一位；找不到主管或成環的當根 */
+  const tableOfSeat = s => (/^t(\d+)\./.exec(s || '') || [])[1]
+  function relTree(people) {
+    const boss = new Map()
+    for (const p of people) if (p.role === 'manager' && p.agent) boss.set(bareAgent(p.agent), [...(boss.get(bareAgent(p.agent)) || []), p])
+    const up = p => {
+      const l = (p.team && boss.get(bareAgent(p.team)) || []).filter(b => b.id !== p.id), t = tableOfSeat(p.seat)
+      return (t && l.find(b => tableOfSeat(b.seat) === t)) || l[0]
+    }
+    const kids = new Map(), roots = []
+    for (const p of people) {
+      let b = up(p), seen = new Set([p.id])
+      for (let q = b; q; q = up(q)) { if (seen.has(q.id)) { b = undefined; break } seen.add(q.id) } // 成環（互相掛）：當根
+      if (b) kids.set(b.id, [...(kids.get(b.id) || []), p]); else roots.push(p)
+    }
+    const order = (a, b) => (b.role === 'manager') - (a.role === 'manager') || String(a.plate).localeCompare(String(b.plate))
+    for (const l of kids.values()) l.sort(order)
+    return { roots: roots.sort(order), kids }
+  }
+  const REL_DOT = { typing: 'work', thinking: 'work', reading: 'work', done: 'done', blocked: 'err', waiting: 'wait' }
+  const relNode = (p, kids, depth) => {
+    const k = kids.get(p.id) || []
+    return `<li><button class="rnode${p.role === 'manager' ? ' boss' : ''}" data-id="${esc(p.id)}"><span class="rav" style="background-image:url('${src(faceOf(p) + '_front')}')"></span>` +
+      `<span class="rtxt"><b>${p.role === 'manager' ? '<i class="rstar">★</i>' : ''}${esc(p.plate)}${p.kind === 'codex' ? ' <i class="rtag">Codex</i>' : ''}</b>` +
+      `<small><em class="rdot ${REL_DOT[p.mode] || 'idle'}"></em>${esc(ZH[p.mode] || p.mode || '')}${p.title && p.title !== p.plate ? '・' + esc(p.title) : ''}${k.length ? `・${k.length} 人` : ''}</small></span></button>` +
+      (k.length && depth < 8 ? `<ul>${k.map(c => relNode(c, kids, depth + 1)).join('')}</ul>` : '') + '</li>'
+  }
+  const rel = document.createElement('div'); rel.id = 'relroom'; rel.setAttribute('role', 'region'); rel.setAttribute('aria-label', '關係')
+  rel.innerHTML = '<div class="rwrap"><div class="rhead"><b>關係</b><small>誰在誰底下；長按空白開專案</small><button class="mbtn" id="relproj">開專案</button></div><div id="reltree"></div></div>'
+  const tabs = document.createElement('nav'); tabs.id = 'v2tabs'; tabs.setAttribute('aria-label', '畫面')
+  tabs.innerHTML = '<button data-tab="office" class="on">辦公室</button><button data-tab="rel">關係</button>'
+  document.body.append(rel, tabs)
+  let relOn = false, relKey = ''
+  function relRender() {
+    if (!relOn || !st) return
+    const people = st.people || [], key = people.map(p => [p.id, p.plate, p.role, p.team, p.agent, p.mode, p.title].join('\u0001')).join('\u0002')
+    if (key === relKey) return
+    relKey = key
+    const { roots, kids } = relTree(people)
+    const top = roots.filter(p => p.role === 'manager' || kids.has(p.id)), loose = roots.filter(p => !top.includes(p))
+    document.getElementById('reltree').innerHTML = !people.length ? '<div class="note">辦公室現在沒有人</div>'
+      : (top.length ? `<ul class="rtree">${top.map(p => relNode(p, kids, 0)).join('')}</ul>` : '') +
+        (loose.length ? `<h3 class="rsec">沒掛主管</h3><ul class="rtree flat">${loose.map(p => relNode(p, kids, 0)).join('')}</ul>` : '')
+  }
+  function setTab(t) {
+    relOn = t === 'rel'; relKey = ''
+    const hd = document.querySelector('header'); if (hd) rel.style.top = Math.round(hd.getBoundingClientRect().bottom) + 'px' // 標題列會折行，高度不固定
+    rel.classList.toggle('on', relOn)
+    tabs.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-pressed', String(b.dataset.tab === t)) })
+    relRender()
+  }
+  tabs.addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab) })
+  ready.then(() => PO().onState && PO().onState(() => relRender()))
+  let relPress = null
+  rel.addEventListener('click', e => {
+    if (relPress && relPress.fired) { relPress = null; return }
+    if (e.target.closest('#relproj')) { openCardsV2('project'); return }
+    const n = e.target.closest('.rnode'); if (!n) return
+    const p = (st && st.people || []).find(x => x.id === n.dataset.id)
+    if (!p) { toast('這位已經不在線'); return }
+    if (PO().show) PO().show(p)
+  })
+  // 長按空白（不是節點、不是按鈕）約 0.6 秒＝開專案
+  rel.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return
+    const x = e.clientX, y = e.clientY
+    relPress = { x, y, fired: false, timer: setTimeout(() => { if (relPress) { relPress.fired = true; try { navigator.vibrate && navigator.vibrate(20) } catch {} openCardsV2('project') } }, 600) }
+  })
+  rel.addEventListener('pointermove', e => { if (relPress && !relPress.fired && Math.hypot(e.clientX - relPress.x, e.clientY - relPress.y) > 10) { clearTimeout(relPress.timer); relPress = null } })
+  ;['pointerup', 'pointercancel'].forEach(t => rel.addEventListener(t, () => { if (relPress && !relPress.fired) { clearTimeout(relPress.timer); relPress = null } }))
+  window.PO_REL = { relTree } // 給測試
+  ready.then(() => { if (window.PO) { window.PO.openHire = openHireV2; window.PO.openShift = openShiftV2; window.PO.openSummon = p => openCardsV2('member', p); window.PO.openProjects = () => openCardsV2('project') } })
   // 狀態一拿到就接（通知列不用等圖）；場景等第一批圖到了才畫（render 自己會擋），到了馬上畫一次
   manifest.then(() => { PO().onState(j => { st = j; trackMail(j); render(); trackTrips(j); renderHelp(j) }) })
   ready.then(() => render()).finally(() => dispatchEvent(new Event('po:scene-ready'))) // 第一次畫好（或載入失敗）：收掉載入畫面
@@ -1732,6 +1839,7 @@
           <button class="hr-ent" data-l2="staff"><span class="hr-ei" aria-hidden="true">👥</span><span class="hr-txt"><b>員工</b><small id="hrn-staff"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="tables"><img class="hr-ic" src="${src('hr_ic_tables')}" alt=""><span class="hr-txt"><b>協作桌</b><small id="hrn-tables"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-l2="away" id="hrent-away"><span class="hr-ei" aria-hidden="true">📱</span><span class="hr-txt"><b>在 App 裡的 Codex</b><small id="hrn-away"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
+          <button class="hr-ent" data-q="project"><span class="hr-ei" aria-hidden="true"><i class="ico notes"></i></span><span class="hr-txt"><b>開專案</b><small>從專案的主管卡開人</small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="shift"><img class="hr-ic" src="${src('hr_ic_shift')}" alt=""><span class="hr-txt"><b>排班</b><small id="hrn-shift"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="pay"><img class="hr-ic" src="${src('hr_ic_pay')}" alt=""><span class="hr-txt"><b>薪水單</b><small id="hrn-pay"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
         </nav>
@@ -1847,7 +1955,7 @@
   hr.querySelector('.hr-search input').addEventListener('input', e => { hrQuery = e.target.value; hrRender() })
   hr.addEventListener('click', e => {
     const q = e.target.closest('[data-q]')
-    if (q) { if (q.dataset.q === 'tables') openTables(); else if (q.dataset.q === 'shift') PO().openShift(); else PO().openPay(); return }
+    if (q) { if (q.dataset.q === 'tables') openTables(); else if (q.dataset.q === 'project') openCardsV2('project'); else if (q.dataset.q === 'shift') PO().openShift(); else PO().openPay(); return }
     const g = e.target.closest('[data-l2]'); if (g) { openL2(g.dataset.l2); return }
     const f = e.target.closest('[data-fold]')
     if (f) { const k = f.dataset.fold; if (fold.has(k)) fold.delete(k); else fold.add(k); saveFold(); hrRender(); return }

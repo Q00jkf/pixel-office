@@ -10,7 +10,7 @@ import { timingSafeEqual } from 'node:crypto'
 export type GateClass = 'open' | 'jwt' | 'either'
 export const JWT_ONLY = new Set(['/approve', '/stuck', '/perm'])
 /** 高風險：每次都記一筆（不論身分）；0.63.60 起寫入本來就一律記，這張表另外標 risk:'high' */
-export const HIGH_RISK = new Set(['/perm', '/stuck', '/hire', '/helper'])
+export const HIGH_RISK = new Set(['/perm', '/stuck', '/hire', '/summon', '/helper'])
 /** 高風險的動作（0.63.60，顧問裁示）：同一個端點只有某幾個 op 算，例如 /tables 的刪桌、改桌 */
 export const HIGH_RISK_OPS: Record<string, Set<string>> = { '/tables': new Set(['delete', 'edit']) }
 export function highRisk(method: string, path: string, op?: unknown): boolean {

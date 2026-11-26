@@ -22,6 +22,8 @@ import subprocess
 import sys
 import uuid
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python -I（伺服器這樣叫）不會把本檔所在資料夾放進 sys.path，roles／takeover 要 import
+
 # 一律拿掉：
 # CLAUDE_CODE_CHILD_SESSION：從 Claude session 開出來會繼承，CLI 就不寫 ~/.claude/sessions/<pid>.json →
 #   ListAgents 列不出、SendMessage 送不到、transcript 不存檔（2026-10-26 實測）
@@ -142,15 +144,20 @@ def preset_file(session_id):
     return os.path.join(os.path.expanduser('~'), '.claude', 'pixel-office', 'presets', f'{session_id}.json')
 
 
+SINGLE_QUOTES = "'‘’‚‛"  # PowerShell 把這四個也當單引號（iPhone 智慧標點會把 ' 換成 ’）
+
+
 def q(s):
-    """PowerShell 單引號字串"""
-    return "'" + s.replace("'", "''") + "'"
+    """PowerShell 單引號字串：每種單引號都重複一次才是字面值"""
+    return "'" + ''.join(c + c if c in SINGLE_QUOTES else c for c in s) + "'"
 
 
-def ps_script(role, folder, prompt, session_id, plugin_dir=None):
+def ps_script(role, folder, prompt, session_id, plugin_dir=None, extra=()):
+    """extra：額外的 claude 參數（--model、--permission-mode、--add-dir…），每個都照字面加引號"""
     plugin = f' --plugin-dir {q(plugin_dir)}' if plugin_dir else ''
+    more = ''.join(f' {q(x)}' for x in extra)
     return (f'Set-Location -LiteralPath {q(folder)}; $host.UI.RawUI.WindowTitle = {q(role)}; '
-            f'claude --name {q(role)} --session-id {q(session_id)}{plugin} {q(prompt)}')
+            f'claude --name {q(role)} --session-id {q(session_id)}{plugin}{more}' + (f' {q(prompt)}' if prompt else ''))
 
 
 def card_dir(role):
@@ -195,6 +202,17 @@ def encoded(script):
     return base64.b64encode(script.encode('utf-16-le')).decode('ascii')
 
 
+PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan', 'default')  # claude --help 2026-11-26；default 是舊名
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+
+
+def session_uuid(v):
+    try:
+        return str(uuid.UUID(v))
+    except ValueError:
+        raise argparse.ArgumentTypeError('not a uuid')
+
+
 def main(argv=None):
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
@@ -202,54 +220,103 @@ def main(argv=None):
     ap.add_argument('--role', required=True, help='role name: --name, window title, default title')
     ap.add_argument('--dir', help="working folder (must exist; default: the role card's start folder)")
     ap.add_argument('--kickoff', help='kickoff file the role reads first (must exist; default: say "你是 <role>，接手")')
+    ap.add_argument('--task-file', help='UTF-8 file whose text is the opening message (phone hire; instead of --kickoff)')
     ap.add_argument('--card', help='role card path, added to the opening line (default: the single card named --role)')
+    ap.add_argument('--name-only', action='store_true', help='a new hire without a role card: no card lookup, no "already online" check; no opening line unless --task-file')
     ap.add_argument('--team', help="manager's ListAgents name (office team)")
     ap.add_argument('--title', help='office title, max 16 chars (default: role)')
     ap.add_argument('--plate', help='nameplate, 1-12 letters/digits (default: from --name if ASCII)')
+    ap.add_argument('--role-type', choices=('staff', 'manager'), default='staff', help='office role in the preset (default staff)')
+    ap.add_argument('--session-id', type=session_uuid, help='session id to use (default: a new uuid)')
+    ap.add_argument('--model', help='claude --model')
+    ap.add_argument('--permission-mode', choices=PERMISSION_MODES, help='claude --permission-mode')
+    ap.add_argument('--effort', choices=EFFORTS, help='claude --effort')
+    ap.add_argument('--add-dir', action='append', default=[], help='claude --add-dir (repeatable; created if missing)')
+    ap.add_argument('--chrome', action='store_true', help='claude --chrome')
+    ap.add_argument('--remote-control', action='store_true', help='claude --remote-control <role>')
     ap.add_argument('--plugin-dir', help='extra --plugin-dir for claude (must exist)')
     ap.add_argument('--force', action='store_true', help='open even if a session with this name or title is already online')
+    ap.add_argument('--json', action='store_true', help='print one JSON line {"sid","pid"} (or {"error","code"}) instead of text')
     ap.add_argument('--dry-run', action='store_true', help='print the command and preset only; open nothing, write nothing')
     a = ap.parse_args(argv)
 
-    card, notes = card_notes(a.role, a.dir)
+    def fail(code, msg):
+        if a.json:
+            print(json.dumps({'error': msg, 'code': code}, ensure_ascii=False))
+        else:
+            print(msg, file=sys.stderr)
+        return code
+
+    card, notes = (None, []) if a.name_only else card_notes(a.role, a.dir)
     for n in notes:
         print('Note: ' + n, file=sys.stderr)
     a.card = a.card or (card and card['card'])
-    taken = online_as(a.role, *((card['role'], card['name']) if card else ()))
+    taken = [] if a.name_only else online_as(a.role, *((card['role'], card['name']) if card else ()))
     if taken and not a.force:  # --dry-run 照樣印指令，最後才 exit 3
-        print(f'STOP: {", ".join(taken)} already online as {a.role} -> message it instead (SendMessage), or ask the user; --force opens a second one', file=sys.stderr)
+        msg = f'STOP: {", ".join(taken)} already online as {a.role} -> message it instead (SendMessage), or ask the user; --force opens a second one'
         if not a.dry_run:
-            return 3
-    a.dir = a.dir or card_dir(a.role)
+            return fail(3, msg)
+        print(msg, file=sys.stderr)
+    a.dir = a.dir or (None if a.name_only else card_dir(a.role))
     if not a.dir:
-        print(f'No --dir and no single role card with a start folder for {a.role} (python roles.py {a.role})', file=sys.stderr)
-        return 1
-    missing = [p for p in (a.dir, a.kickoff, a.plugin_dir) if p and not os.path.exists(p)]
+        return fail(1, f'No --dir and no single role card with a start folder for {a.role} (python roles.py {a.role})')
+    missing = [p for p in (a.dir, a.kickoff, a.task_file, a.plugin_dir) if p and not os.path.exists(p)]
     if missing:
-        print('Not found: ' + ', '.join(missing), file=sys.stderr)
-        return 1
+        return fail(1, 'Not found: ' + ', '.join(missing))
+    task = ''
+    if a.task_file:
+        with open(a.task_file, encoding='utf-8') as f:
+            task = f.read().strip()
     title = (a.title or (card and (card['title'] or card['role'])) or a.role)[:16]  # 用 office_name 叫的也登記成卡名，takeover 才認得持有者
-    sid = str(uuid.uuid4())
-    preset = {'title': title, 'role': 'staff', **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
-    prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做' + (f'（你的角色卡：{a.card}）' if a.card else '') + '。' if a.kickoff else f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
-    if a.team:  # 卡上寫的主管是正式流程的那位；實際開你的人以這句與名單上的 team 為準（jacky 2026-11-08）
+    sid = a.session_id or str(uuid.uuid4())
+    preset = {'title': title, 'role': a.role_type, **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
+    if task:
+        prompt = task
+    elif a.kickoff:
+        prompt = f'請讀 {os.path.abspath(a.kickoff)} 並照做' + (f'（你的角色卡：{a.card}）' if a.card else '') + '。'
+    elif a.name_only:
+        prompt = ''  # 沒交代工作的新人不送開場句（同 tmux 招聘）
+    else:
+        prompt = f'你是 {a.role}，接手' + (f'。角色卡：{a.card}' if a.card else '')
+    if a.team and prompt:  # 卡上寫的主管是正式流程的那位；實際開你的人以這句與名單上的 team 為準（jacky 2026-11-08）
         prompt = prompt.rstrip('。') + f'。開你的是 {a.team}，它是你的主管，有事向它回報'
+    if prompt.startswith('-'):  # 不能被 claude 當成參數
+        prompt = '任務：' + prompt
+    add_dirs = []
+    for d in a.add_dir:
+        d = os.path.abspath(d)
+        if d in add_dirs or d == os.path.abspath(a.dir):
+            continue
+        if not a.dry_run:
+            try:
+                os.makedirs(d, exist_ok=True)
+            except OSError:
+                continue
+        add_dirs.append(d)
+    extra = [*(['--model', a.model] if a.model else []), *(['--permission-mode', a.permission_mode] if a.permission_mode else []),
+             *(['--effort', a.effort] if a.effort else []), *[x for d in add_dirs for x in ('--add-dir', d)],
+             *(['--remote-control', a.role] if a.remote_control else []), *(['--chrome'] if a.chrome else [])]
     script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
-                       os.path.abspath(a.plugin_dir) if a.plugin_dir else None)
+                       os.path.abspath(a.plugin_dir) if a.plugin_dir else None, extra)
     if a.dry_run:
-        print(f'env drop: {", ".join(sorted(k for k in os.environ if k not in child_env())) or "(none)"}')
-        print(f'preset {preset_file(sid)}: {json.dumps(preset, ensure_ascii=False)}')
-        print(f'powershell -NoExit -EncodedCommand <{script}>')
+        if a.json:
+            print(json.dumps({'sid': sid, 'pid': None, 'dry_run': True, 'preset': preset, 'script': script}, ensure_ascii=False))
+        else:
+            print(f'env drop: {", ".join(sorted(k for k in os.environ if k not in child_env())) or "(none)"}')
+            print(f'preset {preset_file(sid)}: {json.dumps(preset, ensure_ascii=False)}')
+            print(f'powershell -NoExit -EncodedCommand <{script}>')
         return 3 if taken and not a.force else 0
     if sys.platform != 'win32':
-        print('Opening a window is Windows-only; use --dry-run to see the command.', file=sys.stderr)
-        return 2
+        return fail(2, 'Opening a window is Windows-only; use --dry-run to see the command.')
     os.makedirs(os.path.dirname(preset_file(sid)), exist_ok=True)
     with open(preset_file(sid), 'w', encoding='utf-8') as f:
         json.dump(preset, f, ensure_ascii=False)
-    subprocess.Popen(['powershell', '-NoExit', '-EncodedCommand', encoded(script)], env=child_env(),
-                     creationflags=subprocess.CREATE_NEW_CONSOLE)
-    print(f'Opened: {a.role} ({a.dir}), session {sid}')
+    proc = subprocess.Popen(['powershell', '-NoExit', '-EncodedCommand', encoded(script)], env=child_env(),
+                            creationflags=subprocess.CREATE_NEW_CONSOLE)
+    if a.json:
+        print(json.dumps({'sid': sid, 'pid': proc.pid}))
+    else:
+        print(f'Opened: {a.role} ({a.dir}), session {sid}')
     return 0
 
 

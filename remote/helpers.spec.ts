@@ -3,7 +3,8 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HELPER_MAX, IDLE_CLOSE_MS, IDLE_WARN_MS, answerAsk, helperView, helpers, initHelpers, keepHelper, pendingAsks, tickHelpers } from './helpers'
+import { HELPER_MAX, IDLE_CLOSE_MS, IDLE_WARN_MS, _setHelpersWin, answerAsk, helperView, helpers, initHelpers, keepHelper, pendingAsks, tickHelpers } from './helpers'
+_setHelpersWin(false) // 下面都是 Mac／Linux 的行為；Windows 分支在檔尾另外測
 
 function setup(people: any[]) {
   const base = mkdtempSync(join(tmpdir(), 'po-helpers-'))
@@ -92,6 +93,7 @@ test('a busy helper is never warned; one that never showed up is forgotten after
 // ---------- 0.63.37／0.63.38 Codex 生圖幫手（第 5 件；審查 codex-review-2026-11-25-art.md） ----------
 import { existsSync, readFileSync, realpathSync, symlinkSync } from 'node:fs'
 import { ART_BATCH_MAX, artBrief, artInbox, artPrefix, helpersOf, resolveHelpers, type Launch } from './helpers'
+import { CODEX_WIN_TEXT } from './hr'
 
 const L1: Launch = { tmux: '$7', pane: '%21', marker: 'm-1' }
 function setupArt(people: any[], o: { owner?: Record<string, 'yes' | 'no' | 'unknown'>; state?: 'alive' | 'gone' | 'unknown'; tables?: any[] } = {}) {
@@ -427,4 +429,19 @@ test('an idle Codex helper whose close fails: the countdown card is hidden, the 
   ok = true
   expect(await tickHelpers(2000 + IDLE_CLOSE_MS + 2 * 60e3)).toEqual(['主管生圖'])
   expect(tries).toEqual(['codex-z', 'codex-z'])
+})
+
+test('Windows: a Codex art helper is refused before anything is created; the manager is told why', () => {
+  const s = setupArt([BOSS()])
+  s.ask(U(1), 'codex-art', 1000)
+  const old = _setHelpersWin(true)
+  try {
+    const r = answerAsk(U(1), true, 2000)
+    expect(r).toEqual({ ok: false, text: CODEX_WIN_TEXT })
+    expect(s.cx).toHaveLength(0)
+    expect(existsSync(join(s.base, 'art-inbox'))).toBe(false)
+    expect(existsSync(join(s.base, 'notes-t1'))).toBe(false)
+    expect(helpers()).toHaveLength(0)
+    expect(s.sent.at(-1)).toEqual(['boss', expect.stringContaining(CODEX_WIN_TEXT)])
+  } finally { _setHelpersWin(old) }
 })

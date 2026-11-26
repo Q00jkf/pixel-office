@@ -11,6 +11,10 @@
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, sep } from 'node:path'
 import { homedir } from 'node:os'
+import { CODEX_WIN_TEXT } from './hr'
+/** Windows 分支（設計 windows-hire 3.）：測試可以換，在 Windows 上也測得到 Mac／Linux 的行為 */
+let WIN = process.platform === 'win32'
+export function _setHelpersWin(v: boolean): boolean { const old = WIN; WIN = v; return old }
 
 export const HELPER_MAX = 2
 export const IDLE_WARN_MS = 25 * 60e3
@@ -214,6 +218,8 @@ export function answerAsk(id: string, yes: boolean, now = Date.now()): Res {
   }
   const art = a.kind === 'codex-art'
   if (art && !D.hireCodex) return { ok: false, text: '這間辦公室不能開 Codex 幫手' }
+  // Windows 沒有 tmux，Codex 生圖幫手開不了：什麼都還沒建就回（設計 windows-hire 3.）
+  if (art && WIN) { D.sendCommand(boss.id, `${NOTE}使用者同意加 Codex 生圖幫手，但開不起來：${CODEX_WIN_TEXT}`); return { ok: false, text: CODEX_WIN_TEXT } }
   const base0 = a.name || `${boss.plate}${art ? '生圖' : '幫手'}`
   let name = base0
   for (let n = 2; people.some(p => p.plate === name || p.agent === name) || list.some(h => h.name === name); n++) name = `${[...base0].slice(0, 18).join('')}${n}`
