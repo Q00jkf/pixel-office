@@ -91,6 +91,23 @@ test('python 要帶 -X utf8 -I', () => {
   expect(a[4]).toMatch(/scripts[\\/]open_role\.py$/)
 })
 
+// 名字、工作裡有智慧標點的單引號（’‘‚‛）：PowerShell 也當單引號，q() 沒重複就斷字串（office設計 2026-11-26）。
+// 用 open_role 真的產出的開窗腳本，把 claude 換成印出每個參數的函式，比對拿到的值
+test.skipIf(process.platform !== 'win32')('開窗腳本：名字、工作裡的各種單引號照原字傳給 claude', () => {
+  const name = `小’明‘x'y‚z‛`, task = `don’t ‘stop’ it's ‚a‛ ; Write-Output PWNED; '`
+  const py = `import sys, json\nsys.path.insert(0, ${JSON.stringify(join(import.meta.dir, '..', 'scripts'))})\nfrom open_role import ps_script, encoded\n` +
+    `n, t, d = json.loads(sys.stdin.read())\n` +
+    `s = "function claude { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); foreach ($a in $args) { Write-Output ('<' + $a + '>') } }; " + ps_script(n, d, t, 'sid-1', None, ['--model', n])\n` +
+    `print(encoded(s))`
+  const enc = Bun.spawnSync(['python', '-X', 'utf8', '-I', '-c', py], { stdin: Buffer.from(JSON.stringify([name, task, work])), stdout: 'pipe', stderr: 'pipe' })
+  expect(enc.stderr.toString()).toBe('')
+  const r = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand', enc.stdout.toString().trim()], { stdout: 'pipe', stderr: 'pipe' })
+  expect(r.stderr.toString()).not.toContain('S="Error"') // stderr 另有「Preparing modules」的進度 CLIXML，不算錯
+  const got = [...r.stdout.toString().matchAll(/<([^>]*)>/g)].map(m => m[1])
+  expect(got).toEqual(['--name', name, '--session-id', 'sid-1', '--model', name, task])
+  expect(r.stdout.toString()).not.toMatch(/^PWNED/m)
+})
+
 test('folderTrusted：往上找到信任過的就算；Windows 路徑不分大小寫、斜線方向；設定檔讀不到回 undefined', () => {
   const c = join(base, 'c2'); mkdirSync(c, { recursive: true })
   writeFileSync(join(c, '.claude.json'), JSON.stringify({ projects: { 'C:/Users/me': { hasTrustDialogAccepted: true }, 'C:/Users/me/x': { hasTrustDialogAccepted: false }, '/home/me/p': { hasTrustDialogAccepted: true } } }))

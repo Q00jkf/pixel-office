@@ -144,9 +144,12 @@ def preset_file(session_id):
     return os.path.join(os.path.expanduser('~'), '.claude', 'pixel-office', 'presets', f'{session_id}.json')
 
 
+SINGLE_QUOTES = "'‘’‚‛"  # PowerShell 把這四個也當單引號（iPhone 智慧標點會把 ' 換成 ’）
+
+
 def q(s):
-    """PowerShell 單引號字串"""
-    return "'" + s.replace("'", "''") + "'"
+    """PowerShell 單引號字串：每種單引號都重複一次才是字面值"""
+    return "'" + ''.join(c + c if c in SINGLE_QUOTES else c for c in s) + "'"
 
 
 def ps_script(role, folder, prompt, session_id, plugin_dir=None, extra=()):
