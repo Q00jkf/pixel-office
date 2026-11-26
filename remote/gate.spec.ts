@@ -41,7 +41,16 @@ test('PO_DEV=1 only on 8781/8782; elsewhere ignored (and reported)', () => {
   expect(devMode('true', 8782)).toEqual({ dev: false, ignored: false })
 })
 
-test('local key file: created 0600 with 64 hex; reused; refused when too open, a symlink, or malformed', () => {
+test('local key file on Windows: mode is not checked (lstat always says 666), format still is', () => {
+  const f = join(dir, 'kw'); writeFileSync(f, 'd'.repeat(64) + '\n')
+  try { chmodSync(f, 0o666) } catch {}
+  expect((loadLocalKey(f, undefined, 'win32') as any).key).toBe('d'.repeat(64))
+  const m = join(dir, 'kw2'); writeFileSync(m, 'short\n')
+  expect((loadLocalKey(m, undefined, 'win32') as any).error).toContain('格式不對')
+})
+
+// POSIX 權限只在 Mac／Linux 驗得到（Windows 的 lstat 沒有 600 可言）
+test.skipIf(process.platform === 'win32')('local key file: created 0600 with 64 hex; reused; refused when too open, a symlink, or malformed', () => {
   const f = join(dir, 'k1')
   const a = loadLocalKey(f) as any
   expect(a.key).toMatch(/^[0-9a-f]{64}$/)
@@ -89,7 +98,7 @@ test('through handle(): no auth → 401 on data and writes, page still served; r
   // 用金鑰的、高風險的都記一筆（0600），不記內容
   const lines = readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l))
   expect(lines.map(l => `${l.method} ${l.path} ${l.via}`)).toEqual(['GET /phone-live key', 'POST /command key'])
-  expect(statSync(log).mode & 0o777).toBe(0o600)
+  if (process.platform !== 'win32') expect(statSync(log).mode & 0o777).toBe(0o600) // Windows 沒有 600 可言
   expect(JSON.stringify(lines)).not.toContain('hi')
   _setGatePatch({ key, dev: false, tailscale: true, log })
   expect((await get('/phone-live')).status).toBe(200)

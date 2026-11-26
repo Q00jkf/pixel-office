@@ -93,7 +93,7 @@ const KEY_RE = /^[0-9a-f]{64}$/
  * 本機金鑰：檔案不在就獨占建立（0600，32 bytes 亂數的 hex）；在的話要是自己的一般檔（不是連結）、群組與其他人沒有任何權限、內容格式對。
  * 驗不過回 error（伺服器照樣啟動，只是沒有金鑰：本機程式都過不了，手機頁照常）
  */
-export function loadLocalKey(file: string, uid = process.getuid?.()): { key: string } | { error: string } {
+export function loadLocalKey(file: string, uid = process.getuid?.(), platform: string = process.platform): { key: string } | { error: string } {
   try {
     const fd = openSync(file, 'wx', 0o600)
     try { writeSync(fd, Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex') + '\n') } finally { closeSync(fd) }
@@ -102,7 +102,9 @@ export function loadLocalKey(file: string, uid = process.getuid?.()): { key: str
   try { st = lstatSync(file) } catch (e: any) { return { error: `讀不到本機金鑰檔：${e?.code ?? e}` } }
   if (st.isSymbolicLink() || !st.isFile()) return { error: '本機金鑰檔不是一般檔（連結或資料夾），不用' }
   if (uid !== undefined && st.uid !== uid) return { error: '本機金鑰檔不是自己的，不用' }
-  if (st.mode & 0o077) return { error: `本機金鑰檔權限太寬（${(st.mode & 0o777).toString(8)}），要 600；不用` }
+  // Windows 沒有 POSIX 權限：bun／node 的 lstat 一律回 666（唯讀檔 444），這項永遠不過，金鑰會被丟掉、本機呼叫全 401（0.63.61）。
+  // 檔在使用者自己的設定夾，NTFS 預設只給本人與管理員；Mac／Linux 照舊要 600
+  if (platform !== 'win32' && st.mode & 0o077) return { error: `本機金鑰檔權限太寬（${(st.mode & 0o777).toString(8)}），要 600；不用` }
   const key = readFileSync(file, 'utf8').trim()
   if (!KEY_RE.test(key)) return { error: '本機金鑰檔內容格式不對，不用' }
   return { key }
