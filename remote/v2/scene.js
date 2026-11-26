@@ -1030,7 +1030,7 @@
       `<div class="nhead"><b>辦公室通知</b><button id="v2helpx" class="mbtn" aria-label="收起">收起</button></div>` +
       // 0.63.4：畫面上解析得出選項的，列成按鈕，點了由伺服器替他按（只送這些選項）；解析不出來的照舊只提醒
       sk.map(s => { const op = s.options || []
-        if (s.win) return card('warn', `新員工 ${esc(s.name)} 開了但還沒進辦公室`, `可能停在確認畫面（例如信任資料夾、權限），請到電腦上看標題是「${esc(s.session)}」的視窗`,
+        if (s.win) return card('warn', `新員工 ${esc(s.name)} 開了但還沒進辦公室`, `可能停在確認畫面（例如信任資料夾、權限）。請到電腦上找 ${esc(s.session)} 的視窗${s.dir ? `（資料夾 ${esc(s.dir)}；如果停在信任詢問，標題可能顯示 claude）` : '（如果停在信任詢問，標題可能顯示 claude）'}`,
           `<span></span><button class="mbtn" data-stuckok="${esc(s.id)}">知道了</button>`, ' hstuck')
         return card('warn', `新員工 ${esc(s.name)} 卡在電腦上的確認畫面`,
           `畫面：${esc(s.title)}。${op.length ? '在這裡選一項，辦公室替他按；或' : '請'}到電腦上執行 <code>tmux attach -t ${esc(s.session)}</code> 處理`,

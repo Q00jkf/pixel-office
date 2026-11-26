@@ -177,3 +177,32 @@ test.skipIf(process.platform !== 'win32')('叫角色（Windows）：帶 --card�
   try { expect(summonRole({ name: 'P', card: 'c', cwd: work, b: {} })).toMatchObject({ ok: false, online: true, text: 'P 已經在線：改傳話給他' }) } finally { reply = keep }
   expect(summonRole({ name: 'P', card: 'c', cwd: join(base, 'nope'), b: {} }).text).toContain('資料夾不存在')
 })
+
+test('folderTrusted：在 git repo 裡只找到 git 根目錄（上層信任過不算）；不在 repo 裡照舊往上找', () => {
+  const g = join(base, 'g'), repo = join(g, 'repo'), sub = join(repo, 'sub'), plain = join(g, 'plain', 'x'), c = join(base, 'c3')
+  for (const d of [join(repo, '.git'), sub, plain, c]) mkdirSync(d, { recursive: true })
+  writeFileSync(join(c, '.claude.json'), JSON.stringify({ projects: { [fwd(g)]: { hasTrustDialogAccepted: true } } }))
+  expect(folderTrusted(sub, c)).toBe(false)
+  expect(folderTrusted(repo, c)).toBe(false)
+  expect(folderTrusted(plain, c)).toBe(true)
+  writeFileSync(join(c, '.claude.json'), JSON.stringify({ projects: { [fwd(repo)]: { hasTrustDialogAccepted: true } } }))
+  expect(folderTrusted(sub, c)).toBe(true)
+  rmSync(join(repo, '.git'), { recursive: true }); writeFileSync(join(repo, '.git'), 'gitdir: x') // worktree 的 .git 是檔案：也算 git 根目錄
+  writeFileSync(join(c, '.claude.json'), JSON.stringify({ projects: { [fwd(g)]: { hasTrustDialogAccepted: true } } }))
+  expect(folderTrusted(sub, c)).toBe(false)
+})
+
+test('open_role 逾時（結束碼 null）：說開窗程式沒回應，不寫結束碼', () => {
+  const keep = reply
+  reply = () => ({ code: null as any, out: '', err: '' })
+  try { expect(hireWindows({ name: 'T', dir: work }).text).toBe('開不起來：開窗程式 20 秒沒有回應，電腦上可能沒開出視窗') } finally { reply = keep }
+})
+
+test('沒信任過的提示附實際路徑；90 秒提醒卡帶資料夾', async () => {
+  expect(hireWindows({ name: 'B', dir: fresh }).text).toContain(fresh)
+  watchWinHire('s9', '小李', undefined, Date.now() - 91e3, () => true, 10, join(base, 'somewhere'))
+  await Bun.sleep(40)
+  expect(stuckView()[0]).toMatchObject({ name: '小李', dir: join(base, 'somewhere') })
+  people = [{ id: 's9', name: '小李' }]
+  await Bun.sleep(40)
+})

@@ -296,6 +296,7 @@ export function _setOpenRoleRun(fn: OpenRoleRun): OpenRoleRun { const old = open
 /** 呼叫 open_role.py --json：回 { sid, pid } 或錯誤字 */
 export function runOpenRole(args: string[], cfgDir?: string): { sid: string; pid?: number } | { error: string; code?: number } {
   const r = openRoleRun([...args, '--json'], { ...process.env, ...(cfgDir ? { CLAUDE_CONFIG_DIR: cfgDir } : {}) })
+  if (r.code === null) return { error: '開窗程式 20 秒沒有回應，電腦上可能沒開出視窗' } // 逾時被砍（spawnSync 的結束碼是 null）
   const last = r.out.trim().split('\n').pop() ?? ''
   try {
     const j = JSON.parse(last)
@@ -307,8 +308,8 @@ export function runOpenRole(args: string[], cfgDir?: string): { sid: string; pid
 
 /**
  * 這個資料夾在 Claude Code 信任過沒（設定檔 .claude.json 的 projects.<路徑>.hasTrustDialogAccepted）。
- * 照 Claude Code 自己的「不探檔案系統」判斷：從這層一路往上，任何一層信任過就算（2026-11-26 讀 claude 2.x 的 Rh()；
- * 它正式判斷時會停在 git 根目錄，所以這裡偶爾會說「信任過」但其實會問：那種由開了 90 秒沒進辦公室的提醒接住）。
+ * 照 Claude Code 的正式判斷（2026-11-26 讀 claude 2.x 的 Rh()）：從這層往上找，任何一層信任過就算；
+ * 但資料夾在 git repo 裡時只找到 git 根目錄為止（實測：家目錄信任過，底下新 git init 的資料夾 claude 照樣問）。
  * 讀不到設定檔回 undefined（不擋）。只讀，不改
  */
 export function folderTrusted(dir: string, cfgDir?: string, home = homedir()): boolean | undefined {
@@ -319,11 +320,14 @@ export function folderTrusted(dir: string, cfgDir?: string, home = homedir()): b
   const norm = (p: string) => { const s = p.replace(/\\/g, '/').replace(/\/+$/, ''); const t = s === '' || /^[A-Za-z]:$/.test(s) ? s + '/' : s; return win ? t.toLowerCase() : t }
   const trusted = new Set(Object.entries(projects).filter(([, v]) => v?.hasTrustDialogAccepted === true).map(([k]) => norm(k)))
   const parts = dir.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
-  for (let i = parts.length; i >= 1; i--) if (trusted.has(norm(parts.slice(0, i).join('/')))) return true
+  const at = (i: number) => parts.slice(0, i).join('/') || '/'
+  let stop = 1 // git 根目錄（有 .git 資料夾或檔案的那層）：找到就不再往上
+  for (let i = parts.length; i >= 1; i--) if (existsSync(join(at(i), '.git'))) { stop = i; break }
+  for (let i = parts.length; i >= stop; i--) if (trusted.has(norm(at(i)))) return true
   return false
 }
 
-export const TRUST_TEXT = (dir: string) => `「${dir}」這個資料夾還沒在 Claude Code 信任過：開了會停在「要不要信任這個資料夾」，要到電腦上按。`
+export const TRUST_TEXT = (path: string, name?: string) => `${name && name !== path ? `「${name}」（${path}）` : `「${path}」`}這個資料夾還沒在 Claude Code 信任過：開了會停在「要不要信任這個資料夾」，要到電腦上按。`
 
 /** Windows 版招聘：參數檢查與 hire() 相同，開視窗交給 open_role.py（預先登記也由它寫） */
 export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[] } = {}): { ok: boolean; text: string; sid?: string; need?: string } {
@@ -340,7 +344,7 @@ export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | un
   const mode = claudeModeArgs(b)
   if (typeof mode === 'string') return { ok: false, text: mode }
   const cfg = D.hireConfigDir()
-  if (b.trustOk !== true && folderTrusted(dir.path, cfg) === false) return { ok: false, need: 'trust', text: TRUST_TEXT(dir.name) }
+  if (b.trustOk !== true && folderTrusted(dir.path, cfg) === false) return { ok: false, need: 'trust', text: TRUST_TEXT(dir.path, dir.name) }
   const sid = crypto.randomUUID()
   const title = [...(typeof b.title === 'string' && b.title.trim() ? b.title.trim() : name)].slice(0, 16).join('')
   let taskFile: string | undefined
@@ -355,7 +359,7 @@ export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | un
   })()
   if ('error' in r) return { ok: false, text: `開不起來：${r.error}` }
   if (r.pid) winLaunchSet(r.sid, r.pid)
-  watchWinHire(r.sid, name, r.pid)
+  watchWinHire(r.sid, name, r.pid, undefined, undefined, undefined, dir.path)
   ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
   return { ok: true, text: `🧑‍💼 招聘了 ${name}（${MODELS[model]}${b.chrome === true ? '，可以操作瀏覽器' : ''}），電腦上開了一個標題「${name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
 }
@@ -406,7 +410,7 @@ export function summonRole(o: { name: string; card: string; cwd: string; team?: 
     '--model', model, ...mode.args, '--remote-control'], cfg)
   if ('error' in r) return r.code === 3 ? { ok: false, online: true, text: `${o.name} 已經在線：改傳話給他` } : { ok: false, text: `開不起來：${r.error}` }
   if (r.pid) winLaunchSet(r.sid, r.pid)
-  watchWinHire(r.sid, o.name, r.pid)
+  watchWinHire(r.sid, o.name, r.pid, undefined, undefined, undefined, o.cwd)
   ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
   return { ok: true, text: `📇 叫了 ${o.name}${o.team ? `（掛在 ${o.team} 底下）` : ''}：電腦上開了一個標題「${o.name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
 }
@@ -1225,7 +1229,7 @@ export function stuckTitle(screen: string): string | undefined {
 }
 export const STUCK_WATCH_MS = 60e3, STUCK_EVERY_MS = 3000, STUCK_KEEP_MS = 30 * 60e3
 export type StuckOpt = { id: string; label: string }
-type Stuck = { id: string; name: string; session: string; title: string; at: number; options: StuckOpt[]; win?: boolean }
+type Stuck = { id: string; name: string; session: string; title: string; at: number; options: StuckOpt[]; win?: boolean; dir?: string }
 const stuck = new Map<string, Stuck>()
 /** 招聘開出後呼叫：60 秒內偵測；偵測到之後每 5 秒確認畫面還在，最多留 30 分鐘 */
 export function watchHire(session: string, name: string, capture = (s: string) => tmux('capture-pane', '-p', '-t', `=${s}:`).stdout.toString(), t0 = Date.now()) {
@@ -1252,12 +1256,12 @@ export function watchHire(session: string, name: string, capture = (s: string) =
  * 不給選項按鈕。之後每 5 秒再看：進辦公室了、視窗程序結束了、或滿 30 分鐘就拿掉
  */
 export const WIN_STUCK_MS = 90e3
-export function watchWinHire(sid: string, name: string, pid?: number, t0 = Date.now(), alive = (p: number) => pidAlive(p), every = 5000) {
+export function watchWinHire(sid: string, name: string, pid?: number, t0 = Date.now(), alive = (p: number) => pidAlive(p), every = 5000, dir?: string) {
   const key = `win-${sid}`
   const check = () => {
     const now = Date.now()
     if (D.people().some(p => p.id === sid) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
-    if (now - t0 >= WIN_STUCK_MS && !stuck.has(key)) stuck.set(key, { id: crypto.randomUUID().slice(0, 8), name, session: name, title: '開了但還沒進辦公室', at: now, options: [], win: true })
+    if (now - t0 >= WIN_STUCK_MS && !stuck.has(key)) stuck.set(key, { id: crypto.randomUUID().slice(0, 8), name, session: name, title: '開了但還沒進辦公室', at: now, options: [], win: true, ...(dir ? { dir } : {}) })
     setTimeout(check, every).unref?.()
   }
   setTimeout(check, every).unref?.()
