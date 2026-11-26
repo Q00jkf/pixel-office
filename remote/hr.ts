@@ -37,13 +37,32 @@ const dayOf = (t: number) => new Date(t).toLocaleDateString('sv-SE')
 
 type Proc = { pid: number; sessionId: string; cwd: string; configDir: string; app: boolean; pane?: string; tmuxSession?: string; bridge?: string }
 
+/** <configDir>/sessions/<pid>.json 裡 sessionId＝id 的那個 pid（同一份對話開兩次取最新的檔）；找不到回 undefined */
+export function pidBySession(dir: string, id: string): number | undefined {
+  let best: { pid: number; t: number } | undefined
+  let names: string[] = []
+  try { names = readdirSync(dir) } catch { return }
+  for (const n of names) {
+    if (!/^\d+\.json$/.test(n)) continue
+    try {
+      const f = join(dir, n), j = JSON.parse(readFileSync(f, 'utf8'))
+      if (j.sessionId !== id) continue
+      const pid = Number(n.slice(0, -5))
+      try { process.kill(pid, 0) } catch (e: any) { if (e?.code !== 'EPERM') continue } // 強制結束會留下舊檔
+      const t = statSync(f).mtimeMs
+      if (!best || t > best.t) best = { pid, t }
+    } catch {}
+  }
+  return best?.pid
+}
 function procOf(id: string): Proc | undefined {
   let s: any
   try { s = JSON.parse(readFileSync(join(D.base, 'sessions', `${id}.json`), 'utf8')) } catch { return }
   const m = /cc-socks\/(\d+)\.sock$/.exec(String(s.addr ?? ''))
   const cfg = String(s.configDir || join(homedir(), '.claude')).replace(/\/+$/, '') // 沒寫 configDir＝沒設 CLAUDE_CONFIG_DIR，用預設 ~/.claude（0.63.59，桌面 app 的對話）
-  if (!m || !cfg) return
-  const pid = Number(m[1])
+  // Windows 的 addr 是 named pipe（\\.\pipe\LOCAL\cc-msg-<雜湊>），沒有 pid：改從 <cfg>/sessions/<pid>.json 用 sessionId 找（0.63.61）
+  const pid = m ? Number(m[1]) : process.platform === 'win32' ? pidBySession(join(cfg, 'sessions'), id) : undefined
+  if (!pid || !cfg) return
   let j: any
   try { j = JSON.parse(readFileSync(join(cfg, 'sessions', `${pid}.json`), 'utf8')) } catch { return }
   try { process.kill(pid, 0) } catch (e: any) { if (e?.code !== 'EPERM') return }

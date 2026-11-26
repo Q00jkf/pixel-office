@@ -7,10 +7,13 @@
 
 ---
 
-## 0.63.61 — 2026-11-26 — Windows 上本機金鑰被丟掉（關聯圖叫不出角色）
+## 0.63.61 — 2026-11-26 — Windows 上本機金鑰被丟掉（關聯圖叫不出角色）、手機人事功能全灰
 
-- **改了什麼**：`remote/gate.ts` 的 `loadLocalKey` 在 Windows（`process.platform === 'win32'`）不檢查金鑰檔的 POSIX 權限；其他檢查照舊（不是連結、是一般檔、64 位 hex）。Mac／Linux 照舊要 600、要是自己的檔。測試：`remote/gate.spec.ts` 加 Windows 情境；原本驗 600 的兩處只在 Mac／Linux 驗（Windows 上從 0.63.56 起就是紅的）。
-- **為什麼**：jacky 2026-11-26：「之前的 pixel office 可以在關聯圖上面叫出 session，但是新版本這一個功能 window 不能使用了」。根因：Windows 沒有 POSIX 權限，bun 的 `lstat` 對一般檔一律回 666，`st.mode & 0o077` 永遠成立 → 伺服器丟掉金鑰 → 本機帶金鑰的請求全部 401。關聯圖、團隊視窗抓 `/state.json` 被拒，圖上沒有人可右鍵；`hooks/waiter.ts` 拿手機核准結果也帶金鑰，同一個原因（沒實測）。手機頁走 Cloudflare JWT，不受影響。實測：直接帶金鑰打 8767 的 `/state.json` 回 401；用新的 `loadLocalKey` 讀同一份金鑰檔讀得到。
+- **改了什麼**：
+  - `remote/gate.ts` 的 `loadLocalKey` 在 Windows（`process.platform === 'win32'`）不檢查金鑰檔的 POSIX 權限；其他檢查照舊（不是連結、是一般檔、64 位 hex）。Mac／Linux 照舊要 600、要是自己的檔。測試：`remote/gate.spec.ts` 加 Windows 情境；原本驗 600 的兩處只在 Mac／Linux 驗（Windows 上從 0.63.56 起就是紅的）。
+  - `remote/hr.ts` 的 `procOf`：Windows 的 addr 是 named pipe（`\\.\pipe\LOCAL\cc-msg-…`），抓不到 pid，手機人事（換智力、投入程度、整理記憶、清空、解雇）全部灰掉、來源寫「還判斷不出開在哪」。改從 `<configDir>/sessions/<pid>.json` 用 sessionId 找活著的 pid（新函式 `pidBySession`，測試 `remote/winproc.spec.ts`）。Mac／Linux 照舊讀 `cc-socks/<pid>.sock`。
+  - 實測（2026-11-26，Windows，用團隊視窗開的受試 session、手機頁經 Cloudflare）：傳話、完整對話、照片、換智力、投入程度、整理記憶、清空、員工檔案、升主管／改回、調部門、解雇都成功；招聘照舊回「只支援 Mac／Linux」。
+- **為什麼**：jacky 2026-11-26：「我怎麼沒有看到解雇的按鈕呢」「看起來 window 有些功能用不了」（人事全灰同一類：只照 Mac／Linux 寫）。關聯圖：jacky 2026-11-26：「之前的 pixel office 可以在關聯圖上面叫出 session，但是新版本這一個功能 window 不能使用了」。根因：Windows 沒有 POSIX 權限，bun 的 `lstat` 對一般檔一律回 666，`st.mode & 0o077` 永遠成立 → 伺服器丟掉金鑰 → 本機帶金鑰的請求全部 401。關聯圖、團隊視窗抓 `/state.json` 被拒，圖上沒有人可右鍵；`hooks/waiter.ts` 拿手機核准結果也帶金鑰，同一個原因（沒實測）。手機頁走 Cloudflare JWT，不受影響。實測：直接帶金鑰打 8767 的 `/state.json` 回 401；用新的 `loadLocalKey` 讀同一份金鑰檔讀得到。
 - **commit**：見本版 commit
 - **issue**：無
 - **升級要做的**：Windows 要重開辦公室伺服器（8767），新的金鑰檢查才會生效；金鑰檔不用動。Mac／Linux 無。
