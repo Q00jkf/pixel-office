@@ -442,6 +442,9 @@
     body.innerHTML = html
     if (open && !fill && !RM.matches) { body.classList.remove('po-next'); void body.offsetWidth; body.classList.add('po-next') }
     if (!fill) menu.scrollTop = 0
+    // 從完整對話裡開的（例：⚙ → 人事 → 員工檔案）要疊在對話頁上面，不然開在它後面看不到（0.63.62）
+    const oc = getComputedStyle($('chat')).display !== 'none'
+    menu.classList.toggle('overchat', oc); scrim.classList.toggle('overchat', oc)
     pop(menu, 'block'); pop(scrim, 'block')
     return sheetN
   }
@@ -740,7 +743,10 @@
       }
     } else if (sub.kind === 'hr') {
       const row = (k, v) => v ? `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>` : ''
-      const team = `<select class="v2team" data-team><option value="">調部門　選擇部門</option>${people().filter(x => x.role === 'manager' && x.agent && x.id !== p.id && x.agent !== p.team).map(x => `<option value="${esc(x.agent)}">到 ${esc(x.plate)} 底下</option>`).join('')}${p.team ? '<option value="-">不掛主管</option>' : ''}</select>`
+      // 主管照 ListAgents 名稱認（team 存的是名字）：同名的幾位合成一項並寫明，選哪個結果都一樣（0.63.62）
+      const bosses = new Map()
+      for (const x of people()) if (x.role === 'manager' && x.agent && x.id !== p.id && x.agent !== p.team) bosses.set(x.agent, [...(bosses.get(x.agent) || []), x.plate])
+      const team = `<select class="v2team" data-team><option value="">調部門　選擇部門</option>${[...bosses].map(([a, plates]) => `<option value="${esc(a)}">到 ${plates.length > 1 ? `${esc(a)}（${plates.map(esc).join('、')} 同名）` : esc(plates[0])} 底下</option>`).join('')}${p.team ? '<option value="-">不掛主管</option>' : ''}</select>`
       // 「接回後台」只給 App 開的 Codex（第一層也有）；終端機視窗的 Codex、agy 都不放（顧問 11-25）
       const ho = app && p.kind === 'codex' && p.src === 'app' && handoffOf(p), back = ho && ho.to === 'tmux' ? `<button class="mbtn${ho.why ? '' : ' go'}"${ho.why ? dk(ho.why) : ' data-ho2="tmux"'}>${ho.label}</button>${ho.why ? line(ho.why) : ''}` : ''
       if (app) h = line(whereOf(p) + '，只能傳話、調部門') + team + back // 來源、標題等收掉（顧問 11-25）；調部門只動辦公室座位，照樣能用
@@ -1093,6 +1099,11 @@
     if (clog.scrollHeight - clog.scrollTop - clog.clientHeight < 80) $('chnew').hidden = true
   })
   const ctext = $('chtext')
+  // 電腦（滑鼠／觸控板）上 Enter 送出、Shift+Enter 換行；輸入法選字中的 Enter 不算；手機照舊換行（0.63.62）
+  for (const [box, form] of [[ctext, 'chsay'], [$('text'), 'say']]) box.addEventListener('keydown', ev => {
+    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing || ev.keyCode === 229 || !matchMedia('(pointer: fine)').matches) return
+    ev.preventDefault(); $(form).requestSubmit()
+  })
   ctext.addEventListener('input', () => { ctext.style.height = 'auto'; ctext.style.height = Math.min(ctext.scrollHeight, 160) + 'px' })
   const chSay = t => { $('chsent').textContent = t }
   $('chsay').addEventListener('submit', async ev => {

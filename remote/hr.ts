@@ -66,7 +66,7 @@ function procOf(id: string): Proc | undefined {
   let j: any
   try { j = JSON.parse(readFileSync(join(cfg, 'sessions', `${pid}.json`), 'utf8')) } catch { return }
   try { process.kill(pid, 0) } catch (e: any) { if (e?.code !== 'EPERM') return }
-  const app = j.entrypoint === 'sdk-cli'
+  const app = j.entrypoint === 'sdk-cli' || j.entrypoint === 'claude-desktop' // claude-desktop＝Windows 版 Claude Desktop 的分頁（0.63.62）
   const t = !app && typeof j.tmux === 'string' ? /^(.*):@\d+\.(%\d+)$/.exec(j.tmux) : null
   return { pid, sessionId: String(j.sessionId ?? ''), cwd: String(j.cwd ?? ''), configDir: cfg, app, pane: TMUX ? t?.[2] : undefined, tmuxSession: t?.[1],
     bridge: typeof j.bridgeSessionId === 'string' ? j.bridgeSessionId : undefined }
@@ -159,7 +159,7 @@ function scan(p: Proc): Scan | undefined {
         if (typeof m.model === 'string' && !m.model.startsWith('<')) s.model = m.model
         const u = m.usage
         if (u && dayOf(at) === s.day && !j.isSidechain) s.usage.set(m.id ?? j.uuid, { i: u.input_tokens || 0, o: u.output_tokens || 0, cw: u.cache_creation_input_tokens || 0, cr: u.cache_read_input_tokens || 0 })
-      } else if (j.type === 'user' && m && !j.isMeta && !j.isSidechain) {
+      } else if (j.type === 'user' && m && !j.isMeta && !j.isSidechain && !j.isCompactSummary) { // 壓縮摘要不是交代的事（0.63.62，完整對話那邊另顯示成 note）
         const c = m.content
         const t = typeof c === 'string' ? c : Array.isArray(c) && !c.some((x: any) => x?.type === 'tool_result') ? c.filter((x: any) => x?.type === 'text').map((x: any) => x.text).join(' ') : ''
         const clean = String(t).trim()
@@ -378,6 +378,7 @@ export async function fire(id: string): Promise<{ ok: boolean; text: string }> {
   const notes: string[] = []
   // 終端機開的（--remote-control）結束時 app 那筆會自動封存；只有從 app 開的要請同事代封存
   if (p.bridge && !p.app) notes.push('Claude app 裡的對話會跟著封存')
+  if (p.app && !p.bridge) notes.push('Claude app 裡那個分頁要自己關或封存') // Windows 版 Desktop 沒有 bridge，沒辦法代封存（0.63.62）
   if (p.bridge && p.app) {
     const now = Date.now()
     const helpers = D.people().map(c => procOf(c.id)).filter((q): q is Proc => !!q && q.sessionId !== p.sessionId && !!hrAlive(q.sessionId, now)?.archive)
@@ -1464,7 +1465,19 @@ export function codexSettings(id: string): { model?: string; effort?: string; pe
 }
 
 // ---------- 關掉 App 分頁就解雇（0.63.24，remote/apptabs.ts）用的程序資訊 ----------
-const psOf = (pid: number, field: string) => { const r = Bun.spawnSync(['ps', '-o', `${field}=`, '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' }); return r.exitCode === 0 ? r.stdout.toString().trim() : '' }
+// Windows 沒有 ps（0.63.62）：一次撈整張程序表（父程序、啟動時間），留 10 秒；Claude Desktop 的分頁跟 Mac 一樣都是同一個主程序的子程序（2026-11-26 實測）
+let winTable: { at: number; m: Map<number, { ppid: string; start: string }> } | undefined
+function winProc(pid: number) {
+  if (!winTable || Date.now() - winTable.at > 10e3) {
+    const m = new Map<number, { ppid: string; start: string }>()
+    const r = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CreationDate.ToString(\'o\'))" }'], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
+    if (r.exitCode === 0) for (const l of r.stdout.toString().split(/\r?\n/)) { const [a, b, c] = l.trim().split(' '); if (a && b && c) m.set(Number(a), { ppid: b, start: c }) }
+    winTable = { at: Date.now(), m }
+  }
+  return winTable.m.get(pid)
+}
+const psOf = (pid: number, field: 'ppid' | 'lstart') => process.platform === 'win32' ? (field === 'ppid' ? winProc(pid)?.ppid : winProc(pid)?.start) ?? '' : psUnix(pid, field)
+const psUnix = (pid: number, field: string) => { const r = Bun.spawnSync(['ps', '-o', `${field}=`, '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' }); return r.exitCode === 0 ? r.stdout.toString().trim() : '' }
 const tabSeen = new Map<number, { host: number; hostStart: string; at: number }>()
 /** 這位是不是 Claude app 的分頁（entrypoint＝sdk-cli；Remote Control 接起來的對話也是）：是就回它的程序、父程序與父程序的啟動時間 */
 export function appTabOf(id: string, now = Date.now()): { pid: number; host: number; hostStart: string } | undefined {

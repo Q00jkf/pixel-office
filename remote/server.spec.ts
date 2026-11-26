@@ -262,7 +262,7 @@ import { officeOfDir } from './server'
 
 test('collab folder of a work folder follows projects.json like takeover.py (worktree mapped on this machine, else <repo>/.claude/office)', () => {
   const tmp = join(require('node:os').tmpdir(), 'po-no-repo')
-  expect(officeOfDir(tmp)).toBe(`${tmp}/.claude/office`)
+  expect(officeOfDir(tmp)).toBe(`${tmp}/.claude/office`.replace(/\\/g, '/')) // Windows：程式回的路徑一律 /
 })
 
 // ---------- 0.62.10 共用筆記、交代、行政（測試 port、暫存協作資料夾、假的招聘） ----------
@@ -582,7 +582,7 @@ test('0.63.6 Codex 檢查點：坐協作桌的帶這桌 checkpoints/ 的檔；�
     hireAt({ name: '小丙', role: 'staff', seat: String(t.id), agent: 'codex' }, 0, fake)
     hireAt({ name: '小丙', role: 'staff', seat: String(t.id), agent: 'codex' }, 0, fake)
     const [c1, c2] = [got[2].opts.cpFile, got[3].opts.cpFile]
-    expect(c1).toMatch(/checkpoints\/小丙-[0-9a-f]{6}\.md$/)
+    expect(c1).toMatch(/checkpoints[\\/]小丙-[0-9a-f]{6}\.md$/) // Windows 的分隔是 \
     expect(c1).not.toBe(c2)
     expect(got[2].b.task).toContain(c1)
   } finally {
@@ -1559,7 +1559,7 @@ test('0.63.60: deleting a table first appends it (with its pins and seats) to of
     expect(rows[0].table).toMatchObject({ id: t.id, name: '要刪的桌', size: 6 })
     expect(typeof rows[0].at).toBe('number')
     expect(rows[0].pins).toEqual({})
-    expect(statSync(deletedFile()).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect(statSync(deletedFile()).mode & 0o777).toBe(0o600) // Windows 沒有 600 可言
     // 示意模式的刪除不留檔
     await handle(new Request('http://127.0.0.1/tables', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'delete', id: 1, force: true, demo: 3 }) })) // 測試埠的示意請求（不帶金鑰）
     expect(readFileSync(deletedFile(), 'utf8').trim().split('\n').length).toBe(1)

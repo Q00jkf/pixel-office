@@ -1142,8 +1142,9 @@ export function hireAt(b: any, now = Date.now(), hireFn: (b: any, opts?: { addDi
   const dir = notesDir(table.id, boss?.id)
   // Codex 的檢查點檔名加短碼（0.63.22，最後複驗第 4 項：同桌兩位同名的 Codex 會綁到同一個檔）；共用筆記照它綁定的 cpFile 讀，不靠檔名
   const cpName = b?.agent === 'codex' ? `${name}-${crypto.randomUUID().slice(0, 6)}` : name
-  const cpNote = `做到一個段落、收工前，在 ${dir}/checkpoints/${cpName}.md 存一筆檢查點（「## YYYY-MM-DD HH:mm ${name}」＋做完／卡在／下一步，只往後加），這桌的共用筆記會顯示最新一筆。`
   const cpFile = join(dir, 'checkpoints', `${cpName}.md`) // Codex：人事令帶給看守，每小時提醒、壓縮後提示重讀（0.63.6）
+  // 開場句的路徑跟 cpFile 同一份（0.63.62：原本手接 `/checkpoints/`，Windows 上變成 \ 與 / 混用）
+  const cpNote = `做到一個段落、收工前，在 ${cpFile} 存一筆檢查點（「## YYYY-MM-DD HH:mm ${name}」＋做完／卡在／下一步，只往後加），這桌的共用筆記會顯示最新一筆。`
   const withCp = (task: unknown) => `${typeof task === 'string' && task.trim() ? `${task.trim()}\n` : ''}${cpNote}`
   if (role === 'admin') {
     const team = boss ? boss.agent || boss.code || boss.plate : waitBoss ?? ''

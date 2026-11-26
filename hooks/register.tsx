@@ -1060,8 +1060,16 @@ async function followSession($: EngineInterface) {
   if (me.id === 'me') return
   const id = await $.session.id()
   if (id === me.id) return
+  const prev = me
   await publish($, true).catch(() => undefined)
   await adopt($, id)
+  // 新編號沒存過身分（/clear、/resume 到沒登記過的對話）：同一個視窗、同一個人，沿用原本的名牌、角色、主管、職稱（0.63.62；原本全部重設，主管掉了）
+  if (fresh || (!me.team && !me.title && !me.agent && me.role === 'staff' && me.name === defaultName)) {
+    const { role, name, agent, ref, title, titleAuto, titleAt, auto, team } = prev
+    me = { ...me, role, name, agent, ref, title, titleAuto, titleAt, auto, team }
+    fresh = false
+    await saveProfile($)
+  }
 }
 
 const meetingFile = (sessionsDir: string) => `${sessionsDir.replace(/\/sessions$/, '')}/meeting.json`
@@ -1134,7 +1142,7 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
-export const VERSION = '0.63.61'
+export const VERSION = '0.63.62'
 
 // 系統提示那段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
 export const ROLE_SECTION =
@@ -1754,7 +1762,8 @@ async function takeCommand($: EngineInterface, d: string, now: number) {
     phoneAsk = c.text
     // 不 await：排在長回合後面時要等那個回合結束才 resolve，不能卡住每秒的 refresh
     void $.prompt.submit({ text: pend.text, asUser: true }).then(
-      async () => { pend.inFlight = false; await markCmdDone($, pend, await $.clock.now()) },
+      // resolve＝那句的回合開始了：自己送的話自己的 prompt.submit 掛點聽不到，狀態在這裡設成工作中（0.63.62：原本手機傳話後一直顯示閒著，做完才跳剛做完）
+      async () => { pend.inFlight = false; await setMode($, 'thinking').catch(() => undefined); await markCmdDone($, pend, await $.clock.now()) },
       async err => {
         pend.inFlight = false
         await $.fs.write(f.replace(/\.json$/, '.err.json'), JSON.stringify({ nonce: c.nonce, at: now, tries: pend.tries, err: String(err).slice(0, 300) })).catch(() => undefined)

@@ -73,7 +73,17 @@ po -X POST -H 'content-type: application/json' \
 
 （`-H @<(…)` 讓金鑰不出現在指令列：`ps` 和辦公室的存取紀錄只看得到 `/dev/fd/…`。不要寫成 `-H "X-PO-Key: $(cat …)"`。）
 
-- 金鑰由伺服器第一次啟動時產生（`~/.claude/pixel-office/local-key`，權限 600）。不要貼進對話、檔案、commit 或 issue；不要改它的權限（太寬伺服器就不用它，本機呼叫全部回 401）。
+Windows（Git Bash 的 curl 讀不到 `<(…)`）改用 Python，金鑰一樣不上指令列；第二個參數是 POST 的 JSON，不給就是 GET：
+
+```
+po() { python -I -c "import os,sys,urllib.request as u,urllib.error as e;sys.stdout.reconfigure(encoding='utf-8');k=open(os.path.expanduser('~/.claude/pixel-office/local-key')).read().strip();d=sys.argv[2].encode() if len(sys.argv)>2 else None;r=u.Request(sys.argv[1],data=d,headers={'X-PO-Key':k,'content-type':'application/json'})
+try: print(u.build_opener(u.ProxyHandler({})).open(r).read().decode('utf-8'))
+except e.HTTPError as x: print(x.code,x.read().decode('utf-8'))" "$@"; }
+po http://127.0.0.1:8767/state.json
+po http://127.0.0.1:8767/command '{"id":"<session id>","text":"<要說的話>"}'
+```
+
+- 金鑰由伺服器第一次啟動時產生（`~/.claude/pixel-office/local-key`，Mac／Linux 權限 600；Windows 沒有這種權限，不檢查）。不要貼進對話、檔案、commit 或 issue；不要改它的權限（太寬伺服器就不用它，本機呼叫全部回 401）。
 - 沒帶金鑰回 401「請用 Cloudflare 網址開…」；Mac 上直接用瀏覽器開 127.0.0.1 也一樣，請改用 Cloudflare 網址。
 - `/approve`（按允許）、`/stuck`（替新員工按確認畫面）、`/perm`（換模式）只能在經 Cloudflare 登入的手機頁按，帶金鑰也回 403：這三個要使用者本人。
 - `/hire`、`/helper`、`/perm`、`/stuck` 每次都記一筆，用金鑰的本機呼叫也每次都記（`~/.claude/pixel-office/access-log.jsonl`：時間、端點、來源程序）。

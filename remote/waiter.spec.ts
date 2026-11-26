@@ -106,7 +106,7 @@ test('approve-log append: O_APPEND keeps what is there (the server writes the sa
   const f = join(dir, 'approve-log.jsonl')
   const add = (line: string) => expect(Bun.spawnSync([PY!, '-I', '-c', APPROVE_LOG_PY, f, line]).exitCode).toBe(0)
   add(JSON.stringify({ n: 1 }))
-  expect(statSync(f).mode & 0o777).toBe(0o600)
+  if (process.platform !== 'win32') expect(statSync(f).mode & 0o777).toBe(0o600) // Windows 沒有 600 可言
   writeFileSync(f, readFileSync(f, 'utf8') + JSON.stringify({ n: 'server' }) + '\n') // 伺服器那邊附加的一行
   add(JSON.stringify({ n: 2, text: '中文 "引號"' }))
   expect(readFileSync(f, 'utf8').trim().split('\n').map(l => JSON.parse(l))).toEqual([{ n: 1 }, { n: 'server' }, { n: 2, text: '中文 "引號"' }])

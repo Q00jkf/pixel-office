@@ -7,6 +7,27 @@
 
 ---
 
+## 0.63.62 — 2026-11-26 — Windows 實測後的一批修正：手機核准、Desktop 分頁、/clear 身分、手機傳話的狀態、頁面小修
+
+- **改了什麼**：
+  - **手機核准在 Windows 出不來**（`hooks/waiter.ts` 的 `SERVER_CHECK_PY`）：送單前確認 8767 上是辦公室伺服器，原本只用 `/usr/sbin/lsof`、`/bin/ps`，Windows 一律判斷「不是」→ 單不送。Windows 改用 `netstat -ano` 找監聽的 pid、PowerShell 看指令列（`\` 換成 `/` 再比 `remote/server.ts`），不開黑窗。Mac／Linux 不變。
+  - **Windows 版 Claude Desktop 的分頁**（`remote/hr.ts`）：entrypoint 是 `claude-desktop`（Mac 是 `sdk-cli`），原本被當成終端機。現在算 App：手機上來源寫 App、關掉 App 分頁 10 分鐘後自動解雇（`remote/apptabs.ts`）也適用。查父程序、啟動時間的 `ps` 在 Windows 改成一次撈整張程序表（PowerShell，留 10 秒）。Windows 版 Desktop 沒有 bridge，解雇時提醒「Claude app 裡那個分頁要自己關或封存」。
+  - **/clear 後主管掉了**（`hooks/register.tsx` 的 `followSession`）：換到沒存過身分的新編號時，沿用原本的名牌、角色、主管、職稱並存起來（原本全部重設）。
+  - **手機傳話後一直顯示閒著**（`hooks/register.tsx` 的 `takeCommand`）：外掛自己送進對話的話，自己的 prompt.submit 掛點聽不到，狀態從沒變成工作中，做完才跳「剛做完」。送出的 promise resolve（＝那句的回合開始）時設成工作中。
+  - **員工檔案開在完整對話後面**（`remote/page.html`、`remote/v2/scene.css`）：從對話頁的 ⚙ → 人事 → 員工檔案，底部選單與暗幕改疊在對話頁上面（`overchat`）。
+  - **「最近交代的事」列出壓縮摘要**（`remote/hr.ts`）：`isCompactSummary` 的那行不算交代。
+  - **調部門選單同名主管列兩次**（`remote/page.html`）：主管照 ListAgents 名稱認，同名的幾位合成一項並寫明「（甲、乙 同名）」。
+  - **電腦瀏覽器按 Enter 不送出**（`remote/page.html`）：滑鼠／觸控板的裝置上 Enter 送出、Shift+Enter 換行；輸入法選字中的 Enter 不算；手機照舊換行。
+  - **協作桌開場句的檢查點路徑 `\` `/` 混用**（`remote/server.ts`）：改用跟 cpFile 同一份路徑。
+  - `skills/team/SKILL.md`：本機呼叫伺服器補 Windows 寫法（Git Bash 的 curl 讀不到 `<(…)`，改 Python，金鑰不上指令列、輸出 UTF-8）。
+  - 測試：Windows 上本來就紅的改成只在 Mac／Linux 驗 600 權限（`remote/server.spec.ts`、`remote/waiter.spec.ts`），路徑比對接受 `\`；新增 /clear 沿用身分、手機傳話後狀態是工作中。
+- **為什麼**：jacky 2026-11-26：「你應該先把全部可以測試的項目都列出來測試過後再統一修整問題」「照你建議的順序修吧」。手機頁在 Windows 全面實測（受試 session 用團隊視窗開）找出上述問題。
+- **實測**（2026-11-26，Windows）：伺服器端的（Desktop 認成 App、員工檔案疊在對話上、同名合併、Enter 送出、交代的事不含壓縮摘要）已在手機頁驗過；外掛端的（手機核准、/clear 身分、傳話後的狀態）只有單元測試，要裝上新版外掛才能實測。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：Windows 重開辦公室伺服器（8767）；開著的 session `/reload-plugins` 或重開，手機核准、/clear 身分、傳話狀態才生效。Mac／Linux：重開在用的 session 即可。
+- **已知事項**：招聘（含 Codex、交接、新人卡確認畫面、Codex 交接）在 Windows 仍不支援（靠 tmux），排在跟手機「叫角色」一起做。多個 remote 測試檔一起跑時有 3 個會互相干擾（共用測試埠的資料），單獨跑會過，改版前就這樣。
+
 ## 0.63.61 — 2026-11-26 — Windows 上本機金鑰被丟掉（關聯圖叫不出角色）、手機人事功能全灰
 
 - **改了什麼**：

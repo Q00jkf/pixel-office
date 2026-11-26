@@ -6,8 +6,18 @@
  * 擋的是「別的程式先搶了這個埠假冒伺服器」；同帳號能任意執行程式的話仍可假冒（已知事項）。查不到（例如 Windows 沒有 lsof）一律當不是
  */
 export const SERVER_CHECK_PY = [
-  'import subprocess',
+  'import subprocess,sys',
+  // Windows 沒有 lsof／ps（0.63.62）：netstat -ano 找監聽的 pid、PowerShell 看指令列；路徑的 \\ 換成 / 再比
+  'def ok_server_win(port):',
+  '    try:',
+  '        out=subprocess.run(["netstat","-ano","-p","TCP"],capture_output=True,text=True,timeout=3,creationflags=0x08000000).stdout',
+  '        pids={f[4] for f in (l.split() for l in out.splitlines()) if len(f)==5 and f[1].endswith(":%d"%port) and f[3]=="LISTENING"}',
+  '        if len(pids)!=1: return False',
+  '        cmd=subprocess.run(["powershell","-NoProfile","-NonInteractive","-Command","(Get-CimInstance Win32_Process -Filter \'ProcessId=%d\').CommandLine"%int(pids.pop())],capture_output=True,text=True,timeout=5,creationflags=0x08000000).stdout',
+  '        return "remote/server.ts" in cmd.replace(chr(92),"/")',
+  '    except Exception: return False',
   'def ok_server(port):',
+  '    if sys.platform=="win32": return ok_server_win(port)',
   '    try:',
   '        pids=subprocess.run(["/usr/sbin/lsof","-nP","-iTCP:%d"%port,"-sTCP:LISTEN","-t"],capture_output=True,text=True,timeout=2).stdout.split()',
   '        if len(pids)!=1: return False',

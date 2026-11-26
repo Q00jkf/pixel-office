@@ -660,6 +660,8 @@ html body #chlog .ctg > .gl > .ct { margin: 4px 0; max-width: 100%; }
 html body #chlog .ct > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 從完整對話 ⚙ 開的設定：卡片蓋在完整對話上面 */
 html body #card.overchat { z-index: 6; }
+html body #poscrim.overchat { z-index: 6; }  /* 從完整對話開的底部選單（員工檔案等）：暗幕、選單都在對話頁（5）上面 */
+html body #menu.overchat { z-index: 7; }
 /* 辦公室通知列（z 50、場景上方）在完整對話整頁時收起，不蓋到狀態列和對話；關掉對話就回來 */
 html body:has(#chat[style*="display: flex"]) #v2help { display: none !important; }
 /* 審查 C-2：⚙、×、打斷的點擊範圍擴到 44px 高（外觀不變：用透明的 ::after 往外撐） */

@@ -1,5 +1,5 @@
 // 關掉 Claude app 分頁就自動解雇（0.63.23；像素顧問定案規格，使用者確認、主管 2026-11-25 核可做法）
-// - 範圍：只管 Claude app 開的分頁（Claude Code 的 session 紀錄 entrypoint＝sdk-cli；Remote Control 接起來的對話也是）。
+// - 範圍：只管 Claude app 開的分頁（Claude Code 的 session 紀錄 entrypoint＝sdk-cli；Remote Control 接起來的對話也是；Windows 版 Desktop 是 claude-desktop，0.63.62 起也算）。
 //   手機招聘的（tmux）、終端機開的都不算
 // - 同一個 App＝同一個父程序（實測：App 的分頁都是某個 claude 主程序的子程序）；記父程序 pid＋啟動時間，免得 pid 被重用
 // - 判定分頁關掉（四個都成立，而且連續取樣累積滿 10 分鐘；取樣中斷超過 3 分鐘從零算）：這位不在名冊、它自己的程序結束了（排除 /clear 換了 session id）、

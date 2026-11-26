@@ -1027,6 +1027,37 @@ test('after /resume the window follows the new session id: old file marked left,
   expect(now.role).toBe('manager')
 })
 
+test('after /clear the new session id has no saved identity: name, role, team and title carry over (0.63.62)', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  let sid = 'aaaa1111'
+  const files: Record<string, string> = {
+    'sessions/aaaa1111.json': JSON.stringify({ id: 'aaaa1111', name: 'worker', role: 'staff', team: 'boss1', title: 'tester', updatedAt: 0, left: true }),
+  }
+  on('env.get', () => ({ value: 'C:/Users/tester' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', (_$: any, e: any) => ({ value: files[e.path.split(/[\\/]/).slice(-2).join('/')] ?? '{}' }))
+  on('fs.write', (_$: any, e: any) => {
+    files[e.path.split(/[\\/]/).slice(-2).join('/')] = e.text
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: undefined }) as any)
+  on('tool.register', () => ({ value: undefined }) as any)
+  on('session.start', (_$: any, e: any) => e)
+  on('session.id', () => ({ value: sid }) as any)
+  on('session.cwd', () => ({ value: 'C:/Users/user' }) as any)
+  mock.store(on)
+  await ($ as any).session.start({ cwd: 'C:/Users/user', surface: 'terminal', isInteractive: true })
+  expect(JSON.parse(files['sessions/aaaa1111.json']).team).toBe('boss1')
+
+  sid = 'cccc3333' // /clear：同一個程序換到全新的編號
+  await clock.advance(5000)
+  const now = JSON.parse(files['sessions/cccc3333.json'])
+  expect(now.left).toBe(false)
+  expect(now.name).toBe('worker')
+  expect(now.team).toBe('boss1')
+  expect(now.title).toBe('tester')
+})
+
 // ---------- 放貓咬人 ----------
 
 import { BITE_FRAMES, birdHopRows, raidFrames, raidPath, raidPose } from './scene'
@@ -2535,6 +2566,7 @@ test('a command from the phone is submitted once as the user\'s own words with �
   await clock.advance(3000)
   expect(submitted.map(e => [e.text, e.origin?.asUser ?? e.asUser])).toEqual([['📱 整理一下今天的進度', true]])
   expect(JSON.parse(files['commands/aaaa1111.done.json']).nonce).toBe('n1')
+  expect(JSON.parse(files['sessions/aaaa1111.json']).mode).toBe('thinking') // 0.63.62：送進去就算工作中（自己的 prompt.submit 掛點聽不到）
   // 那一輪講完：回覆寫到 replies/，帶上手機那道命令；子代理的不寫、下一輪不再帶命令
   await ($ as any).turn.complete({ answer: '進度：A 完成、B 進行中', durationMs: 5, isAborted: false, turnId: 't1' })
   await clock.advance(1)
