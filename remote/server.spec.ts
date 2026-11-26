@@ -1483,7 +1483,13 @@ test('0.63.59: HR finds a configDir-less Claude session through the default ~/.c
 })
 
 // ── 0.63.60 伺服器準備（顧問裁示）：刪桌留一份、刪改桌記存取紀錄、configDirs 的 ~ 展開、端點層的 configDirs 測試 ──
-const fakeHome = () => ![join('/Users', userInfo().username), join('/home', userInfo().username)].includes(homedir()) // 會寫 office-<port>.json 的測試只在假 HOME 跑，免得蓋到真檔（bun 的 userInfo().homedir 跟著 HOME 走，所以用帳號名比）
+// 會寫 office-<port>.json 的測試只在假 HOME 跑，免得蓋到真檔（bun 的 userInfo().homedir 跟著 HOME 走，所以用帳號名比）。
+// Windows：homedir() 跟著 USERPROFILE（不看 HOME），真家目錄是 C:\Users\<帳號>，不分大小寫
+const fakeHome = () => {
+  const u = userInfo().username, h = homedir(), win = process.platform === 'win32'
+  const real = [join('/Users', u), join('/home', u), ...(win ? [`${process.env.SystemDrive ?? 'C:'}\\Users\\${u}`] : [])]
+  return !real.some(r => win ? r.toLowerCase() === h.toLowerCase() : r === h)
+}
 
 test('0.63.60 N-1: configDirs in remote.json may start with ~; it is expanded to the home folder (trailing slash trimmed)', async () => {
   const { config, configDirOf, _setConfigPatch } = await import('./server')
