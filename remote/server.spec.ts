@@ -1490,6 +1490,9 @@ const fakeHome = () => {
   const real = [join('/Users', u), join('/home', u), ...(win ? [`${process.env.SystemDrive ?? 'C:'}\\Users\\${u}`] : [])]
   return !real.some(r => win ? r.toLowerCase() === h.toLowerCase() : r === h)
 }
+const HOME_SKIP = '（略過：會寫 office-<port>.json，要用假家目錄跑；Windows 設 USERPROFILE，Mac／Linux 設 HOME）'
+/** 真家目錄上不跑（skip、標題附原因），不算失敗 */
+const homeTest = (name: string, fn: () => Promise<void>) => fakeHome() ? test(name, fn) : test.skip(name + HOME_SKIP, fn)
 
 test('0.63.60 N-1: configDirs in remote.json may start with ~; it is expanded to the home folder (trailing slash trimmed)', async () => {
   const { config, configDirOf, _setConfigPatch } = await import('./server')
@@ -1542,8 +1545,7 @@ test('0.63.60 N-2: a configDir-less session cannot be seen or commanded through 
   }
 })
 
-test('0.63.60: deleting a table first appends it (with its pins and seats) to office-<port>.deleted.jsonl; the access log records op, table and name as high risk', async () => {
-  if (!fakeHome()) throw new Error('要用假 HOME 跑（會寫 office-<port>.json）')
+homeTest('0.63.60: deleting a table first appends it (with its pins and seats) to office-<port>.deleted.jsonl; the access log records op, table and name as high risk', async () => {
   const { handle, deletedFile, _setGatePatch: gp } = await import('./server')
   const log = join(tmpdir(), `po-spec-tables-${process.pid}.jsonl`)
   gp({ dev: true, key: TK, anyHost: true, log })
@@ -1593,8 +1595,7 @@ test('0.63.60: the phone delete confirmation names the table', () => {
   expect(js).toContain('再按一次確定刪除「${t.name}」')
 })
 
-test('0.63.60: /state.json shares one roster within the cache window; any write (here /tables) drops the cache so the next read is fresh', async () => {
-  if (!fakeHome()) throw new Error('要用假 HOME 跑（會寫 office-<port>.json）')
+homeTest('0.63.60: /state.json shares one roster within the cache window; any write (here /tables) drops the cache so the next read is fresh', async () => {
   const { handle, _setRosterTtl } = await import('./server')
   const dir = join(homedir(), '.claude', 'pixel-office', 'sessions')
   mkdirSync(dir, { recursive: true })
