@@ -56,6 +56,8 @@ def plugin_scripts():
 sys.path.insert(0, plugin_scripts())
 from open_role import child_env  # 開分頁時拿掉哪些環境變數，跟外掛開角色視窗共用一份
 from open_role import main as open_role_main, preset_file  # Relations 視窗叫出角色＝開一個角色視窗
+from cards import front, session_cwd  # 角色卡清單：跟手機頁共用（2026-11-26 搬到 scripts/cards.py）
+import cards as card_lists
 try:
     from open_role import live_sessions  # 外掛 0.39.0 起
 except ImportError:
@@ -94,111 +96,6 @@ def load_team():
             a.setdefault('id', str(uuid.uuid4()))
         save_team(team)
     return team
-
-
-def main_repo(cwd):
-    """git repo 取 --git-common-dir 的上一層（所有 worktree 算同一個專案）；不是 git repo 就是目前資料夾"""
-    try:
-        common = subprocess.run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=cwd,
-                                capture_output=True, text=True, timeout=5, creationflags=0x08000000)
-        return os.path.dirname(os.path.normpath(common.stdout.strip())) if common.returncode == 0 else cwd
-    except OSError:
-        return cwd
-
-
-def session_cwd(session_id):
-    """~/.claude/sessions/<pid>.json 記著每個在線 session 的 sessionId 與 cwd"""
-    for p in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
-        try:
-            with open(p, encoding='utf-8') as f:
-                j = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if j.get('sessionId') == session_id and j.get('cwd') and os.path.isdir(j['cwd']):
-            return j['cwd']
-    return None
-
-
-def office_dir(cwd):
-    """pixel-office team skill 的 <office>：projects.json 有設定用它，否則 <主 repo>/.claude/office"""
-    main = main_repo(cwd)
-    key = lambda p: os.path.normpath(p).replace('\\', '/').lower()
-    try:
-        with open(os.path.join(os.path.expanduser('~'), '.claude', 'office', 'projects.json'), encoding='utf-8') as f:
-            hit = {key(k): v for k, v in json.load(f).items()}.get(key(main))
-        if hit:
-            return os.path.normpath(os.path.join(main, hit))
-    except (OSError, ValueError, AttributeError):
-        pass
-    return os.path.join(main, '.claude', 'office')
-
-
-def front(path):
-    """卡片開頭 --- 之間的 key: value（# 後是註解）＋其餘內文"""
-    with open(path, encoding='utf-8') as f:
-        text = f.read()
-    m = re.match(r'---\s*\n(.*?)\n---\s*\n?(.*)', text, re.S)
-    if not m:
-        return {}, text
-    meta = {}
-    for line in m.group(1).splitlines():
-        k, sep, v = line.partition(':')
-        if sep:
-            meta[k.strip()] = v.split('#')[0].strip()
-    return meta, m.group(2)
-
-
-def cards(folder, layer):
-    found = []
-    for p in sorted(glob.glob(os.path.join(folder, '*.md'))):
-        try:
-            meta, body = front(p)
-        except OSError:
-            continue
-        if meta.get('layer', '1') == layer:
-            found.append({'name': meta.get('role') or os.path.splitext(os.path.basename(p))[0], 'file': p, '_body': body,
-                          'top': meta.get('reports_to', '') in ('使用者', 'user') or str(meta.get('role', '')).endswith('主管')})  # <範圍>主管（jacky 2026-11-08）
-    return found
-
-
-def launch_plan(body, project):
-    """卡上「## 啟動位置」：第一個絕對路徑（「`<X>` 是 `…`」先代進去）。
-    沒佔位 → ready；有佔位 → 第一段佔位換成實際存在的資料夾讓人選（_ 開頭不列）。
-    fallback＝卡上「先開在 `…`」寫的退路；沒有這一節才開在專案。"""
-    sec = re.search(r'^## 啟動位置\s*\n(.*?)(?=^## |\Z)', body, re.M | re.S)
-    if not sec:
-        return {'ready': project, 'choices': [], 'fallback': None, 'template': None}
-    text = sec.group(1)
-    defs = dict(re.findall(r'`(<[^>`]+>)`\s*是\s*`([^`]+)`', text))
-    fb = re.search(r'先開在\s*`([^`]+)`', text)
-    fb = fb and os.path.normpath(os.path.join(os.path.dirname(project), fb.group(1)))
-    plan = {'ready': None, 'choices': [], 'fallback': fb if fb and os.path.isdir(fb) else None, 'template': None}
-    for p in re.findall(r'`([^`]+)`', text):
-        if p in defs:
-            continue
-        for k, v in defs.items():
-            p = p.replace(k, v.rstrip('\\/'))
-        if os.path.isabs(p):
-            plan['template'] = p = os.path.normpath(p)
-            break
-    else:
-        return plan
-    if '<' not in p:
-        plan['ready'] = p if os.path.isdir(p) else None
-        return plan
-    parts = re.split(r'[\\/]', p)
-    k = next(i for i, x in enumerate(parts) if '<' in x)
-    parent, rest = os.sep.join(parts[:k]) + os.sep, parts[k + 1:]
-    for d in sorted(glob.glob(os.path.join(parent, re.sub(r'<[^>]+>', '*', parts[k])))):
-        name = os.path.basename(d)
-        if os.path.isdir(d) and not name.startswith('_'):
-            full = os.path.join(d, *rest)
-            plan['choices'].append({'label': name, 'path': full, 'exists': os.path.isdir(full) and '<' not in full})
-    return plan
-
-
-def public(card):
-    return {k: v for k, v in card.items() if not k.startswith('_')}
 
 
 def office_port():
@@ -421,72 +318,22 @@ class Api:
         return {'error': 'That session is not running.'}
 
     def roster_cards(self, session_id=None):
-        """團隊清單：被點的人（session id）所在專案的第 1 層角色卡、整台電腦的第 2 層小隊；查不到他在哪就用 team.json 的 project。
-        專案的第 2 層卡寫「通用定義見小隊 <小隊> 的 <角色> 卡」、卡名 <組名><角色> → 依組名分組成 options（lead＝組名），叫小隊時開專案卡"""
-        where = session_id and session_cwd(session_id)
-        project = main_repo(where) if where else self._project
-        roles = os.path.join(office_dir(project), 'roles')
-        local = cards(roles, '2')
-        squads = []
-        for sq in sorted(glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'office', 'squads', '*', 'squad.md'))):
-            try:
-                meta, body = front(sq)
-            except OSError:
-                continue
-            name = meta.get('squad') or os.path.basename(os.path.dirname(sq))
-            when = re.search(r'什麼時候用[:：]\s*(.+)', body)
-            generic = cards(os.path.join(os.path.dirname(sq), 'roles'), '2')
-            groups = {}
-            for c in local:
-                m = re.search(rf'通用定義見小隊\s*{re.escape(name)}\s*的\s*(\S+?)\s*卡', c['_body'])
-                if m:  # 卡名＝<組名><角色>（例 willy實作）：前綴就是組；卡上不寫主管是誰（jacky 2026-11-08）
-                    group = c['name'][:-len(m.group(1))] if c['name'].endswith(m.group(1)) else ''
-                    groups.setdefault(group, {})[m.group(1)] = public(c)
-            options = [{'lead': lead, 'roles': [got.get(g['name'], public(g)) for g in generic]} for lead, got in groups.items()]
-            squads.append({'name': name, 'when': when.group(1).strip() if when else '',
-                           'roles': [public(g) for g in generic], 'options': options})
-        return {'project': [public(c) for c in cards(roles, '1')], 'squads': squads,
-                'project_dir': project, 'from_session': bool(where)}
+        """團隊清單（scripts/cards.py roster_cards）：查不到被點的人在哪就用 team.json 的 project"""
+        return card_lists.roster_cards(session_id, self._project)
 
     def manager_projects(self):
-        """關係圖空白處右鍵：有「主管」卡（第一階，top）的專案，開專案從這裡開。
-        找法：team.json 的 project_roots（預設 ~/.aaproject）底下兩層的 <專案>/.claude/office/roles，
-        加上 ~/.claude/office/projects.json 指定的目錄；在線的 ★ 主管寫進 managers"""
-        dirs = {}
-        roots = self._team.get('project_roots') or [os.path.join(os.path.expanduser('~'), '.aaproject')]
-        for root in roots:
-            for pat in ('*', os.path.join('*', '*')):
-                for d in glob.glob(os.path.join(root, pat, '.claude', 'office', 'roles')):
-                    project = os.path.dirname(os.path.dirname(os.path.dirname(d)))
-                    dirs[os.path.normcase(project)] = project
-        try:
-            with open(os.path.join(os.path.expanduser('~'), '.claude', 'office', 'projects.json'), encoding='utf-8') as f:
-                for k in json.load(f):
-                    dirs[os.path.normcase(os.path.normpath(k))] = os.path.normpath(k)
-        except (OSError, ValueError, AttributeError):
-            pass
-        online = {}
+        """關係圖空白處右鍵：有主管卡的專案（scripts/cards.py）；在線主管從辦公室 /state.json 讀"""
+        people = []
         try:
             with OFFICE_OPENER.open(urllib.request.Request(Proxy.office + '/state.json', headers=office_key_header()), timeout=5) as r:
-                for p in json.load(r).get('people', []):
-                    where = p.get('role') == 'manager' and session_cwd(p.get('id'))
-                    if where:
-                        online.setdefault(os.path.normcase(main_repo(where)), []).append(p.get('agent') or p.get('plate'))
+                people = json.load(r).get('people', [])
         except (OSError, ValueError):
             pass
-        found = []
-        for key, project in dirs.items():
-            top = [public(c) for c in cards(os.path.join(office_dir(project), 'roles'), '1') if c['top']]
-            if top:
-                found.append({'project_dir': project, 'name': os.path.basename(project), 'managers': online.get(key, []), 'roles': top})
-        return {'projects': sorted(found, key=lambda e: e['name'].lower())}
+        return card_lists.manager_projects(self._team.get('project_roots'), card_lists.online_managers(people))
 
     def launch_options(self, card_file, project=None):
-        """叫出前看啟動位置：ready 就直接開；否則 choices 給人選（每項 label、path、exists），fallback 是卡上寫的退路"""
-        try:
-            return launch_plan(front(card_file)[1], project or self._project)
-        except OSError as e:
-            return {'ready': None, 'choices': [], 'fallback': None, 'template': None, 'error': str(e)}
+        """叫出前看啟動位置（scripts/cards.py）"""
+        return card_lists.launch_options(card_file, project or self._project)
 
     def summon_role(self, name, card_file, summoner_id=None, team=None, project=None):
         """小隊成員（第 2 層）：掛 team＝叫的人，開在叫的人目前的資料夾；卡上有可直接用的啟動位置才照卡，不跳選單、不擋"""

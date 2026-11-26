@@ -388,7 +388,29 @@ export function winWindowOf(sid: string, claudePid: number, parentOf: ParentOf =
   if (!rec) return
   return parentOf(claudePid) === rec.pid ? rec.pid : undefined
 }
-export const CODEX_WIN_TEXT ='Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
+/**
+ * 從角色卡叫人（手機「叫他的團隊成員」「開專案」，設計 windows-hire 4.）：卡、資料夾、主管由伺服器從 cards.py 的清單挑好才進來。
+ * Windows → open_role.py（帶 --card；它自己擋「已經在線」→ 結束碼 3）；Mac／Linux → hire() 帶「你是 <角色>，接手。角色卡：…」
+ */
+export function summonRole(o: { name: string; card: string; cwd: string; team?: string; manager?: boolean; b: any }): { ok: boolean; text: string; sid?: string; need?: string; online?: boolean } {
+  const model = String(o.b?.model ?? 'opus')
+  if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
+  const mode = claudeModeArgs(o.b)
+  if (typeof mode === 'string') return { ok: false, text: mode }
+  if (!existsSync(o.cwd)) return { ok: false, text: `資料夾不存在：${o.cwd}` }
+  if (process.platform !== 'win32')
+    return hire({ name: o.name, model, effort: mode.effort, perm: mode.perm, role: o.manager ? 'manager' : 'staff', team: o.team, task: `你是 ${o.name}，接手。角色卡：${o.card}` }, { cwd: o.cwd })
+  const cfg = D.hireConfigDir()
+  if (o.b?.trustOk !== true && folderTrusted(o.cwd, cfg) === false) return { ok: false, need: 'trust', text: TRUST_TEXT(o.cwd) }
+  const r = runOpenRole(['--role', o.name, '--dir', o.cwd, '--card', o.card, '--role-type', o.manager ? 'manager' : 'staff', ...(o.team ? ['--team', o.team] : []),
+    '--model', model, ...mode.args, '--remote-control'], cfg)
+  if ('error' in r) return r.code === 3 ? { ok: false, online: true, text: `${o.name} 已經在線：改傳話給他` } : { ok: false, text: `開不起來：${r.error}` }
+  if (r.pid) winLaunchSet(r.sid, r.pid)
+  watchWinHire(r.sid, o.name, r.pid)
+  ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
+  return { ok: true, text: `📇 叫了 ${o.name}${o.team ? `（掛在 ${o.team} 底下）` : ''}：電腦上開了一個標題「${o.name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
+}
+export const CODEX_WIN_TEXT = 'Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
 
 export async function setModel(id: string, model: string): Promise<{ ok: boolean; text: string }> {
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }

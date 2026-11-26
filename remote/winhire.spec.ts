@@ -154,3 +154,26 @@ test('啟動紀錄超過 7 天的會清掉', () => {
   expect(winLaunches().old).toBeUndefined()
   expect(winLaunches().new.pid).toBe(2)
 })
+
+test.skipIf(process.platform !== 'win32')('叫角色（Windows）：帶 --card、主管、主管身分；在線（結束碼 3）回改傳話；沒信任過的資料夾先問', () => {
+  const { summonRole } = require('./hr')
+  const r = summonRole({ name: 'office測試', card: join(base, 'card.md'), cwd: work, team: 'office設計', b: { perm: 'auto' } })
+  expect(r.ok).toBe(true)
+  const a = calls[0].args
+  expect(arg(a, '--role')).toBe('office測試')
+  expect(arg(a, '--card')).toBe(join(base, 'card.md'))
+  expect(arg(a, '--dir')).toBe(work)
+  expect(arg(a, '--team')).toBe('office設計')
+  expect(arg(a, '--role-type')).toBe('staff')
+  expect(arg(a, '--model')).toBe('opus')
+  expect(arg(a, '--permission-mode')).toBe('auto')
+  expect(a).not.toContain('--name-only')
+  expect(summonRole({ name: 'P', card: 'c', cwd: work, manager: true, b: {} }).ok).toBe(true)
+  expect(arg(calls[1].args, '--role-type')).toBe('manager')
+  expect(calls[1].args).not.toContain('--team')
+  expect(summonRole({ name: 'P', card: 'c', cwd: fresh, b: {} })).toMatchObject({ ok: false, need: 'trust' })
+  const keep = reply
+  reply = () => ({ code: 3, out: JSON.stringify({ error: 'STOP: x already online', code: 3 }) + '\n', err: '' })
+  try { expect(summonRole({ name: 'P', card: 'c', cwd: work, b: {} })).toMatchObject({ ok: false, online: true, text: 'P 已經在線：改傳話給他' }) } finally { reply = keep }
+  expect(summonRole({ name: 'P', card: 'c', cwd: join(base, 'nope'), b: {} }).text).toContain('資料夾不存在')
+})

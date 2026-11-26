@@ -1305,7 +1305,33 @@
       if (j.ok) { await PO().load(); openShiftV2() }
     })
   }
-  ready.then(() => { if (window.PO) { window.PO.openHire = openHireV2; window.PO.openShift = openShiftV2 } })
+  // ---------- 叫角色、開專案（設計 windows-hire 4.）：清單由伺服器從角色卡算（/cards.json、/projects.json），點一張就開 ----------
+  // kind=member：p＝被點的人，開出來掛在他底下；kind=project：開那個專案的主管。已在線的回「改傳話」；資料夾沒信任過先說明、再按一次才開
+  async function openCardsV2(kind, p) {
+    const title = kind === 'member' ? `叫 ${p.plate} 的團隊成員` : '開專案'
+    if (PO().demo) { PO().toast('示意資料：這裡會列出角色卡，點了在電腦上開出那個角色'); return }
+    const sid = PO().sheet(title, PO().LOADING)
+    let j; try { j = await (await fetch(kind === 'member' ? `/cards.json?id=${encodeURIComponent(p.id)}` : '/projects.json', { cache: 'no-store' })).json() } catch {}
+    if (PO().sheetId() !== sid) return // 等的時候關掉或換了別的選單
+    if (!j || !j.ok) { PO().sheet(title, `<div class="note">${esc((j && j.text) || '連不到電腦')}</div>`, true); return }
+    const groups = new Map()
+    for (const c of j.cards || []) groups.set(c.group, [...(groups.get(c.group) || []), c])
+    const models = (st && st.models) || {}
+    PO().sheet(title,
+      `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}</div>` +
+      (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
+      ([...groups].map(([g, list]) => `<h3 class="sec line">${esc(g)}</h3>` + list.map(c =>
+        `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}${c.managers && c.managers.length ? `<small>在線：${c.managers.map(esc).join('、')}</small>` : ''}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('')).join('')
+        || '<div class="note">沒有找到角色卡</div>'), true)
+    document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
+      const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
+      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })
+      if (r.need === 'trust') { b.dataset.sure = 'trust'; b.querySelector('b').textContent = `${r.text} 還是要開就再按一次`; return }
+      if (r.ok) PO().closeSheet()
+      toast(r.text || r.error || '沒有回應')
+    }))
+  }
+  ready.then(() => { if (window.PO) { window.PO.openHire = openHireV2; window.PO.openShift = openShiftV2; window.PO.openSummon = p => openCardsV2('member', p); window.PO.openProjects = () => openCardsV2('project') } })
   // 狀態一拿到就接（通知列不用等圖）；場景等第一批圖到了才畫（render 自己會擋），到了馬上畫一次
   manifest.then(() => { PO().onState(j => { st = j; trackMail(j); render(); trackTrips(j); renderHelp(j) }) })
   ready.then(() => render()).finally(() => dispatchEvent(new Event('po:scene-ready'))) // 第一次畫好（或載入失敗）：收掉載入畫面
@@ -1737,6 +1763,7 @@
           <button class="hr-ent" data-l2="staff"><span class="hr-ei" aria-hidden="true">👥</span><span class="hr-txt"><b>員工</b><small id="hrn-staff"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="tables"><img class="hr-ic" src="${src('hr_ic_tables')}" alt=""><span class="hr-txt"><b>協作桌</b><small id="hrn-tables"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-l2="away" id="hrent-away"><span class="hr-ei" aria-hidden="true">📱</span><span class="hr-txt"><b>在 App 裡的 Codex</b><small id="hrn-away"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
+          <button class="hr-ent" data-q="project"><span class="hr-ei" aria-hidden="true">🗂</span><span class="hr-txt"><b>開專案</b><small>從專案的主管卡開人</small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="shift"><img class="hr-ic" src="${src('hr_ic_shift')}" alt=""><span class="hr-txt"><b>排班</b><small id="hrn-shift"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
           <button class="hr-ent" data-q="pay"><img class="hr-ic" src="${src('hr_ic_pay')}" alt=""><span class="hr-txt"><b>薪水單</b><small id="hrn-pay"></small></span><span class="hr-go" aria-hidden="true">›</span></button>
         </nav>
@@ -1852,7 +1879,7 @@
   hr.querySelector('.hr-search input').addEventListener('input', e => { hrQuery = e.target.value; hrRender() })
   hr.addEventListener('click', e => {
     const q = e.target.closest('[data-q]')
-    if (q) { if (q.dataset.q === 'tables') openTables(); else if (q.dataset.q === 'shift') PO().openShift(); else PO().openPay(); return }
+    if (q) { if (q.dataset.q === 'tables') openTables(); else if (q.dataset.q === 'project') openCardsV2('project'); else if (q.dataset.q === 'shift') PO().openShift(); else PO().openPay(); return }
     const g = e.target.closest('[data-l2]'); if (g) { openL2(g.dataset.l2); return }
     const f = e.target.closest('[data-fold]')
     if (f) { const k = f.dataset.fold; if (fold.has(k)) fold.delete(k); else fold.add(k); saveFold(); hrRender(); return }

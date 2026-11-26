@@ -749,13 +749,14 @@
       const team = `<select class="v2team" data-team><option value="">調部門　選擇部門</option>${[...bosses].map(([a, plates]) => `<option value="${esc(a)}">到 ${plates.length > 1 ? `${esc(a)}（${plates.map(esc).join('、')} 同名）` : esc(plates[0])} 底下</option>`).join('')}${p.team ? '<option value="-">不掛主管</option>' : ''}</select>`
       // 「接回後台」只給 App 開的 Codex（第一層也有）；終端機視窗的 Codex、agy 都不放（顧問 11-25）
       const ho = app && p.kind === 'codex' && p.src === 'app' && handoffOf(p), back = ho && ho.to === 'tmux' ? `<button class="mbtn${ho.why ? '' : ' go'}"${ho.why ? dk(ho.why) : ' data-ho2="tmux"'}>${ho.label}</button>${ho.why ? line(ho.why) : ''}` : ''
-      if (app) h = line(whereOf(p) + '，只能傳話、調部門') + team + back // 來源、標題等收掉（顧問 11-25）；調部門只動辦公室座位，照樣能用
+      const summon = claude ? '<button class="mrow" data-p="summon"><span><b>叫他的團隊成員</b><small>從他專案的角色卡開人，掛在他底下</small></span></button>' : '' // 設計 windows-hire 4.
+      if (app) h = line(whereOf(p) + '，只能傳話、調部門') + team + summon + back // 來源、標題等收掉（顧問 11-25）；調部門只動辦公室座位，照樣能用
       else h = `<div class="mcard kvs">${row('來源', esc(srcText(p) || '還不知道'))}${row('標題', p.title && esc(p.title))}${row('工具', p.tool && esc(p.tool))}${row('團隊', p.team && esc(p.team))}${row('名稱', p.agent && esc(p.agent))}</div>`
       if (!app) h += (claude ? '<button class="mrow" data-p="profile"><span><b>員工檔案</b></span></button>' : '') +
         (p.role === 'manager' ? '<button class="mrow" data-p="demote"><span><b>改回員工</b></span></button>'
           : p.kind ? `<button class="mrow"${dk('主管只能是 Claude')}><span><b>升為主管</b><small>主管只能是 Claude</small></span></button>` // 使用者 11-24
           : '<button class="mrow" data-p="promote"><span><b>升為主管</b></span></button>') +
-        team +
+        team + summon +
         (cap.fire ? `<button class="mbtn danger"${dk(cap.fire)}>解雇</button>`
           : arm === 'fire' ? `<div class="mcard warn"><i class="ico warn"></i><div><b>確定刪除 ${esc(p.plate)}？</b><span>${claude ? '對話會結束、Claude app 裡封存、電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）' : 'Codex 會關掉，電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）'}</span></div></div><button class="mbtn danger sure" data-f="yes">確定解雇</button><button class="mbtn" data-f="no">算了</button>`
           : '<button class="mbtn danger" data-f="ask">解雇</button>')
@@ -782,6 +783,7 @@
     }))
     body.querySelectorAll('button[data-p]').forEach(b => b.addEventListener('click', async () => {
       if (b.dataset.p === 'profile') { openProfile(p); return }
+      if (b.dataset.p === 'summon') { if (window.PO.openSummon) window.PO.openSummon(p); return }
       const j = await post('/staffing', { id: p.id, op: b.dataset.p }); toast(j.text || '沒有回應')
     }))
     body.querySelectorAll('select[data-team]').forEach(s => s.addEventListener('change', async () => {
