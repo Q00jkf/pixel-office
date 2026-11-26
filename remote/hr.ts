@@ -294,12 +294,16 @@ export function hire(b: any, opts: { cwd?: string; addDirs?: (string | undefined
 // ---------- Windows 招聘（設計 windows-hire 第 1 期）：沒有 tmux，改呼叫 scripts/open_role.py 開一個獨立的 PowerShell 視窗 ----------
 // 抓不到畫面：開之前看資料夾信任過沒（最常見的卡點），開了 90 秒還沒進辦公室就在通知卡提醒到電腦看那個視窗
 export const OPEN_ROLE = join(import.meta.dir, '..', 'scripts', 'open_role.py')
-export type OpenRoleRun = (args: string[], env: Record<string, string | undefined>) => { code: number | null; out: string; err: string }
+export type OpenRoleRun = (args: string[], env: Record<string, string | undefined>) => { code: number | null; out: string; err: string; sig?: string; ms?: number }
 /** python -I 不讀 PYTHONUTF8，roles.py 讀子程序輸出會用 cp950 解碼炸掉（2026-11-26 實測）：一定要帶 -X utf8 */
 export const openRoleArgv = (args: string[]) => [Bun.which('python') ?? Bun.which('py') ?? 'python', '-X', 'utf8', '-I', OPEN_ROLE, ...args]
+export const OPEN_ROLE_MS = 20000
 let openRoleRun: OpenRoleRun = (args, env) => {
-  const r = Bun.spawnSync(openRoleArgv(args), { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 20000, killSignal: 'SIGKILL' })
-  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() }
+  const t0 = Date.now()
+  try {
+    const r = Bun.spawnSync(openRoleArgv(args), { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: OPEN_ROLE_MS, killSignal: 'SIGKILL' })
+    return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString(), sig: r.signalCode ?? undefined, ms: Date.now() - t0 }
+  } catch (e: any) { return { code: null, out: '', err: `叫不起 python：${e?.message ?? e}`, ms: Date.now() - t0 } }
 }
 /** 測試換成假的 open_role（回傳原本的） */
 export function _setOpenRoleRun(fn: OpenRoleRun): OpenRoleRun { const old = openRoleRun; openRoleRun = fn; return old }
@@ -307,14 +311,19 @@ export function _setOpenRoleRun(fn: OpenRoleRun): OpenRoleRun { const old = open
 /** 呼叫 open_role.py --json：回 { sid, pid } 或錯誤字 */
 export function runOpenRole(args: string[], cfgDir?: string): { sid: string; pid?: number } | { error: string; code?: number } {
   const r = openRoleRun([...args, '--json'], { ...process.env, ...(cfgDir ? { CLAUDE_CONFIG_DIR: cfgDir } : {}) })
-  if (r.code === null) return { error: '開窗程式 20 秒沒有回應，電腦上可能沒開出視窗' } // 逾時被砍（spawnSync 的結束碼是 null）
   const last = r.out.trim().split('\n').pop() ?? ''
   try {
     const j = JSON.parse(last)
-    if (typeof j?.sid === 'string' && r.code === 0) return { sid: j.sid, pid: typeof j.pid === 'number' ? j.pid : undefined }
+    // 印出 sid＝預先登記寫了、視窗開了（open_role.py 最後一步才印）：之後才被中斷也算開成，不然手機會再開一份
+    if (typeof j?.sid === 'string' && j.dry_run !== true) return { sid: j.sid, pid: typeof j.pid === 'number' ? j.pid : undefined }
     if (typeof j?.error === 'string') return { error: j.error, code: typeof j.code === 'number' ? j.code : r.code ?? undefined }
   } catch {}
-  return { error: (r.err.trim().split('\n').pop() || `open_role.py 結束碼 ${r.code}`).slice(0, 300), code: r.code ?? undefined }
+  const tail = r.err.trim().split('\n').slice(-3).map(l => l.trim()).join(' / ').slice(-300)
+  if (r.code === null) { // 結束碼 null：逾時被砍，或被訊號／當掉中斷（W3 實測 3 秒就 null）；看得到的都帶給手機
+    if ((r.ms ?? 0) >= OPEN_ROLE_MS - 500) return { error: '開窗程式 20 秒沒有回應，電腦上可能沒開出視窗' }
+    return { error: `開窗程式被中斷（訊號 ${r.sig ?? '無'}、${r.ms ?? '?'} 毫秒）${tail ? '：' + tail : '，沒有錯誤訊息'}；電腦上可能沒開出視窗` }
+  }
+  return { error: (tail || `open_role.py 結束碼 ${r.code}`).slice(0, 300), code: r.code }
 }
 
 /**

@@ -71,10 +71,10 @@ test('open_role.py 回錯誤（例如資料夾不存在）：招聘失敗，訊�
   try { expect(hireWindows({ name: 'C', dir: work })).toMatchObject({ ok: false, text: '開不起來：Not found: X' }) } finally { reply = keep }
 })
 
-test('runOpenRole：輸出不是 JSON 時拿 stderr 最後一行', () => {
+test('runOpenRole：輸出不是 JSON 時拿 stderr 最後幾行', () => {
   const keep = reply
   reply = () => ({ code: 1, out: '', err: 'Traceback\nValueError: boom\n' })
-  try { expect(runOpenRole(['--role', 'x'])).toEqual({ error: 'ValueError: boom', code: 1 }) } finally { reply = keep }
+  try { expect(runOpenRole(['--role', 'x'])).toEqual({ error: 'Traceback / ValueError: boom', code: 1 }) } finally { reply = keep }
 })
 
 test('參數檢查與 tmux 版一樣；Codex 在 Windows 不能招', () => {
@@ -194,8 +194,20 @@ test('folderTrusted：在 git repo 裡只找到 git 根目錄（上層信任過�
 
 test('open_role 逾時（結束碼 null）：說開窗程式沒回應，不寫結束碼', () => {
   const keep = reply
-  reply = () => ({ code: null as any, out: '', err: '' })
+  reply = () => ({ code: null as any, out: '', err: '', ms: 20003 })
   try { expect(hireWindows({ name: 'T', dir: work }).text).toBe('開不起來：開窗程式 20 秒沒有回應，電腦上可能沒開出視窗') } finally { reply = keep }
+})
+
+test('結束碼 null 但沒到 20 秒：帶訊號、毫秒、stderr 最後幾行', () => {
+  const keep = reply
+  reply = () => ({ code: null as any, out: '', err: 'a\nb\nc\nTraceback: boom\n', sig: 'SIGKILL', ms: 3012 })
+  try { expect(hireWindows({ name: 'T', dir: work }).text).toBe('開不起來：開窗程式被中斷（訊號 SIGKILL、3012 毫秒）：b / c / Traceback: boom；電腦上可能沒開出視窗') } finally { reply = keep }
+})
+
+test('結束碼 null 但已印出 sid（視窗開了才被中斷）：算開成，不重開', () => {
+  const keep = reply
+  reply = () => ({ code: null as any, out: JSON.stringify({ sid: '11111111-2222-3333-4444-555555555555', pid: 1 }) + '\n', err: '', ms: 3000 })
+  try { const r = hireWindows({ name: 'T', dir: work }); expect(r.ok).toBe(true); expect(r.sid).toBe('11111111-2222-3333-4444-555555555555') } finally { reply = keep }
 })
 
 test('沒信任過的提示附實際路徑；90 秒提醒卡帶資料夾', async () => {
