@@ -1030,6 +1030,8 @@
       `<div class="nhead"><b>辦公室通知</b><button id="v2helpx" class="mbtn" aria-label="收起">收起</button></div>` +
       // 0.63.4：畫面上解析得出選項的，列成按鈕，點了由伺服器替他按（只送這些選項）；解析不出來的照舊只提醒
       sk.map(s => { const op = s.options || []
+        if (s.win) return card('warn', `新員工 ${esc(s.name)} 開了但還沒進辦公室`, `可能停在確認畫面（例如信任資料夾、權限），請到電腦上看標題是「${esc(s.session)}」的視窗`,
+          `<span></span><button class="mbtn" data-stuckok="${esc(s.id)}">知道了</button>`, ' hstuck')
         return card('warn', `新員工 ${esc(s.name)} 卡在電腦上的確認畫面`,
           `畫面：${esc(s.title)}。${op.length ? '在這裡選一項，辦公室替他按；或' : '請'}到電腦上執行 <code>tmux attach -t ${esc(s.session)}</code> 處理`,
           (op.length ? `<div class="nopts">${op.map(o => `<button class="mbtn${/^\d\./.test(o.label) ? '' : ' sub'}" data-stuckid="${esc(s.id)}" data-stuckopt="${esc(o.id)}" data-stucklabel="${esc(o.label)}">${esc(o.label)}</button>`).join('')}</div>` : '<span></span>') +
@@ -1179,7 +1181,8 @@
     // 0.62.20：誰來做（Claude／Codex）；Codex 開在電腦背景的 tmux，會花 ChatGPT 的用量，先只能當員工或行政
     const cxm = s0.codexModels || []
     sheet('招聘新員工',
-      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex">Codex</label></div>` +
+      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex"${s0.noCodexHire ? ' disabled' : ''}>Codex</label></div>` +
+      (s0.noCodexHire ? `<div class="v2hnote">${esc(s0.noCodexHire)}</div>` : '') +
       `<div id="hagentnote" class="v2hnote" style="display:none"></div>` +
       `<label>名字</label><input id="hname" maxlength="20" placeholder="輸入員工名字（也是 Claude app 裡的對話名稱）">` +
       // 選的角色的大站姿（0.63.46）：Claude→Claude、Codex→ChatGPT。放在名字欄下面（測試員：320 寬放上面會把名字欄擠出第一屏）；
@@ -1240,16 +1243,18 @@
       else if (adm) n.innerHTML = '<i class="ico admin"></i><span>' + esc(n.textContent) + '</span>' // ref3-H6：行政的說明前面放夾板圖示
       $('hgo').dataset.sure = ''; $('hgo').textContent = '招聘'
     }
-    $('hseat').addEventListener('change', note); document.querySelectorAll('input[name="hrole"]').forEach(r => r.addEventListener('change', note))
+    $('hseat').addEventListener('change', note); if ($('hdir')) $('hdir').addEventListener('change', note); document.querySelectorAll('input[name="hrole"]').forEach(r => r.addEventListener('change', note))
     document.querySelectorAll('input[name="hagent"]').forEach(r => r.addEventListener('change', agentSync)); note()
+    const sure = () => ($('hgo').dataset.sure || '').split(' ').filter(Boolean)
     $('hgo').addEventListener('click', async ev => {
       const name = $('hname').value.trim()
       if (!name) { toast('先取個名字'); return }
-      const body = { name, agent: agent(), role: role(), seat: $('hseat').value, model: $('hmodel').value, effort: ($('heffort') || {}).value || undefined, perm: ($('hperm') || {}).value, dir: ($('hdir') || {}).value, task: $('htask').value, chrome: agent() === 'claude' && $('hchrome').checked, replace: ev.target.dataset.sure === 'replace' }
+      const body = { name, agent: agent(), role: role(), seat: $('hseat').value, model: $('hmodel').value, effort: ($('heffort') || {}).value || undefined, perm: ($('hperm') || {}).value, dir: ($('hdir') || {}).value, task: $('htask').value, chrome: agent() === 'claude' && $('hchrome').checked, replace: sure().includes('replace'), trustOk: sure().includes('trust') }
       ev.target.disabled = true
       const j = await PO().post('/hire', body)
       ev.target.disabled = false
-      if (j.need === 'replace') { ev.target.dataset.sure = 'replace'; ev.target.textContent = `${j.text} 按這裡確定`; return }
+      // 主管換人（replace）、Windows 上資料夾還沒信任過（trust，設計 windows-hire 2.）：先說明，再按一次才開
+      if (j.need === 'replace' || j.need === 'trust') { ev.target.dataset.sure = [...sure(), j.need].join(' '); ev.target.textContent = `${j.text} ${j.need === 'trust' ? '還是要開就按這裡' : '按這裡確定'}`; return }
       if (j.ok) closeSheet()
       toast(j.text || j.error || '沒有回應')
     })

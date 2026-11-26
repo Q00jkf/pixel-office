@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -451,6 +451,7 @@ export function roster(now = Date.now()) {
     codexModels: codexModels(),
     efforts: EFFORTS, perms: PERMS, codexEfforts: CODEX_EFFORTS, codexPerms: CODEX_PERMS, // 投入程度＋模式（0.63.9）
     hireDirs: cfg.hireDirs.map(d => ({ name: d.name, path: d.path, ...(d.default ? { default: true } : {}) })),
+    ...(process.platform === 'win32' ? { noCodexHire: CODEX_WIN_TEXT } : {}), // Windows 招聘不能選 Codex（設計 windows-hire 3.）
   }
   if (bossBack) try { saveStore(officeFile(), S) } catch {}
   return out
@@ -1978,6 +1979,7 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
       if (!hp.ok) return json({ ok: false, error: hp.text, text: hp.text }, 403)
       b = hp.b
       if (b.agent !== 'codex') return json(hireAt(b, Date.now(), hire))
+      if (process.platform === 'win32') return json({ ok: false, text: CODEX_WIN_TEXT })
       // Codex 一開就結束（設定檔壞了、沒登入…）要回失敗，附畫面最後幾行和結束碼（0.63.56）
       let cxp: string | undefined
       const r = hireAt(b, Date.now(), (bb, o) => { const x = hireCodex(bb, { ...o, hold: true }); cxp = x.sid; return x })

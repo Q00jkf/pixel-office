@@ -4,7 +4,7 @@
 // 每位同事是哪種（狀態檔 addr 的 /tmp/cc-socks/<pid>.sock → <configDir>/sessions/<pid>.json）：
 //   entrypoint=sdk-cli → 從 Claude app 開的（沒有終端機：換模型、打斷要靠對話裡的外掛，見 hooks/register.tsx 的「人事」段）
 //   有 tmux 欄位       → 背景 tmux 裡的終端機對話：可以替他打 /model、/compact、按 Esc
-// 招聘要 tmux（Mac／Linux）；Windows 上招聘回「不支援」，其他功能照常
+// 招聘：Mac／Linux 開在 tmux；Windows 呼叫 scripts/open_role.py 開獨立視窗（hireWindows）。Codex 招聘只有 Mac／Linux
 import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -251,7 +251,8 @@ export function addDirArgs(dirs: (string | undefined)[] = [], cwd?: string): str
  * opts.addDirs：坐協作桌的人要讀寫的資料夾（這桌的協作資料夾：議題、檢查點、會議都在底下）。
  * 開 claude 時帶 --add-dir，免得每讀一次工作資料夾外的檔就停下來問（0.62.16）
  */
-export function hire(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[] } = {}): { ok: boolean; text: string; sid?: string } {
+export function hire(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[] } = {}): { ok: boolean; text: string; sid?: string; need?: string } {
+  if (process.platform === 'win32') return hireWindows(b, opts)
   if (!TMUX) return { ok: false, text: '這台電腦沒有 tmux，招聘目前只支援 Mac／Linux' }
   const name = String(b?.name ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim()
   if (!name || [...name].length > 20) return { ok: false, text: '名字要 1～20 個字' }
@@ -278,6 +279,86 @@ export function hire(b: any, opts: { cwd?: string; addDirs?: (string | undefined
   ctlSet(sid, { effort: mode.effort, perm: mode.perm })
   return { ok: true, text: `🧑‍💼 招聘了 ${name}（${MODELS[model]}${b.chrome === true ? '，可以操作瀏覽器' : ''}），大約十幾秒後進辦公室`, sid }
 }
+
+// ---------- Windows 招聘（設計 windows-hire 第 1 期）：沒有 tmux，改呼叫 scripts/open_role.py 開一個獨立的 PowerShell 視窗 ----------
+// 抓不到畫面：開之前看資料夾信任過沒（最常見的卡點），開了 90 秒還沒進辦公室就在通知卡提醒到電腦看那個視窗
+export const OPEN_ROLE = join(import.meta.dir, '..', 'scripts', 'open_role.py')
+export type OpenRoleRun = (args: string[], env: Record<string, string | undefined>) => { code: number | null; out: string; err: string }
+/** python -I 不讀 PYTHONUTF8，roles.py 讀子程序輸出會用 cp950 解碼炸掉（2026-11-26 實測）：一定要帶 -X utf8 */
+export const openRoleArgv = (args: string[]) => [Bun.which('python') ?? Bun.which('py') ?? 'python', '-X', 'utf8', '-I', OPEN_ROLE, ...args]
+let openRoleRun: OpenRoleRun = (args, env) => {
+  const r = Bun.spawnSync(openRoleArgv(args), { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 20000, killSignal: 'SIGKILL' })
+  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() }
+}
+/** 測試換成假的 open_role（回傳原本的） */
+export function _setOpenRoleRun(fn: OpenRoleRun): OpenRoleRun { const old = openRoleRun; openRoleRun = fn; return old }
+
+/** 呼叫 open_role.py --json：回 { sid, pid } 或錯誤字 */
+export function runOpenRole(args: string[], cfgDir?: string): { sid: string; pid?: number } | { error: string; code?: number } {
+  const r = openRoleRun([...args, '--json'], { ...process.env, ...(cfgDir ? { CLAUDE_CONFIG_DIR: cfgDir } : {}) })
+  const last = r.out.trim().split('\n').pop() ?? ''
+  try {
+    const j = JSON.parse(last)
+    if (typeof j?.sid === 'string' && r.code === 0) return { sid: j.sid, pid: typeof j.pid === 'number' ? j.pid : undefined }
+    if (typeof j?.error === 'string') return { error: j.error, code: typeof j.code === 'number' ? j.code : r.code ?? undefined }
+  } catch {}
+  return { error: (r.err.trim().split('\n').pop() || `open_role.py 結束碼 ${r.code}`).slice(0, 300), code: r.code ?? undefined }
+}
+
+/**
+ * 這個資料夾在 Claude Code 信任過沒（設定檔 .claude.json 的 projects.<路徑>.hasTrustDialogAccepted）。
+ * 照 Claude Code 自己的「不探檔案系統」判斷：從這層一路往上，任何一層信任過就算（2026-11-26 讀 claude 2.x 的 Rh()；
+ * 它正式判斷時會停在 git 根目錄，所以這裡偶爾會說「信任過」但其實會問：那種由開了 90 秒沒進辦公室的提醒接住）。
+ * 讀不到設定檔回 undefined（不擋）。只讀，不改
+ */
+export function folderTrusted(dir: string, cfgDir?: string, home = homedir()): boolean | undefined {
+  let projects: Record<string, any>
+  try { projects = JSON.parse(readFileSync(join(cfgDir || home, '.claude.json'), 'utf8'))?.projects ?? {} } catch { return }
+  const win = /^[A-Za-z]:/.test(dir)
+  // 路徑統一成正斜線、去掉結尾斜線（根目錄留 / 或 C:/）；Windows 不分大小寫
+  const norm = (p: string) => { const s = p.replace(/\\/g, '/').replace(/\/+$/, ''); const t = s === '' || /^[A-Za-z]:$/.test(s) ? s + '/' : s; return win ? t.toLowerCase() : t }
+  const trusted = new Set(Object.entries(projects).filter(([, v]) => v?.hasTrustDialogAccepted === true).map(([k]) => norm(k)))
+  const parts = dir.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+  for (let i = parts.length; i >= 1; i--) if (trusted.has(norm(parts.slice(0, i).join('/')))) return true
+  return false
+}
+
+export const TRUST_TEXT = (dir: string) => `「${dir}」這個資料夾還沒在 Claude Code 信任過：開了會停在「要不要信任這個資料夾」，要到電腦上按。`
+
+/** Windows 版招聘：參數檢查與 hire() 相同，開視窗交給 open_role.py（預先登記也由它寫） */
+export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[] } = {}): { ok: boolean; text: string; sid?: string; need?: string } {
+  if (b?.agent === 'codex') return { ok: false, text: CODEX_WIN_TEXT }
+  const name = String(b?.name ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim()
+  if (!name || [...name].length > 20) return { ok: false, text: '名字要 1～20 個字' }
+  const model = String(b.model ?? 'sonnet')
+  if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
+  const dirs = D.hireDirs()
+  const dir = opts.cwd && existsSync(opts.cwd) ? { name: opts.cwd, path: opts.cwd } : dirs.find(d => d.path === b.dir) ?? dirs[0]
+  if (!dir) return { ok: false, text: '沒有可以上班的資料夾（remote.json 的 hireDirs）' }
+  const team = typeof b.team === 'string' && b.team.trim() ? b.team.trim().slice(0, 60) : undefined
+  const task = typeof b.task === 'string' ? b.task.trim().slice(0, 4000) : ''
+  const mode = claudeModeArgs(b)
+  if (typeof mode === 'string') return { ok: false, text: mode }
+  const cfg = D.hireConfigDir()
+  if (b.trustOk !== true && folderTrusted(dir.path, cfg) === false) return { ok: false, need: 'trust', text: TRUST_TEXT(dir.name) }
+  const sid = crypto.randomUUID()
+  const title = [...(typeof b.title === 'string' && b.title.trim() ? b.title.trim() : name)].slice(0, 16).join('')
+  let taskFile: string | undefined
+  if (task) { taskFile = join(hrDir(), `task-${sid}.txt`); mkdirSync(hrDir(), { recursive: true }); writeFileSync(taskFile, task) }
+  const add = addDirArgs(opts.addDirs, dir.path).filter((_, i) => i % 2 === 1)
+  const r = (() => {
+    try {
+      return runOpenRole(['--role', name, '--name-only', '--dir', dir.path, '--session-id', sid, '--title', title, '--role-type', b.role === 'manager' ? 'manager' : 'staff',
+        ...(team ? ['--team', team] : []), '--model', model, ...mode.args, ...add.flatMap(d => ['--add-dir', d]), '--remote-control', ...(b.chrome === true ? ['--chrome'] : []),
+        ...(taskFile ? ['--task-file', taskFile] : [])], cfg)
+    } finally { if (taskFile) rmSync(taskFile, { force: true }) }
+  })()
+  if ('error' in r) return { ok: false, text: `開不起來：${r.error}` }
+  watchWinHire(r.sid, name, r.pid)
+  ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
+  return { ok: true, text: `🧑‍💼 招聘了 ${name}（${MODELS[model]}${b.chrome === true ? '，可以操作瀏覽器' : ''}），電腦上開了一個標題「${name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
+}
+export const CODEX_WIN_TEXT = 'Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
 
 export async function setModel(id: string, model: string): Promise<{ ok: boolean; text: string }> {
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
@@ -1090,7 +1171,7 @@ export function stuckTitle(screen: string): string | undefined {
 }
 export const STUCK_WATCH_MS = 60e3, STUCK_EVERY_MS = 3000, STUCK_KEEP_MS = 30 * 60e3
 export type StuckOpt = { id: string; label: string }
-type Stuck = { id: string; name: string; session: string; title: string; at: number; options: StuckOpt[] }
+type Stuck = { id: string; name: string; session: string; title: string; at: number; options: StuckOpt[]; win?: boolean }
 const stuck = new Map<string, Stuck>()
 /** 招聘開出後呼叫：60 秒內偵測；偵測到之後每 5 秒確認畫面還在，最多留 30 分鐘 */
 export function watchHire(session: string, name: string, capture = (s: string) => tmux('capture-pane', '-p', '-t', `=${s}:`).stdout.toString(), t0 = Date.now()) {
@@ -1112,8 +1193,23 @@ export function watchHire(session: string, name: string, capture = (s: string) =
   }
   setTimeout(check, STUCK_EVERY_MS)
 }
+/**
+ * Windows 招聘開出後呼叫（沒有畫面可抓）：90 秒內名冊沒有這個 sid → 通知卡「可能停在確認畫面，請到電腦看標題是 <名字> 的視窗」，
+ * 不給選項按鈕。之後每 5 秒再看：進辦公室了、視窗程序結束了、或滿 30 分鐘就拿掉
+ */
+export const WIN_STUCK_MS = 90e3
+export function watchWinHire(sid: string, name: string, pid?: number, t0 = Date.now(), alive = (p: number) => pidAlive(p), every = 5000) {
+  const key = `win-${sid}`
+  const check = () => {
+    const now = Date.now()
+    if (D.people().some(p => p.id === sid) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
+    if (now - t0 >= WIN_STUCK_MS && !stuck.has(key)) stuck.set(key, { id: crypto.randomUUID().slice(0, 8), name, session: name, title: '開了但還沒進辦公室', at: now, options: [], win: true })
+    setTimeout(check, every).unref?.()
+  }
+  setTimeout(check, every).unref?.()
+}
 /** 給手機通知列 */
-export const stuckView = () => [...stuck.values()].map(s => ({ ...s, options: s.options.map(o => ({ ...o })) }))
+export const stuckView =() => [...stuck.values()].map(s => ({ ...s, options: s.options.map(o => ({ ...o })) }))
 
 // ---------- 在手機上按確認（0.63.4）----------
 // 使用者在通知卡上點選項 → 伺服器對那個 tmux 送按鍵。只限上面 watchHire 盯著的、正卡住的 po-* session；
