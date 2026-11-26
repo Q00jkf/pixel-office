@@ -206,3 +206,8 @@ test('沒信任過的提示附實際路徑；90 秒提醒卡帶資料夾', async
   people = [{ id: 's9', name: '小李' }]
   await Bun.sleep(40)
 })
+
+test('關掉（可 --resume）：不在線的回原因、不動任何東西', async () => {
+  const { closeSession } = require('./hr')
+  expect(await closeSession('not-here')).toEqual({ ok: false, text: '這位已經不在線' })
+})

@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, summonRole, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, summonRole, closeSession, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -2124,7 +2124,7 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
     if (who.kind) return json({ ok: false, text: 'agy 不能從這裡換智力、打斷或解雇' })
     if (url.pathname === '/model') return json(await withPane(id, () => setModel(id, String(b.model ?? ''))))
     if (url.pathname === '/key') return json(await withPane(id, () => pressKey(id, String(b.key ?? ''))))
-    const fr = await fire(id)
+    const fr = b.keep === true ? await closeSession(id) : await fire(id) // keep＝關掉（可 --resume，設計 windows-hire 6.）
     if (fr.ok) unseat(id)
     return json(fr)
   }

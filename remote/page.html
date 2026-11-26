@@ -757,6 +757,8 @@
           : p.kind ? `<button class="mrow"${dk('主管只能是 Claude')}><span><b>升為主管</b><small>主管只能是 Claude</small></span></button>` // 使用者 11-24
           : '<button class="mrow" data-p="promote"><span><b>升為主管</b></span></button>') +
         team + summon +
+        // 關掉（可 --resume）跟解雇分開（設計 windows-hire 6.）：只給終端機、背景開的 Claude
+        (claude && !cap.fire && (p.src || p.host) !== 'app' && arm !== 'fire' ? `<button class="mbtn" data-f="close">關掉（之後可以接回來）</button>${line('對話結束、紀錄留著；在電腦上 claude --resume 接得回來')}` : '') +
         (cap.fire ? `<button class="mbtn danger"${dk(cap.fire)}>解雇</button>`
           : arm === 'fire' ? `<div class="mcard warn"><i class="ico warn"></i><div><b>確定刪除 ${esc(p.plate)}？</b><span>${claude ? '對話會結束、Claude app 裡封存、電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）' : 'Codex 會關掉，電腦上的紀錄丟到垃圾桶（倒垃圾前還救得回來）'}</span></div></div><button class="mbtn danger sure" data-f="yes">確定解雇</button><button class="mbtn" data-f="no">算了</button>`
           : '<button class="mbtn danger" data-f="ask">解雇</button>')
@@ -796,7 +798,7 @@
       if (f === 'ask') { arm = 'fire'; subKey = ''; drawSub(); return }
       arm = ''; subKey = ''
       if (f === 'no') { drawSub(); return }
-      const j = await post('/fire', { id: p.id })
+      const j = await post('/fire', { id: p.id, ...(f === 'close' ? { keep: true } : {}) })
       toast(j.text || '沒有回應')
       if (j.ok) show()
     }))

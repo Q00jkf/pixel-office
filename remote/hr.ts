@@ -508,6 +508,22 @@ export async function pressKey(id: string, key: string): Promise<{ ok: boolean; 
  *   3. 電腦上的對話紀錄（jsonl 與同名資料夾）搬到垃圾桶的「像素辦公室解雇」資料夾，倒垃圾前都還救得回來
  *      （沒有 ~/.Trash 的系統放 ~/.claude/pixel-office/fired/）
  */
+/**
+ * 關掉（設計 windows-hire 6.）：結束對話但不刪紀錄，之後在電腦上 claude --resume <id> 接得回來；解雇（fire）是結束＋紀錄丟垃圾桶。
+ * 只給終端機、tmux 開的 Claude：從 Claude app 開的請在 App 裡關。Windows 上連開窗的 PowerShell 一起關（同 fire）
+ */
+export async function closeSession(id: string): Promise<{ ok: boolean; text: string }> {
+  const p = procOf(id)
+  if (!p) return { ok: false, text: '這位已經不在線' }
+  if (p.app) return { ok: false, text: '從 Claude app 開的，請在 App 裡關' }
+  const who = nameOf(id)
+  const win = process.platform === 'win32' ? winWindowOf(p.sessionId, p.pid) : undefined
+  try { process.kill(p.pid, 'SIGTERM') } catch { return { ok: false, text: `${who} 關不掉` } }
+  if (p.tmuxSession?.startsWith('po-')) setTimeout(() => tmux('kill-session', '-t', p.tmuxSession!), 4000)
+  if (win) { try { process.kill(win) } catch {} }
+  return { ok: true, text: `🚪 關掉了 ${who}，對話紀錄留著：要接回來就在電腦上 ${p.cwd} 跑 claude --resume ${p.sessionId}` }
+}
+
 export async function fire(id: string): Promise<{ ok: boolean; text: string }> {
   const p = procOf(id)
   if (!p) return { ok: false, text: '這位已經不在線' }
