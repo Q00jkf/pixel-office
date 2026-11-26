@@ -108,7 +108,7 @@ const NO_HR = '這位的對話還沒載入新版像素辦公室外掛：請在�
 // ---------- 對話紀錄（<configDir>/projects/*/<sessionId>.jsonl）：一路往下讀（記住讀到哪），整理出最後用的模型、今天的用量、最近交代的事 ----------
 // 第一次只讀最後 8 MB：很長的對話，今天早一點的用量可能沒算到
 type Use = { i: number; o: number; cw: number; cr: number }
-type Scan = { file: string; off: number; model?: string; day: string; usage: Map<string, Use>; asks: { text: string; at: number }[]; first?: number }
+type Scan = { file: string; off: number; model?: string; day: string; usage: Map<string, Use>; asks: { text: string; at: number }[]; first?: number; hookSkip?: { by: string; at: number } }
 const transcripts = new Map<string, string>()
 const scans = new Map<string, Scan>()
 const FIRST_READ = 8 * 1024 * 1024
@@ -150,6 +150,10 @@ function scan(p: Proc): Scan | undefined {
     if (skipFirst) lines.shift()
     s.first ??= Date.now()
     for (const line of lines) {
+      if (line.includes('"subtype":"informational"') && line.includes('pixel-office: its classic.PermissionRequest hook was skipped')) {
+        try { const j = JSON.parse(line), by = HOOK_SKIP.exec(String(j.content ?? '')); if (by) s.hookSkip = { by: by[1], at: Date.parse(j.timestamp) || Date.now() } } catch {}
+        continue
+      }
       if (!line.includes('"type":"assistant"') && !line.includes('"type":"user"')) continue
       let j: any
       try { j = JSON.parse(line) } catch { continue }
@@ -177,6 +181,13 @@ function scan(p: Proc): Scan | undefined {
   }
 }
 const modelOf = (p: Proc) => scan(p)?.model
+/**
+ * 核准被擋（設計 windows-hire 7.）：別的 plugin 排在前面、把外掛的 classic.PermissionRequest 跳過時，Claude Code 在對話紀錄寫一行
+ * {"type":"system","subtype":"informational","content":"pixel-office: its classic.PermissionRequest hook was skipped. \"<plugin>\" runs first…"}
+ * （2026-11-26 在本機紀錄看到其他 classic.* 的同款字）。回擋住的 plugin 名；沒看到回 undefined
+ */
+export const HOOK_SKIP = /^pixel-office: its classic\.PermissionRequest hook was skipped\. "([^"]{1,80})" runs first/
+export function hookSkipOf(id: string): string | undefined { const p = procOf(id); return p ? scan(p)?.hookSkip?.by : undefined }
 function usageOf(p: Proc): Use {
   const t: Use = { i: 0, o: 0, cw: 0, cr: 0 }
   for (const u of scan(p)?.usage.values() ?? []) { t.i += u.i; t.o += u.o; t.cw += u.cw; t.cr += u.cr }

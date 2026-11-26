@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, summonRole, closeSession, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -403,6 +403,8 @@ export function roster(now = Date.now()) {
       tool: c.tool || undefined,
       since: c.since,
       approval: c.approval?.tool,
+      // 核准被擋（設計 windows-hire 7.）：Claude 在等、外掛卻沒收到權限單，而且對話紀錄寫著外掛的 PermissionRequest 被別的 plugin 跳過
+      ...(!c.kind && c.mode === 'waiting' && !c.approval ? (b => (b ? { hookBlocked: b } : {}))(hookSkipOf(c.id)) : {}),
       lastError: c.lastError,
       ctx: c.ctxPct,
       // 傳話（SendMessage）：手機畫紙飛機用；收件人在伺服器這邊對好（agent 或通訊位址），手機只拿 id

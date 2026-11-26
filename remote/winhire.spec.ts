@@ -106,7 +106,7 @@ test.skipIf(process.platform !== 'win32')('開窗腳本：名字、工作裡的�
   const got = [...r.stdout.toString().matchAll(/<([^>]*)>/g)].map(m => m[1])
   expect(got).toEqual(['--name', name, '--session-id', 'sid-1', '--model', name, task])
   expect(r.stdout.toString()).not.toMatch(/^PWNED/m)
-})
+}, 20000) // 開 PowerShell 在忙的電腦上要好幾秒
 
 test('folderTrusted：往上找到信任過的就算；Windows 路徑不分大小寫、斜線方向；設定檔讀不到回 undefined', () => {
   const c = join(base, 'c2'); mkdirSync(c, { recursive: true })
@@ -210,4 +210,19 @@ test('沒信任過的提示附實際路徑；90 秒提醒卡帶資料夾', async
 test('關掉（可 --resume）：不在線的回原因、不動任何東西', async () => {
   const { closeSession } = require('./hr')
   expect(await closeSession('not-here')).toEqual({ ok: false, text: '這位已經不在線' })
+})
+
+test('核准被擋：對話紀錄有「pixel-office 的 classic.PermissionRequest 被跳過」就回擋住的 plugin；其他 hook 被跳過不算', () => {
+  const { hookSkipOf } = require('./hr')
+  const c = join(base, 'cfgs'), id = 'sess-hook-1'
+  mkdirSync(join(c, 'sessions'), { recursive: true }); mkdirSync(join(c, 'projects', 'p'), { recursive: true }); mkdirSync(join(base, 'sessions'), { recursive: true })
+  writeFileSync(join(base, 'sessions', `${id}.json`), JSON.stringify({ addr: `/tmp/cc-socks/${process.pid}.sock`, configDir: c }))
+  writeFileSync(join(c, 'sessions', `${process.pid}.json`), JSON.stringify({ sessionId: id, cwd: work, entrypoint: 'cli' }))
+  const info = (hook: string) => JSON.stringify({ type: 'system', subtype: 'informational', content: `pixel-office: its classic.${hook} hook was skipped. "sec-plugin" runs first and sent the event on past it.`, timestamp: '2026-11-26T15:49:19.976Z' })
+  const f = join(c, 'projects', 'p', `${id}.jsonl`)
+  writeFileSync(f, info('PreToolUse') + '\n')
+  expect(hookSkipOf(id)).toBeUndefined()
+  writeFileSync(f, info('PreToolUse') + '\n' + info('PermissionRequest') + '\n')
+  expect(hookSkipOf(id)).toBe('sec-plugin')
+  expect(hookSkipOf('nobody')).toBeUndefined()
 })

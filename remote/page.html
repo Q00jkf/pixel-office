@@ -315,7 +315,7 @@
     $('sent').textContent = p.cmd ? `上一則指令：「${p.cmd.text.slice(0, 40)}」— ${CMD[p.cmd.state]}（${ago(p.cmd.at)}）` : ''
     $('cname').innerHTML = `${p.role === 'manager' ? '★ ' : ''}${esc(p.plate)}${p.kind ? ` <i class="badge-codex">${KIND[p.kind] || esc(p.kind)}</i>` : ''}`
     // 狀態列一行（狀態・模型・投入程度・模式・記憶）；待核准、錯誤有才另起一行；標題、工具、團隊、名稱移到「人事」二級
-    $('info').innerHTML = statLine(p)
+    $('info').innerHTML = statLine(p) + (p.hookBlocked ? `<div class="note">⚠ 這台電腦的安全設定（${esc(p.hookBlocked)}）擋住了外掛的權限掛點：他可能停在允許畫面，手機收不到，請到電腦上按</div>` : '')
     // 員工卡上方的 Q 版小人（0.63.46）：照 species（scene.js 給網址；四種角色以外的不顯示）
     const ch = $('cchibi'), cu = window.PO_KV ? window.PO_KV.chibi(p.species) : ''
     if (cu && ch.getAttribute('src') !== cu) ch.src = cu
@@ -917,7 +917,7 @@
   // 頂端狀態列（11-26 定案 B3）：狀態（正在寫／等你／卡在允許）＋打斷鈕；原人物卡那行（模型・投入程度・模式・記憶）；左邊 Q 版大頭
   // 第二階段（0.63.51 伺服器介面）：caps 有就照它（send／interrupt／handoff…），沒有（舊伺服器）照舊推論
   const roOf = p => p.away || (p.caps ? p.caps.send === false : p.kind === 'codex' && (p.src === 'app' || (!p.src && !p.ctl))) // 只能看：灰卡、App 裡的 Codex
-  const chatMode = p => p.away ? 'App 裡（已關）' : p.mode === 'waiting' && (p.approval || p.approvalInfo) ? '卡在允許' : p.mode === 'waiting' ? '等你' : MODE[p.mode] || p.modeText || p.mode || ''
+  const chatMode = p => p.away ? 'App 裡（已關）' : p.mode === 'waiting' && (p.approval || p.approvalInfo) ? '卡在允許' : p.mode === 'waiting' && p.hookBlocked ? '可能卡在允許・電腦的安全設定擋住手機核准，請到電腦按' : p.mode === 'waiting' ? '等你' : MODE[p.mode] || p.modeText || p.mode || ''
   /** 灰卡（state.codexAway）：不在名冊、只能看完整對話，頂端放「接回後台」 */
   function awayOf(id) {
     const a = ((st && st.codexAway) || []).find(x => x.id === id)
