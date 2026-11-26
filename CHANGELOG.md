@@ -7,6 +7,25 @@
 
 ---
 
+## 0.64.0 — 2026-11-27 — Windows 上從手機開人（招聘、交接、幫手、解雇）＋手機叫角色、團隊、開專案、關係圖
+
+- **改了什麼**（設計 `docs/designs/windows-hire.md`；分支 `feat/windows-hire` 合併）：
+  - **Windows 招聘**（`remote/hr.ts` 的 `hire()` Windows 分支、`scripts/open_role.py`）：原本靠 tmux，Windows 一律不能開。改成呼叫 `open_role.py --json` 開一個獨立 PowerShell 視窗；`open_role.py` 補 `--session-id/--model/--permission-mode/--effort/--add-dir/--task-file/--role-type/--name-only/--json/--chrome/--remote-control`。開之前查資料夾信任（`~/.claude.json`，判斷停在 git 根目錄，跟 Claude 一樣），沒信任過手機先問；90 秒沒進辦公室發提醒卡（附資料夾路徑、「標題可能顯示 claude」）。交接、幫手沿用同一個 `hire()`。Mac／Linux 不變。
+  - **PowerShell 引號**（`open_role.py` 的 `q()`）：`‘ ’ ‚ ‛` PowerShell 也當單引號，iPhone 智慧標點會打出 `’` 讓字串提早結束、後面被當指令執行；五種一起重複一次。
+  - **Windows 解雇**：連開窗的 PowerShell 一起關（`hr/win-launch.json` 記 host pid）。
+  - **「關掉」與「解雇」分開**：關掉＝收視窗、保留對話與名牌，之後可以接回來；解雇＝刪除。
+  - **Codex 生圖幫手在 Windows**（`remote/helpers.ts`）：開之前就回「Windows 上還不能從手機招聘 Codex…」，不建交件夾、協作資料夾。
+  - **手機叫角色**：`scripts/cards.py`（從 `team_window.py` 抽出，兩邊共用）；`/cards.json`、`/projects.json`、`/summon`（高風險端點）；手機「叫他的團隊成員」「開專案」（像素圖示）、「辦公室｜關係」分頁（關係樹，在線主管列在專案標題）。
+  - **核准被擋時講清楚**（`remote/approve.ts` 的 `phoneOffCard`）：名冊 `hookBlocked`（組織要求的安全外掛讓 pixel-office 的權限掛點不跑）時，狀態卡與允許卡都寫「電腦的安全設定擋住，請到電腦上按」，不給允許／拒絕按鈕。
+  - **Windows 上 bun 閒置後第一次 `spawnSync` 被假逾時砍掉**（bun 1.3.11）：共用 `spawnSyncW`，沒輸出又沒到逾時就重試一次；open_role、查程序、cards.py、git rev-parse 都改用它。open_role 失敗時回訊號、毫秒、stderr 最後幾行。
+  - 🔴 **交接換主管（共用邏輯，Mac／Linux 也受影響）**（`remote/hr.ts` 的 `swapOrders`）：舊主管沒有上層時，新主管 `team` 清空，不再跟舊主管互相掛（原本會互指，關係圖成環）。
+  - **`skills/team/roles.md` §5**：拿掉 Desktop `start_session` 那段，一律用 `open_role.py` 開獨立視窗（不重編號）。
+  - 測試：`remote/winhire.spec.ts`、`summon.spec.ts`、`reltree.spec.ts` 新增；`server.spec.ts` 的 fakeHome 在 Windows 認得真家目錄（原本會把測試的桌子寫進真的 `office-<port>.json`）。
+- **為什麼**：jacky 2026-11-26「好幫我改版讓window 可以開腳色 原本mac linux 的部分不要改道」、「然後開出製作 測試的session 最後你做確認 確保實際操作沒問題」；另議三項（關掉／解雇分開、核准被擋講清楚、roles.md §5）同日裁示。
+- **實測**：2026-11-26～27 在 Windows 用測試伺服器 8782 逐條驗驗收準則 M1、M2、W1～W12 全過（W4 幫手、W10 Codex 生圖幫手 11-27 補驗）；報告在 repo 外的測試資料夾。手機核准本身在這台驗不到（組織安全外掛擋掛點），以單元測試涵蓋。
+- **commit**：9a78cc3…aafecd0（16 個），合併 66ed1f8
+- **升級要做的**：重開手機伺服器 8767（`remote/server.ts` 不經外掛安裝，舊程序跑的是舊碼）；開著的團隊視窗重開（`team_window.py` 改 import `scripts/cards.py`）；在用 team skill 的視窗重開或 `/reload-plugins`（roles.md §5 改了）。
+
 ## 0.63.62 — 2026-11-26 — Windows 實測後的一批修正：手機核准、Desktop 分頁、/clear 身分、手機傳話的狀態、頁面小修
 
 - **改了什麼**：
