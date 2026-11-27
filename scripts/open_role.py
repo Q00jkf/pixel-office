@@ -11,6 +11,7 @@
   外掛在那個 session 第一次啟動時套用，開場檔不必再寫「開工先登記辦公室」；agent 與 ref 外掛本來就會自己讀 ListAgents 填
 - --dir 省略 → 用角色卡的啟動位置（roles.py；卡上沒寫用卡所在專案根目錄）；--kickoff 省略 → 開場句「你是 <角色>，接手」
 - 路徑不存在 → 報錯、不開；--dry-run 只印要跑的指令與預設登記，不開視窗、不寫檔
+- --agent agy（0.64.5）：視窗跑 agy；預先登記寫 presets/agp-<8 碼>.json，用環境變數 PO_PRESET 交給 agy 外掛（agy/agy_office.py apply_preset），印出的 sid 是那個暫代 id
 - 團隊視窗（pty 分頁）import DROP_ENV、child_env()、live_sessions()，兩邊不各寫一份
 """
 import argparse
@@ -160,6 +161,16 @@ def ps_script(role, folder, prompt, session_id, plugin_dir=None, extra=()):
             f'claude --name {q(role)} --session-id {q(session_id)}{plugin}{more}' + (f' {q(prompt)}' if prompt else ''))
 
 
+AGY_MODES = {'acceptEdits': 'accept-edits', 'auto': 'auto', 'plan': 'plan'}  # agy --mode 只有這三種（agy 1.5.8 --help）；其他的照 agy 預設
+
+
+def ps_agy(role, folder, prompt, extra=()):
+    """agy 版（0.64.5）：沒有 --session-id、--name；開場句用 -i 帶（互動模式先跑這句）"""
+    more = ''.join(f' {q(x)}' for x in extra)
+    return (f'Set-Location -LiteralPath {q(folder)}; $host.UI.RawUI.WindowTitle = {q(role)}; '
+            f'agy{more}' + (f' -i {q(prompt)}' if prompt else ''))
+
+
 def card_dir(role):
     """--dir 沒給：從角色卡的啟動位置拿（卡上沒寫就是卡所在專案的根目錄）；找不到或同名多張回 None"""
     from roles import find  # roles → takeover → 本檔，放這裡免得循環
@@ -228,6 +239,8 @@ def main(argv=None):
     ap.add_argument('--plate', help='nameplate, 1-12 letters/digits (default: from --name if ASCII)')
     ap.add_argument('--role-type', choices=('staff', 'manager'), default='staff', help='office role in the preset (default staff)')
     ap.add_argument('--session-id', type=session_uuid, help='session id to use (default: a new uuid)')
+    ap.add_argument('--agent', choices=('claude', 'agy'), default='claude',
+                    help='agy: run Antigravity CLI instead (preset via PO_PRESET; --model/--effort/--add-dir passed on, --permission-mode mapped to agy --mode)')
     ap.add_argument('--model', help='claude --model')
     ap.add_argument('--permission-mode', choices=PERMISSION_MODES, help='claude --permission-mode')
     ap.add_argument('--effort', choices=EFFORTS, help='claude --effort')
@@ -268,8 +281,12 @@ def main(argv=None):
         with open(a.task_file, encoding='utf-8') as f:
             task = f.read().strip()
     title = (a.title or (card and (card['title'] or card['role'])) or a.role)[:16]  # 用 office_name 叫的也登記成卡名，takeover 才認得持有者
-    sid = a.session_id or str(uuid.uuid4())
+    agy = a.agent == 'agy'
+    # agy 開之前不知道它的對話 id：用暫代 id（agp-<8 碼>）當預先登記的檔名與座位的鑰匙，agy 外掛開場時套用、記成 launch
+    sid = f'agp-{uuid.uuid4().hex[:8]}' if agy else a.session_id or str(uuid.uuid4())
     preset = {'title': title, 'role': a.role_type, **({'team': a.team} if a.team else {}), **({'name': a.plate} if a.plate else {})}
+    if agy:
+        preset.update(agent=a.role, launch=sid)
     if task:
         prompt = task
     elif a.kickoff:
@@ -296,8 +313,13 @@ def main(argv=None):
     extra = [*(['--model', a.model] if a.model else []), *(['--permission-mode', a.permission_mode] if a.permission_mode else []),
              *(['--effort', a.effort] if a.effort else []), *[x for d in add_dirs for x in ('--add-dir', d)],
              *(['--remote-control', a.role] if a.remote_control else []), *(['--chrome'] if a.chrome else [])]
-    script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
-                       os.path.abspath(a.plugin_dir) if a.plugin_dir else None, extra)
+    if agy:
+        extra = [*(['--model', a.model] if a.model else []), *(['--mode', AGY_MODES[a.permission_mode]] if a.permission_mode in AGY_MODES else []),
+                 *(['--effort', a.effort] if a.effort else []), *[x for d in add_dirs for x in ('--add-dir', d)]]
+        script = ps_agy(a.role, os.path.abspath(a.dir), prompt, extra)
+    else:
+        script = ps_script(a.role, os.path.abspath(a.dir), prompt, sid,
+                           os.path.abspath(a.plugin_dir) if a.plugin_dir else None, extra)
     if a.dry_run:
         if a.json:
             print(json.dumps({'sid': sid, 'pid': None, 'dry_run': True, 'preset': preset, 'script': script}, ensure_ascii=False))
@@ -311,7 +333,8 @@ def main(argv=None):
     os.makedirs(os.path.dirname(preset_file(sid)), exist_ok=True)
     with open(preset_file(sid), 'w', encoding='utf-8') as f:
         json.dump(preset, f, ensure_ascii=False)
-    proc = subprocess.Popen(['powershell', '-NoExit', '-EncodedCommand', encoded(script)], env=child_env(),
+    env = {**child_env(), 'PO_PRESET': preset_file(sid)} if agy else child_env()
+    proc = subprocess.Popen(['powershell', '-NoExit', '-EncodedCommand', encoded(script)], env=env,
                             creationflags=subprocess.CREATE_NEW_CONSOLE)
     if a.json:
         print(json.dumps({'sid': sid, 'pid': proc.pid}))

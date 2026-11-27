@@ -284,6 +284,30 @@ def wait_reply(cid: str) -> str:
 
 # ---------------------------------------------------------------- hook
 
+def apply_preset(s: dict, cid: str):
+    """手機招聘、叫角色開的 agy（0.64.5）：open_role.py --agent agy 把預先登記寫在 PO_PRESET 指的檔，這個視窗第一個對話開場時套用一次就刪掉
+    （同 Claude 的 presets/<id>.json；agy 開之前不知道對話 id，所以靠環境變數，hook 會繼承 agy 的環境，2026-11-27 實測）。
+    launch＝伺服器釘座位用的暫代 id（agp-<8 碼>），上線後伺服器照它把座位換到 agy-<對話 id>。
+    回登記檔的路徑：呼叫的人存好狀態檔才刪（先刪再存的話，hook 中途被砍＝登記丟了，2026-11-27 實測名牌變成預設的）"""
+    f = os.environ.get("PO_PRESET")
+    if not f or s.get("id"):
+        return None
+    pre = load(Path(f))
+    if not pre:
+        return None
+    name = str(pre.get("name") or "")
+    if NAME_OK.match(name) and not any(c.get("name") == name and c.get("id") != f"agy-{cid}" for c in live_crew()):
+        s["name"] = name
+    if pre.get("title"):
+        s.update(title=str(pre["title"])[:16], titleAuto=False, titleAt=now_ms())
+    for k in ("agent", "team", "launch"):
+        if pre.get(k):
+            s[k] = str(pre[k])[:64]
+    if pre.get("role") in ("staff", "manager"):
+        s["role"] = pre["role"]
+    return Path(f)
+
+
 def hook(event: str) -> None:
     out = {"decision": "stop"} if event == "Stop" else {}
     try:
@@ -304,6 +328,7 @@ def hook(event: str) -> None:
             SESSIONS.mkdir(parents=True, exist_ok=True)
             p = status_file(cid)
             s = load(p)
+            used = apply_preset(s, cid)
             if event == "PreInvocation":
                 note = cp_note(s)
                 if note:
@@ -328,6 +353,8 @@ def hook(event: str) -> None:
             if err:
                 s["lastError"] = {"text": str(err).splitlines()[0][:80], "at": now}
             save(p, s)
+            if used:
+                used.unlink(missing_ok=True)
             ensure_watch()
     except Exception:
         pass

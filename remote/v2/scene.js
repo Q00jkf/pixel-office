@@ -1183,7 +1183,7 @@
     sheet('招聘新員工',
       // 從角色卡挑（0.64.4，jacky「按椅子進到招聘新員工時沒有看到 role 的選擇」）：照下面選的座位，有主管的桌＝叫角色到這桌、沒主管的桌＝開主管到這桌、辦公區＝開專案
       `<button class="mrow" id="hcards"><span><b>從角色卡挑</b><small>照下面選的「坐哪」：有主管的桌列角色卡（含其他專案）、沒主管的桌和辦公區列主管卡；不用卡就照下面填</small></span></button>` +
-      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex"${s0.noCodexHire ? ' disabled' : ''}>Codex</label></div>` +
+      `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex"${s0.noCodexHire ? ' disabled' : ''}>Codex</label>${s0.agyHire ? '<label><input type="radio" name="hagent" value="agy">agy</label>' : ''}</div>` +
       (s0.noCodexHire ? `<div class="v2hnote">${esc(s0.noCodexHire)}</div>` : '') +
       `<div id="hagentnote" class="v2hnote" style="display:none"></div>` +
       `<label>名字</label><input id="hname" maxlength="20" placeholder="輸入員工名字（也是 Claude app 裡的對話名稱）">` +
@@ -1216,6 +1216,11 @@
     $('hkv').onload = () => { $('hkvbox').hidden = false }
     // 投入程度（預設中）、模式（預設自動）：Codex 換成它自己的清單（伺服器給；沒給就不顯示、不送）
     const cfgSync = (cx, keepOld) => {
+      if (agent() === 'agy') { // 0.64.5：agy 的模式只有自動／手動／接受編輯／規劃；投入程度預設照 agy 自己的
+        $('hcfg').innerHTML = `<label>投入程度</label><select id="heffort"><option value="" selected>照 agy 預設</option>${(s0.efforts || []).map(e => `<option value="${esc(e.v)}">${esc(e.name)}</option>`).join('')}</select>` +
+          `<label>模式</label><select id="hperm">${(s0.agyPerms || []).map(m => `<option value="${esc(m.v)}"${m.v === 'auto' ? ' selected' : ''}>${esc(m.name)}${m.desc ? '｜' + esc(m.desc) : ''}</option>`).join('')}</select>`
+        return
+      }
       const o = PO().cfgOpts ? PO().cfgOpts(cx ? { kind: 'codex' } : {}, cx ? $('hmodel').value : undefined) : { efforts: [], perms: [] }
       const pick = (l, d) => (l.find(x => x.v === d) || l[0] || {}).v
       const keep = keepOld && ($('heffort') || {}).value, keepP = keepOld && ($('hperm') || {}).value, ed = cx ? (o.efforts.some(e => e.v === keep) ? keep : '') : pick(o.efforts, 'medium'), pd = keepP && o.perms.some(m => m.v === keepP) ? keepP : pick(o.perms, 'auto') // 換模型不把唯讀／手動改回自動
@@ -1226,17 +1231,19 @@
     cfgSync(false)
     $('hmodel').addEventListener('change', () => { if (agent() === 'codex') cfgSync(true, true) }) // 換模型：還有的投入程度就保留
     const agentSync = () => {
-      const cx = agent() === 'codex', mgr = document.querySelector('input[name="hrole"][value="manager"]')
-      $('hkv').src = kvSrc('stand', cx ? 'chatgpt' : 'claude')
-      mgr.disabled = cx
-      if (cx && mgr.checked) document.querySelector('input[name="hrole"][value="staff"]').checked = true
-      $('hmodel').innerHTML = cx ? (cxm.length ? cxm.map((m, i) => `<option value="${esc(m.slug)}">${esc(m.name)}${i === 0 ? '｜預設' : ''}</option>`).join('') : '<option value="default">Codex 預設</option>') : claudeModels
+      const cx = agent() === 'codex', ag = agent() === 'agy', other = cx || ag, mgr = document.querySelector('input[name="hrole"][value="manager"]')
+      $('hkv').src = kvSrc('stand', cx ? 'chatgpt' : ag ? 'gemini' : 'claude')
+      mgr.disabled = other
+      if (other && mgr.checked) document.querySelector('input[name="hrole"][value="staff"]').checked = true
+      $('hmodel').innerHTML = cx ? (cxm.length ? cxm.map((m, i) => `<option value="${esc(m.slug)}">${esc(m.name)}${i === 0 ? '｜預設' : ''}</option>`).join('') : '<option value="default">Codex 預設</option>')
+        : ag ? '<option value="default">agy 預設</option>' + (s0.agyModels || []).map(m => `<option value="${esc(m.slug)}">${esc(m.name)}</option>`).join('') : claudeModels
       cfgSync(cx)
-      $('hname').placeholder = cx ? '輸入員工名字（Codex 的名牌由辦公室給，這是它的職稱）' : '輸入員工名字（也是 Claude app 裡的對話名稱）'
-      $('hchromel').style.display = cx ? 'none' : ''; if (cx) $('hchrome').checked = false
-      const n = $('hagentnote'); n.style.display = cx ? '' : 'none'
-      n.innerHTML = cx ? '<i class="ico warn"></i>會花 ChatGPT 的用量（不是 Claude 的）。開在電腦背景，先只能當員工或行政；進辦公室要二十秒左右' : ''
-      n.classList.toggle('warn', cx)
+      $('hname').placeholder = cx ? '輸入員工名字（Codex 的名牌由辦公室給，這是它的職稱）' : ag ? '輸入員工名字（英數字 12 字內也當名牌，其他的當職稱）' : '輸入員工名字（也是 Claude app 裡的對話名稱）'
+      $('hchromel').style.display = other ? 'none' : ''; if (other) $('hchrome').checked = false
+      const n = $('hagentnote'); n.style.display = other ? '' : 'none'
+      n.innerHTML = cx ? '<i class="ico warn"></i>會花 ChatGPT 的用量（不是 Claude 的）。開在電腦背景，先只能當員工或行政；進辦公室要二十秒左右'
+        : ag ? '<i class="ico warn"></i>會花 Google 的用量（不是 Claude 的）。電腦上開一個 agy 視窗，先只能當員工或行政；手機不能替它按允許、換模型，只能傳話' : ''
+      n.classList.toggle('warn', other)
       note()
     }
     const note = () => {
@@ -1332,7 +1339,8 @@
     const cardRows = list => list.map(c => `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('')
     PO().sheet(title,
       `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}${tb ? `，坐「${esc(tb.name)}」` : ''}</div>` +
-      (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
+      (st && st.agyHire && kind === 'member' ? `<label>誰來開</label><select id="cagent"><option value="claude" selected>Claude</option><option value="agy">agy（Google 的用量；手機只能傳話）</option></select>` : '') +
+      (Object.keys(models).length ? `<label id="cmodell">智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
       // 在線主管是「這個專案」的，不是某張卡的人：放在專案分組標題那一行（測試 #7）
       ([...groups].filter(([, list]) => !list[0].other).map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
         return `<h3 class="sec line">${esc(g)}${on.length ? `・在線主管：${on.map(esc).join('、')}` : ''}</h3>` + cardRows(list) }).join('')
@@ -1345,9 +1353,11 @@
         (kind === 'project' ? `<button class="mrow" id="ctable"><span><b>桌子設定</b><small>改名、幾人座、協作資料夾、刪除</small></span></button>` : '') : ''), true)
     const cg = document.getElementById('cgen'); if (cg) cg.addEventListener('click', () => openHireV2(`t${table}.`, kind === 'member' ? 'staff' : 'manager'))
     const ct = document.getElementById('ctable'); if (ct) ct.addEventListener('click', () => openTable(table))
+    const ca = document.getElementById('cagent'), cm = document.getElementById('cmodel'), cml = document.getElementById('cmodell')
+    if (ca && cm) ca.addEventListener('change', () => { const ag = ca.value === 'agy'; cm.style.display = cml.style.display = ag ? 'none' : '' }) // agy 用它自己的預設模型
     document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
       const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
-      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), ...(tb ? { table } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })
+      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), ...(tb ? { table } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, agent: (document.getElementById('cagent') || {}).value || 'claude', trustOk: sure.includes('trust') })
       if (r.need === 'trust') { b.dataset.sure = 'trust'; b.querySelector('b').textContent = `${r.text} 還是要開就再按一次`; return }
       if (r.ok) PO().closeSheet()
       toast(r.text || r.error || '沒有回應')

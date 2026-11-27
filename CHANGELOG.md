@@ -7,6 +7,20 @@
 
 ---
 
+## 0.64.5 — 2026-11-27 — 手機可以招聘 agy、用 agy 叫角色（Windows）
+
+- **改了什麼**：
+  - `scripts/open_role.py` 加 `--agent agy`：視窗跑 `agy`（開場句用 `-i`，`--model`、`--effort`、`--add-dir` 照帶，模式只轉 auto／acceptEdits／plan，其他照 agy 預設）。預先登記寫 `presets/agp-<8 碼>.json`，用環境變數 `PO_PRESET` 交給 agy；印出的 sid 是這個暫代 id。
+  - `agy/agy_office.py`：hook 開場時讀 `PO_PRESET`，套用名牌、職稱、主管、角色、`agent`、`launch`，存好狀態檔才刪登記檔。
+  - `remote/hr.ts`：`hireWindows` 碰到 `agent=agy` 改走 `hireAgyWin`；`summonRole` 帶 `agent=agy` 用 agy 開角色。新增 `agyModeArgs`、`agyInstalled`、`agyModels`（背景跑 `agy models` 一次）、`agyByLaunch`、`AGY_PERMS`。90 秒沒進辦公室的提醒也認 agy。
+  - `remote/server.ts`：狀態多 `agyHire`、`agyModels`、`agyPerms`；新增 `resolveAgyPins`：座位先釘暫代 id，agy 上線後換到 `agy-<對話 id>`，30 分鐘沒來放掉。
+  - `remote/v2/scene.js`：招聘的「誰來做」多 agy（造型、模型清單、投入程度、模式跟著換，不能選主管）；「從角色卡挑」清單多「誰來開」（Claude／agy）。
+- **為什麼**：jacky 11-27「為什麼不能開codex 呢……還有 AGY也是」→ 看完提案說「先做 agy」。原因是 Windows 招聘只做了 Claude，Codex 那套靠 tmux 另議，agy 從來沒接。
+- **代價**：agy 只能當員工或行政；手機不能替它按允許、換模型、打斷，只能傳話；會花 Google 的用量。沒交代工作的 agy 要等使用者在視窗打字才進辦公室。只有 Windows。實測（8782）：招聘一位 agy 坐協作桌，名牌、職稱、主管、座位都對上；第一次因為重裝外掛後 hook 跑了 12 秒被 agy 砍掉（逾時 10 秒），登記先被刪了，所以改成存好才刪。叫角色那條只跑了單元測試，沒有實際開。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：重裝 agy 外掛：關掉所有 agy 視窗，跑 `python <plugin>/agy/agy_office.py install`；重開辦公室伺服器（8767）。
+
 ## 0.64.4 — 2026-11-27 — 手機頁按鈕統一成像素木頭風；招聘畫面可以從角色卡挑
 
 - **改了什麼**：

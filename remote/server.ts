@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, BROWSER_COOKIE, BrowserLogin, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, agyInstalled, agyModels, agyByLaunch, AGY_PERMS, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -231,6 +231,26 @@ export function resolveCodexPins(S: Store, people: { id: string; kind?: string }
   if (dirty) try { saveStore(officeFile(), S) } catch {}
 }
 
+/**
+ * 手機招、叫的 agy（0.64.5）：座位先釘在暫代 id（agp-<8 碼>），它上線、狀態檔記了 launch 後換到 agy-<對話 id>。
+ * agy 要等第一個動作（帶開場句的話馬上、沒帶要等使用者打字）才寫狀態，所以暫代的留 30 分鐘
+ */
+const agpSeen = new Map<string, number>()
+let agpCheck = 0
+export function resolveAgyPins(S: Store, people: { id: string }[], now = Date.now(), byLaunch: (k: string) => string | undefined = agyByLaunch, persist = true): void {
+  const pend = Object.keys(S.pins).filter(k => k.startsWith('agp-'))
+  if (!pend.length || now - agpCheck < 3000) return
+  agpCheck = now
+  let dirty = false
+  for (const k of pend) {
+    if (!agpSeen.has(k)) agpSeen.set(k, now)
+    const id = byLaunch(k)
+    if (id && people.some(p => p.id === id) && !S.pins[id]) { pinSeat(S, id, S.pins[k], 'hire', now); unpin(S, k); agpSeen.delete(k); dirty = true }
+    else if (now - agpSeen.get(k)! > 30 * 60e3) { unpin(S, k); agpSeen.delete(k); dirty = true }
+  }
+  if (dirty && persist) try { saveStore(officeFile(), S) } catch {}
+}
+
 /** Codex 的模型、投入程度、權限：招聘時與手機換過的（hr/<id>.ctl.json；0.63.9） */
 function codexMode(id: string) {
   const st = codexSettings(id) // 0.63.19：對話紀錄的 turn_context（實際設定）＋手機剛換過的；不是手機招的 Codex 也有
@@ -423,6 +443,7 @@ export function roster(now = Date.now()) {
   })
   const S = office()
   resolveCodexPins(S, list, now)
+  resolveAgyPins(S, list, now)
   resolveCodexOrders(list, now)
   // 換好主管的交接紀錄（0.63.58，顧問裁示 a）：認桌時照紀錄，優先於比名字和主管座；桌子已經改給別位在線主管就不算（審查 H-1）
   let done: HandoverHint[] = []
@@ -454,6 +475,7 @@ export function roster(now = Date.now()) {
     efforts: EFFORTS, perms: PERMS, codexEfforts: CODEX_EFFORTS, codexPerms: CODEX_PERMS, // 投入程度＋模式（0.63.9）
     hireDirs: cfg.hireDirs.map(d => ({ name: d.name, path: d.path, ...(d.default ? { default: true } : {}) })),
     ...(process.platform === 'win32' ? { noCodexHire: CODEX_WIN_TEXT } : {}), // Windows 招聘不能選 Codex（設計 windows-hire 3.）
+    ...(agyInstalled() ? { agyHire: true, agyModels: agyModels(), agyPerms: AGY_PERMS } : {}), // 招聘、叫角色可以選 agy（0.64.5，只有 Windows）
   }
   if (bossBack) try { saveStore(officeFile(), S) } catch {}
   return out

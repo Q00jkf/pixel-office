@@ -51,6 +51,14 @@ python "$HOME\.claude\plugins\cache\pixel-office\pixel-office\<版本>\agy\agy_o
 
 在 agy 說：「在辦公室登記名字叫 research，職稱查規格」。它會用 `office_profile`，名單上就換成你取的名字。名牌只能 1～12 個英文字母或數字，不能跟別人重複。
 
+### 從手機招聘、叫角色（0.64.5，只有 Windows）
+
+手機頁「招聘新員工」的「誰來做」選 **agy**，或「從角色卡挑」清單上「誰來開」選 agy：電腦上開一個跑 agy 的視窗（`open_role.py --agent agy`）。名牌（英數字 12 字內的名字）、職稱、主管、座位事先登記好，agy 第一個動作後就照這些進辦公室。
+
+- 先只能當員工或行政（不能當主管）；會花 Google 的用量。
+- 手機不能替它按允許、換模型、打斷，只能傳話；要允許請到電腦上的 agy 視窗按。
+- 沒交代第一件工作的，要等你在 agy 視窗打字才進辦公室；座位保留 30 分鐘。
+
 ### Claude 交代 agy
 
 在 Claude Code 說：「寄信給 agy 的 `<名牌>`，請它 …」。Claude 會照辦公室名單上寫的指令寄出。

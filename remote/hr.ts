@@ -365,6 +365,7 @@ export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | un
   if (b?.agent === 'codex') return { ok: false, text: CODEX_WIN_TEXT }
   const name = String(b?.name ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim()
   if (!name || [...name].length > 20) return { ok: false, text: '名字要 1～20 個字' }
+  if (b?.agent === 'agy') return hireAgyWin(b, name, opts)
   const model = String(b.model ?? 'sonnet')
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
   const dirs = D.hireDirs()
@@ -428,6 +429,18 @@ export function winWindowOf(sid: string, claudePid: number, parentOf: ParentOf =
  * Windows → open_role.py（帶 --card；它自己擋「已經在線」→ 結束碼 3）；Mac／Linux → hire() 帶「你是 <角色>，接手。角色卡：…」
  */
 export function summonRole(o: { name: string; card: string; cwd: string; team?: string; manager?: boolean; b: any }): { ok: boolean; text: string; sid?: string; need?: string; online?: boolean } {
+  if (o.b?.agent === 'agy') { // 0.64.5：用 agy 開這個角色（開場句一樣是「你是 X，接手。角色卡：…」，agy 外掛有 office_takeover）
+    if (!agyInstalled()) return { ok: false, text: '這台電腦沒有 agy（Antigravity CLI）' }
+    if (o.manager) return { ok: false, text: 'agy 先只能當員工，主管請用 Claude 開' }
+    if (!existsSync(o.cwd)) return { ok: false, text: `資料夾不存在：${o.cwd}` }
+    const mode = agyModeArgs({ ...o.b, model: o.b?.agyModel })
+    if (typeof mode === 'string') return { ok: false, text: mode }
+    const r = runOpenRole(['--agent', 'agy', '--role', o.name, '--dir', o.cwd, '--card', o.card, '--role-type', 'staff', ...(o.team ? ['--team', o.team] : []), ...mode.args])
+    if ('error' in r) return r.code === 3 ? { ok: false, online: true, text: `${o.name} 已經在線：改傳話給他` } : { ok: false, text: `開不起來：${r.error}` }
+    if (r.pid) winLaunchSet(r.sid, r.pid)
+    watchWinHire(r.sid, o.name, r.pid, undefined, undefined, undefined, o.cwd)
+    return { ok: true, text: `📇 用 agy 叫了 ${o.name}${o.team ? `（掛在 ${o.team} 底下）` : ''}：電腦上開了一個標題「${o.name}」的 agy 視窗；會花 Google 的用量`, sid: r.sid }
+  }
   const model = String(o.b?.model ?? 'opus')
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
   const mode = claudeModeArgs(o.b)
@@ -444,6 +457,82 @@ export function summonRole(o: { name: string; card: string; cwd: string; team?: 
   watchWinHire(r.sid, o.name, r.pid, undefined, undefined, undefined, o.cwd)
   ctlSet(r.sid, { effort: mode.effort, perm: mode.perm })
   return { ok: true, text: `📇 叫了 ${o.name}${o.team ? `（掛在 ${o.team} 底下）` : ''}：電腦上開了一個標題「${o.name}」的視窗，大約十幾秒後進辦公室`, sid: r.sid }
+}
+/**
+ * agy（Antigravity CLI）的招聘、叫角色（0.64.5，jacky 11-27「先做 agy」；只有 Windows）：open_role.py --agent agy 開一個跑 agy 的視窗。
+ * 開之前不知道它的對話 id：open_role.py 回暫代 id（agp-<8 碼>），預先登記（名牌、職稱、主管、launch）由 agy 外掛開場時套用；
+ * 座位先釘在暫代 id，它上線後 server 的 resolveAgyPins 照 launch 換過去。手機不能替它按允許、換模型（agyCap），只能傳話
+ */
+export const AGY_PERMS = [
+  { v: 'auto', name: '自動', desc: 'agy 自己判斷要不要問' },
+  { v: 'default', name: '手動', desc: '照 agy 預設，動作前會問' }, // 不是手機頁招的預設用這個（hirePerm）；open_role.py 不帶 --mode
+  { v: 'acceptEdits', name: '接受編輯', desc: '自動接受檔案編輯' },
+  { v: 'plan', name: '規劃', desc: '先規劃、不動檔案' },
+] as const
+export function agyModeArgs(b: any): { args: string[] } | string {
+  const model = b?.model === undefined || b?.model === '' || b?.model === 'default' ? undefined : String(b.model)
+  const effort = b?.effort === undefined || b?.effort === '' ? undefined : String(b.effort)
+  const perm = b?.perm === undefined || b?.perm === '' ? 'auto' : String(b.perm)
+  if (model !== undefined && !/^[A-Za-z0-9][\w.\-]{0,63}$/.test(model)) return '不認得的模型'
+  if (effort !== undefined && !has(EFFORTS, effort)) return '不認得的投入程度'
+  if (!AGY_PERMS.some(p => p.v === perm)) return '不認得的模式'
+  return { args: [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), '--permission-mode', perm] }
+}
+/** 這台電腦有沒有 agy（PATH 上，或 %LOCALAPPDATA%\agy\bin\agy.exe）；只有 Windows 能從手機開 */
+export function agyInstalled(): boolean {
+  if (process.platform !== 'win32') return false
+  return !!(Bun.which('agy') || (process.env.LOCALAPPDATA && existsSync(join(process.env.LOCALAPPDATA, 'agy', 'bin', 'agy.exe'))))
+}
+/** agy models 的清單（第一次叫時在背景跑，之後用快取；還沒拿到回空的，手機只顯示「agy 預設」） */
+let agyModelCache: { slug: string; name: string }[] | undefined, agyModelAsk = false
+export function agyModels(): { slug: string; name: string }[] {
+  if (!agyModelCache && !agyModelAsk && agyInstalled()) {
+    agyModelAsk = true
+    ;(async () => {
+      try {
+        const p = Bun.spawn(['agy', 'models'], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' })
+        const t = setTimeout(() => p.kill(), 30e3)
+        const out = await new Response(p.stdout).text(); clearTimeout(t)
+        const l = out.split(/\r?\n/).map(x => /^(\S+)\t(.+)$/.exec(x.trim())).filter((m): m is RegExpExecArray => !!m).map(m => ({ slug: m[1], name: m[2].trim() }))
+        if (l.length) agyModelCache = l; else agyModelAsk = false
+      } catch { agyModelAsk = false }
+    })()
+  }
+  return agyModelCache ?? []
+}
+/** 照暫代 id 找已上線的 agy（狀態檔的 launch，agy_office.py apply_preset 寫的）：回它的辦公室 id（agy-<對話 id>） */
+export function agyByLaunch(launch: string, dir = join(D.base, 'sessions')): string | undefined {
+  let names: string[] = []
+  try { names = readdirSync(dir).filter(n => n.startsWith('agy-') && n.endsWith('.json')) } catch { return }
+  for (const n of names) {
+    try { const s = JSON.parse(readFileSync(join(dir, n), 'utf8')); if (s?.launch === launch && !s.left && typeof s.id === 'string') return s.id } catch {}
+  }
+}
+function hireAgyWin(b: any, name: string, opts: { cwd?: string; addDirs?: (string | undefined)[] }): { ok: boolean; text: string; sid?: string } {
+  if (!agyInstalled()) return { ok: false, text: '這台電腦沒有 agy（Antigravity CLI）' }
+  if (b.role === 'manager') return { ok: false, text: 'agy 先只能當員工或行政' }
+  const mode = agyModeArgs(b)
+  if (typeof mode === 'string') return { ok: false, text: mode }
+  const dirs = D.hireDirs()
+  const dir = opts.cwd && existsSync(opts.cwd) ? { name: opts.cwd, path: opts.cwd } : dirs.find(d => d.path === b.dir) ?? dirs[0]
+  if (!dir) return { ok: false, text: '沒有可以上班的資料夾（remote.json 的 hireDirs）' }
+  const team = typeof b.team === 'string' && b.team.trim() ? b.team.trim().slice(0, 60) : undefined
+  const task = typeof b.task === 'string' ? b.task.trim().slice(0, 4000) : ''
+  const title = [...(typeof b.title === 'string' && b.title.trim() ? b.title.trim() : name)].slice(0, 16).join('')
+  const plate = /^[A-Za-z0-9]{1,12}$/.test(name) ? name : undefined
+  let taskFile: string | undefined
+  if (task) { taskFile = join(hrDir(), `task-agy-${crypto.randomUUID()}.txt`); mkdirSync(hrDir(), { recursive: true }); writeFileSync(taskFile, task) }
+  const add = addDirArgs(opts.addDirs, dir.path).filter((_, i) => i % 2 === 1)
+  const r = (() => {
+    try {
+      return runOpenRole(['--agent', 'agy', '--role', name, '--name-only', '--dir', dir.path, '--title', title, '--role-type', 'staff', ...(plate ? ['--plate', plate] : []),
+        ...(team ? ['--team', team] : []), ...mode.args, ...add.flatMap(d => ['--add-dir', d]), ...(taskFile ? ['--task-file', taskFile] : [])])
+    } finally { if (taskFile) rmSync(taskFile, { force: true }) }
+  })()
+  if ('error' in r) return { ok: false, text: `開不起來：${r.error}` }
+  if (r.pid) winLaunchSet(r.sid, r.pid)
+  watchWinHire(r.sid, name, r.pid, undefined, undefined, undefined, dir.path)
+  return { ok: true, text: `🧑‍💼 招聘了 agy ${name}：電腦上開了一個標題「${name}」的 agy 視窗，它第一次動作後進辦公室；會花 Google 的用量`, sid: r.sid }
 }
 export const CODEX_WIN_TEXT = 'Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
 
@@ -1307,7 +1396,7 @@ export function watchWinHire(sid: string, name: string, pid?: number, t0 = Date.
   const key = `win-${sid}`
   const check = () => {
     const now = Date.now()
-    if (D.people().some(p => p.id === sid) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
+    if (D.people().some(p => p.id === sid) || (sid.startsWith('agp-') && agyByLaunch(sid)) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
     if (now - t0 >= WIN_STUCK_MS && !stuck.has(key)) stuck.set(key, { id: crypto.randomUUID().slice(0, 8), name, session: name, title: '開了但還沒進辦公室', at: now, options: [], win: true, ...(dir ? { dir } : {}) })
     setTimeout(check, every).unref?.()
   }
