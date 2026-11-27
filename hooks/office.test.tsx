@@ -4,7 +4,7 @@ import type { Coworker } from '../types'
 import { parseStatus } from './status'
 import { reloadIfIdle, runHr } from './hr'
 import { doneNonces, nextCommand } from './register'
-import { RELOAD_QUIET_MS, RELOAD_RETRY_MS, canReloadNow, newerVersion, shouldReload } from './selfreload'
+import { RELOAD_QUIET_MS, canReloadNow, newerVersion, reloadRefused, shouldReload } from './selfreload'
 import { catPose, catRange, catWalkRows, drawScene, encode, layout, plateName, sceneRows, sceneWidth } from './scene'
 
 const P = (id: string, name: string, mode: Coworker['mode'] = 'idle', isMe = false, role: Coworker['role'] = 'staff'): Coworker => ({
@@ -3506,7 +3506,7 @@ test('command queue (0.63.17): delivers items in order, skips delivered and expi
   expect(nextCommand({ nonce: 'x', text: '舊格式', at: now }, doneNonces({ nonce: 'x' }), now)).toBeUndefined()
 })
 
-test('self reload (0.63.25): only for a newer version on disk while idle, at most 3 tries 10 minutes apart', () => {
+test('self reload (0.63.25; 0.64.3 one try per version, never in a session marked blocked): only for a newer version on disk while idle', () => {
   expect(newerVersion('0.63.25', '0.63.9')).toBe(true)
   expect(newerVersion('0.63.9', '0.63.25')).toBe(false)
   expect(newerVersion('0.63.25', '0.63.25')).toBe(false)
@@ -3517,9 +3517,13 @@ test('self reload (0.63.25): only for a newer version on disk while idle, at mos
   expect(shouldReload({ ...base, disk: '0.63.25' })).toBe(false)
   expect(shouldReload({ ...base, disk: undefined })).toBe(false)
   expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 1, at: base.now - 60e3 } })).toBe(false) // 剛試過
-  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 1, at: base.now - RELOAD_RETRY_MS } })).toBe(true)
-  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 3, at: 0 } })).toBe(false) // 試滿了
-  expect(shouldReload({ ...base, last: { version: '0.63.24', tries: 3, at: base.now } })).toBe(true) // 新的版號重新算
+  expect(shouldReload({ ...base, last: { version: '0.63.26', tries: 1, at: 0 } })).toBe(false) // 同一版只試一次，隔多久都不再試
+  expect(shouldReload({ ...base, last: { version: '0.63.24', tries: 1, at: base.now } })).toBe(true) // 新的版號重新算
+  expect(shouldReload({ ...base, blocked: true })).toBe(false) // 記成不能重載（遠端連線）：新版也不送
+  expect(reloadRefused("/reload-plugins isn't available over a remote connection in this session.")).toBe(true)
+  expect(reloadRefused('Error: /reload-plugins is not available over a remote connection')).toBe(true)
+  expect(reloadRefused('Reloaded: 2 plugins · 8 skills')).toBe(false)
+  expect(reloadRefused(undefined)).toBe(false)
 })
 
 test('reload gate (0.63.26): no turn, no queued message, no approval, empty draft, 5 quiet minutes', () => {

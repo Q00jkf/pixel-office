@@ -7,6 +7,17 @@
 
 ---
 
+## 0.64.3 — 2026-11-27 — 自己換新版不再在遠端連線的對話裡一直送 /reload-plugins
+
+- **改了什麼**：
+  - `hooks/selfreload.ts`：同一個版號只試 1 次（`RELOAD_TRIES` 3 → 1）；新增 `reloadRefused()` 認「not available over a remote connection」；`shouldReload` 多收 `blocked`。
+  - `hooks/register.tsx` 的 `selfReload`：送完看 `/reload-plugins` 回的字（或丟出的錯），是「遠端連線不能用」就在這個對話記 `reload-blocked:<session>`，之後的新版也不再自己送。不事先排除 Remote Control 開的對話（`CLAUDE_CODE_ENVIRONMENT_KIND=bridge`），看到失敗才停。
+- **為什麼**：jacky 11-27（主管轉）：GUANGUAN 主管（Desktop、手機遠端連著）升 0.64.1 後收到至少兩次 /reload-plugins，每次都回「isn't available over a remote connection」，使用者以為是主管在跑。根因：0.63.25 起每個新版最多試 3 次、隔 10 分鐘，送出去就算一次、不看結果；每發一版又重算。jacky 裁示「照提案做」。
+- **代價**：遠端連線的對話第一次還是會看到一次那句錯誤（外掛查不到 Desktop 有沒有連遠端）；記成不能重載的對話之後遠端斷了也不會自己換版，要重開對話或自己打 /reload-plugins；一般對話重載剛好失敗也不再重試。遠端那條沒有實測（本機沒有遠端連線的對話可以重現），等下次升版看 GUANGUAN 那邊。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：無（開著的對話載入 0.64.3 後才照新規則）。
+
 ## 0.64.2 — 2026-11-27 — 叫團隊成員可以跨專案；點協作桌就能叫主管、叫角色
 
 - **改了什麼**：

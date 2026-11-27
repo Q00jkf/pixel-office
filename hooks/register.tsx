@@ -9,7 +9,7 @@ import { cellAt, drawVector, menuPlace, sameNameNumbers, vectorSvg, type Furnitu
 import { CHAT_KEEP_MS, CHAT_TEXT_MAX, PART_ZH, TASK_KEEP_MS, parseTask, type PartState, type TaskDef, type TaskPart, assign, atTable, chatDir, chatFile, chatTables, chinesePlates, firstLine, needsBoss, parseChat, parseStore, species, tablesOut, type ChatEntry } from './officeV2'
 import { v2PanelSvg, type V2MenuHit, type V2Opts } from './v2panel'
 import { hrSessionStart, hrTurnDone, registerHr, reloadIfIdle, setBusyOf } from './hr'
-import { shouldReload, type ReloadTry } from './selfreload'
+import { reloadRefused, shouldReload, type ReloadTry } from './selfreload'
 import { APPROVE_LOG_PY, PHONE_LIVE_PY, WAITER_PY } from './waiter'
 export { WAITER_PY }
 
@@ -1142,7 +1142,7 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
-export const VERSION = '0.64.2'
+export const VERSION = '0.64.3'
 
 // 系統提示那段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
 export const ROLE_SECTION =
@@ -1872,16 +1872,20 @@ async function selfReload($: EngineInterface) {
   if (me.id === 'me' || me.oneshot) return
   const disk = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(t => String(JSON.parse(String(t)).version ?? '')).catch(() => undefined)
   const now = await $.clock.now()
-  const key = `reload:${await $.session.id()}`
+  const sid = await $.session.id()
+  const key = `reload:${sid}`, blockKey = `reload-blocked:${sid}`
   const last = (await $.store.get(key).catch(() => undefined)) as ReloadTry | undefined
-  // 版號與重試次數先過（閒不閒交給 reloadIfIdle 在呼叫前一刻判定）
-  if (!shouldReload({ disk, loaded: VERSION, idle: true, last, now })) return
+  const blocked = !!(await $.store.get(blockKey).catch(() => undefined))
+  // 版號與重試次數先過（閒不閒交給 reloadIfIdle 在呼叫前一刻判定）；記成不能重載的對話（遠端連線，0.64.3）不再送
+  if (!shouldReload({ disk, loaded: VERSION, idle: true, last, now, blocked })) return
   // 先記下這次嘗試再叫（快驗第 1 項）：重載會換掉這份程式碼，叫完之後的程式不一定跑得到；沒叫成再改回去
   const tried: ReloadTry = { version: disk!, tries: (last?.version === disk ? last!.tries : 0) + 1, at: now }
   await $.store.set(key, tried).catch(() => undefined)
   const r = await reloadIfIdle($)
   if (!r.ran) { await $.store.set(key, last ?? null).catch(() => undefined); return }
-  await r.done.catch(() => undefined)
+  // 看結果（0.64.3）：回「遠端連線不能用」就記下這個對話不能重載，之後的新版也不送（使用者會一直看到那句錯誤）
+  const out = await r.done.then((x: any) => x?.text, (e: any) => String(e?.message ?? e))
+  if (reloadRefused(out)) await $.store.set(blockKey, { at: now, version: disk }).catch(() => undefined)
 }
 
 // 每輪結束把最後的回覆寫到 replies/<session>.json，手機卡片顯示（jacky 2026-10-27：看不到回應就不知道要跟他說什麼）
