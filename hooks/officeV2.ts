@@ -232,6 +232,8 @@ export function assign(S: Store, people: Seatable[], now = Date.now(), handovers
       else { t = { id: S.nextId++, name: `${members[0].plate || members[0].name}團隊`, size: fitSize(members.length), team: agent, auto: true }; S.tables.push(t) }
       dirty = true
     }
+    // 自動開的桌照人數加大（0.64.7，jacky 11-27）：開桌後組員變多就跟著長，最多 8 人；使用者建的桌不動、不縮小
+    if (t.auto && t.size < fitSize(members.length)) { t.size = fitSize(members.length); dirty = true }
     // 主管固定坐 0 號（遠側最左、臉朝畫面）；組員從 1 號起，原本的位置還空著就坐回去
     const boss = members[0], head = `t${t.id}.0`
     if (!out.has(boss.id) && !used.has(head)) take(boss.id, head)
@@ -242,7 +244,7 @@ export function assign(S: Store, people: Seatable[], now = Date.now(), handovers
       for (let i = 1; !key && i < t.size; i++) if (!used.has(`t${t.id}.${i}`)) key = `t${t.id}.${i}`
       if (key) take(p.id, key) // 桌子坐滿：留給 ③ 坐辦公區
     }
-    // 桌子滿了（0.63.58，顧問裁示；不自動加大，8 人是上限）：主人的組員還有人沒位子，桌上 team 不是這位主人、
+    // 桌子滿了（0.63.58，顧問裁示；使用者建的桌不自動加大，自動開的桌已在上面照人數加大，8 人是上限）：主人的組員還有人沒位子，桌上 team 不是這位主人、
     // 釘選也不是使用者拖的（drag）的人讓位回辦公區，空出來的位子給組員；drag 的不動。從號碼大的先讓
     const left = rest.filter(p => !out.has(p.id))
     if (left.length) {

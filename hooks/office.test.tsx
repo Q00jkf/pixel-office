@@ -3579,6 +3579,17 @@ test('0.64.7: a department lead (manager with own members, team=upper manager) s
   const own = S.tables.find(t => t.team === 'willy設計')!
   expect(map.get('lead')).toBe(`t${own.id}.0`)
   expect([map.get('a'), map.get('b')].every(k => k?.startsWith(`t${own.id}.`))).toBe(true)
+  // 自動開的桌照人數加大（最多 8）；使用者建的桌不動
+  const S2 = v2empty()
+  v2assign(S2, [lead, a] as any, 0)
+  expect(S2.tables[0]).toMatchObject({ auto: true, size: 2 })
+  const { map: m2 } = v2assign(S2, [lead, a, b] as any, 1)
+  expect(S2.tables[0].size).toBe(4)
+  expect([m2.get('lead'), m2.get('a'), m2.get('b')].every(k => k?.startsWith(`t${S2.tables[0].id}.`))).toBe(true)
+  S2.tables[0].auto = false
+  S2.tables[0].size = 2
+  v2assign(S2, [lead, a, b] as any, 2)
+  expect(S2.tables[0].size).toBe(2)
   // 部門主管底下沒人：照舊是上一層的組員
   expect(teamsOf([top, mate, lead] as any).get('willy主管')!.map(p => p.id)).toEqual(['top', 'mate', 'lead'])
 })
