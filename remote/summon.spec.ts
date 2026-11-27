@@ -58,3 +58,17 @@ test('0.64.2 跨專案叫人：團隊成員清單多「其他專案・<名>」�
   expect(r.list[0].other).toBeUndefined()
   expect(r.list[1]).toMatchObject({ name: '別專案員工', other: true, project: OTHER })
 })
+
+test('0.64.2 叫到協作桌：桌號不對、桌子不存在都不開（走招聘的座位規則；用沒在用的埠，不碰真的辦公室）', () => {
+  const prev = process.env.PO_PORT
+  process.env.PO_PORT = '8799'
+  try {
+    const n = opened.length
+    expect(summonAt({ kind: 'project', code: cardCode(CARD), table: 'x', trustOk: true }).text).toBe('桌號不對')
+    expect(summonAt({ kind: 'project', code: cardCode(CARD), table: 987654, trustOk: true }).text).toBe('找不到這張桌子')
+    expect(opened.length).toBe(n)
+  } finally {
+    if (prev === undefined) delete process.env.PO_PORT; else process.env.PO_PORT = prev
+    rmSync(join(require('node:os').homedir(), '.claude', 'pixel-office', 'office-8799.json'), { force: true })
+  }
+})

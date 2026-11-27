@@ -1307,8 +1307,10 @@
   }
   // ---------- 叫角色、開專案（設計 windows-hire 4.）：清單由伺服器從角色卡算（/cards.json、/projects.json），點一張就開 ----------
   // kind=member：p＝被點的人，開出來掛在他底下；kind=project：開那個專案的主管。已在線的回「改傳話」；資料夾沒信任過先說明、再按一次才開
-  async function openCardsV2(kind, p) {
-    const title = kind === 'member' ? `叫 ${p.plate} 的團隊成員` : '開專案'
+  // table（0.64.2）：從協作桌叫的，叫出來坐這桌（員工掛這桌主管、主管坐主管椅）；空桌的主管選單底下附招聘一般 session、桌子設定
+  async function openCardsV2(kind, p, table) {
+    const tb = table === undefined ? undefined : ((st && st.tables) || []).find(x => x.id === table)
+    const title = tb ? (kind === 'member' ? '叫角色到這桌' : '開主管到這桌') : kind === 'member' ? `叫 ${p.plate} 的團隊成員` : '開專案'
     if (PO().demo) { PO().toast('示意資料：這裡會列出角色卡，點了在電腦上開出那個角色'); return }
     const sid = PO().sheet(title, PO().LOADING)
     let j; try { j = await (await fetch(kind === 'member' ? `/cards.json?id=${encodeURIComponent(p.id)}` : '/projects.json', { cache: 'no-store' })).json() } catch {}
@@ -1320,7 +1322,7 @@
     const others = [...groups].filter(([, list]) => list[0].other)
     const cardRows = list => list.map(c => `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('')
     PO().sheet(title,
-      `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}</div>` +
+      `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}${tb ? `，坐「${esc(tb.name)}」` : ''}</div>` +
       (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
       // 在線主管是「這個專案」的，不是某張卡的人：放在專案分組標題那一行（測試 #7）
       ([...groups].filter(([, list]) => !list[0].other).map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
@@ -1328,10 +1330,15 @@
         || '<div class="note">沒有找到角色卡</div>') +
       // 其他專案（0.64.2）：預設收起；點開才列，叫出來一樣掛在被點的人底下、開在那張卡自己的專案
       (others.length ? `<details class="others"><summary class="mrow"><span><b>其他專案</b><small>${others.length} 個專案；叫出來一樣掛在 ${esc(p.plate)} 底下</small></span></summary>` +
-        others.map(([g, list]) => `<h3 class="sec line">${esc(g.replace(/^其他專案・/, ''))}</h3>` + cardRows(list)).join('') + '</details>' : ''), true)
+        others.map(([g, list]) => `<h3 class="sec line">${esc(g.replace(/^其他專案・/, ''))}</h3>` + cardRows(list)).join('') + '</details>' : '') +
+      // 從桌子來的：不照角色卡，招聘一般 session 到這桌；空桌另外留一條路到桌子設定（改名、人數、刪除）
+      (tb ? `<h3 class="sec line">其他</h3><button class="mrow" id="cgen"><span><b>${kind === 'member' ? '開一般 session 到這桌' : '招聘一般 session 當主管'}</b><small>不用角色卡，自己取名字、交代工作</small></span></button>` +
+        (kind === 'project' ? `<button class="mrow" id="ctable"><span><b>桌子設定</b><small>改名、幾人座、協作資料夾、刪除</small></span></button>` : '') : ''), true)
+    const cg = document.getElementById('cgen'); if (cg) cg.addEventListener('click', () => openHireV2(`t${table}.`, kind === 'member' ? 'staff' : 'manager'))
+    const ct = document.getElementById('ctable'); if (ct) ct.addEventListener('click', () => openTable(table))
     document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
       const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
-      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })
+      const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), ...(tb ? { table } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })
       if (r.need === 'trust') { b.dataset.sure = 'trust'; b.querySelector('b').textContent = `${r.text} 還是要開就再按一次`; return }
       if (r.ok) PO().closeSheet()
       toast(r.text || r.error || '沒有回應')
@@ -1479,6 +1486,11 @@
       if (r.ok) { closeSheet(); PO().load() } else if (/請重看確認卡/.test(r.text || '')) openTableTeam(id)
     })
   }
+  // 點桌牌（0.64.2）：沒人坐的空桌直接跳主管選單（底下有「桌子設定」）；其他照舊開桌子選單
+  function openTableTap(id) {
+    const t = ((st && st.tables) || []).find(x => x.id === id)
+    if (t && !(t.members || []).length && !PO().demo) openCardsV2('project', undefined, id); else openTable(id)
+  }
   function openTable(id) {
     const t = ((st && st.tables) || []).find(x => x.id === id)
     if (!t) { toast('找不到這張桌子'); return }
@@ -1495,7 +1507,14 @@
         return `<button class="mrow ic" id="v2team"><i class="ico ${t.grouped ? 'check' : 'helper'}"></i><span><b>${head}</b><small>${sub}</small></span></button>`
       })()
       : `<button class="mrow ic" id="v2team" disabled><i class="ico helper"></i><span><b>設成一組</b><small>${bosses.length ? `這桌有 ${bosses.length} 位主管，先降一位` : '先指定主管（同桌名單按「升主管」）'}</small></span></button>`
+    // 叫人到這桌（0.64.2）：有一位 Claude 主管＝照他專案的角色卡叫、或開一般 session；沒主管＝開主管（角色卡或一般 session）
+    const boss1 = bosses.length === 1 && !bosses[0].kind ? bosses[0] : undefined
+    const callRows = boss1
+      ? `<button class="mrow ic" id="v2callrole"><i class="ico helper"></i><span><b>叫角色到這桌</b><small>從角色卡挑（含其他專案），掛在 ${esc(boss1.plate)} 底下</small></span></button>` +
+        `<button class="mrow ic" id="v2callgen"><i class="ico helper"></i><span><b>開一般 session 到這桌</b><small>不用角色卡，掛在 ${esc(boss1.plate)} 底下</small></span></button>`
+      : !bosses.length ? `<button class="mrow ic" id="v2callboss"><i class="ico helper"></i><span><b>開主管到這桌</b><small>從專案的主管卡挑，或招聘一般 session 當主管</small></span></button>` : ''
     sheet(t.name,
+      callRows +
       // 整桌等你回覆（第 7 項）：有人在等就放最上面
       // 缺主管（ref2-F2）：紅色警告卡放最上面
       (t.noBoss ? `<div class="mcard warn"><i class="ico warn"></i><div><b>缺主管</b><span>這桌 ${members.length} 人沒有主管。請挑一位升主管，同桌其他人會掛到他底下。</span></div></div>` : '') +
@@ -1529,6 +1548,9 @@
       if (r.ok) { closeSheet(); PO().load() }
     }))
     const tm = document.getElementById('v2team'); if (tm && !tm.disabled) tm.addEventListener('click', () => openTableTeam(id))
+    const cr = document.getElementById('v2callrole'); if (cr) cr.addEventListener('click', () => openCardsV2('member', boss1, id))
+    const cgn = document.getElementById('v2callgen'); if (cgn) cgn.addEventListener('click', () => openHireV2(`t${id}.`, 'staff'))
+    const cb = document.getElementById('v2callboss'); if (cb) cb.addEventListener('click', () => openCardsV2('project', undefined, id))
     document.getElementById('v2chat').addEventListener('click', () => openTableChat(id))
     const wg = document.getElementById('v2waitgo'); if (wg) wg.addEventListener('click', () => openWaitReply(id))
     document.getElementById('v2notes').addEventListener('click', () => openTableNotes(id))
@@ -1767,7 +1789,7 @@
     const sg = ev.target.closest('.tsugbtn') // 建議加行政（另一顆小標籤）：開招聘、身分預選行政
     if (sg) { openHireV2(`t${sg.dataset.sug}.`, 'admin'); return }
     if (tp && !(PO().RM && PO().RM.matches)) { tp.classList.remove('po-pop'); void tp.offsetWidth; tp.classList.add('po-pop') } // 點桌牌：彈一下
-    if (tp) { if (ev.target.closest('.tsug')) openHireV2(`t${tp.dataset.table}.`, 'admin'); else openTable(+tp.dataset.table); return }
+    if (tp) { if (ev.target.closest('.tsug')) openHireV2(`t${tp.dataset.table}.`, 'admin'); else openTableTap(+tp.dataset.table); return }
     const gh = ev.target.closest('.tag.ghost'); if (gh) { awayGo(gh.dataset.away); return }
     const tag = ev.target.closest('.tag')
     if (tag) { const p = bySeat().get(tag.dataset.seat); if (p) bump(p.id); if (p) PO().openChat(p); return } // 11-26 定案 A：點名牌直接進完整對話

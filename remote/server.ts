@@ -1799,6 +1799,13 @@ export function summonAt(b: any): { ok: boolean; text: string; sid?: string; nee
   // 小隊成員：卡上有可用的啟動位置才照卡，否則開在叫的人的資料夾（同團隊視窗 summon_role）；開專案、其他專案的卡：啟動位置→卡上的退路→那張卡的專案
   const cwd = member && !c.other ? (L.has_start && ready) || (profileOf(who!.id) as { cwd?: string }).cwd || c.project : ready || (typeof L.fallback === 'string' ? L.fallback : undefined) || c.project
   if (!cwd) return { ok: false, text: '找不到要開在哪個資料夾' }
+  // 叫到指定的協作桌（0.64.2，jacky「按沒有主管的桌子跳出主管選擇，有主管了可以選要找哪一個 role」）：坐哪、掛誰、沒主管的桌補主管，
+  // 全照招聘（hireAt）的規則，只把「開對話」換成照卡開
+  if (b?.table !== undefined && b?.table !== null && b?.table !== '') {
+    const seat = Number(b.table)
+    if (!Number.isInteger(seat)) return { ok: false, text: '桌號不對' }
+    return hireAt({ ...b, name: c.name, role: member ? 'staff' : 'manager', seat }, Date.now(), bb => summonRole({ name: c.name, card: c.file, cwd, team: bb.team || undefined, manager: bb.role === 'manager', b }))
+  }
   return summonRole({ name: c.name, card: c.file, cwd, team: member ? bare(who!.agent) || shownName(who!) : undefined, manager: !member, b })
 }
 
