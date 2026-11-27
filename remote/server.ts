@@ -1747,7 +1747,7 @@ let cardsRun: CardsRun = (args, stdin) => {
 /** 測試換成假的 cards.py（回傳原本的） */
 export function _setCardsRun(f: CardsRun): CardsRun { const o = cardsRun; cardsRun = f; return o }
 export const cardCode = (file: string) => new Bun.CryptoHasher('sha256').update(file).digest('hex').slice(0, 12)
-export type CardPick = { code: string; name: string; desc: string; group: string; file: string; project: string; managers?: string[] }
+export type CardPick = { code: string; name: string; desc: string; group: string; file: string; project: string; managers?: string[]; other?: boolean }
 const pick = (c: any, group: string, project: string, extra: Partial<CardPick> = {}): CardPick | undefined =>
   typeof c?.file === 'string' && typeof c?.name === 'string' ? { code: cardCode(c.file), name: c.name.slice(0, 40), desc: String(c.desc ?? '').slice(0, 80), group, file: c.file, project, ...extra } : undefined
 const dedupe = (l: (CardPick | undefined)[]) => { const seen = new Set<string>(); return l.filter((c): c is CardPick => !!c && !seen.has(c.code) && !!seen.add(c.code)) }
@@ -1762,6 +1762,8 @@ export function memberCards(id: string): { ok: true; project: string; list: Card
     if (sq.options?.length) for (const o of sq.options) list.push(...(o.roles ?? []).map((c: any) => pick(c, `${sq.name}${o.lead ? '・' + o.lead : ''}`, proj)))
     else list.push(...(sq.roles ?? []).map((c: any) => pick(c, String(sq.name), proj)))
   }
+  // 其他專案（0.64.2，jacky「有時候我需要跨專案叫人，在當下的主管下面」）：分組「其他專案・<名>」，開在那張卡自己的專案
+  for (const o of j.others ?? []) list.push(...(o.roles ?? []).map((c: any) => pick(c, `其他專案・${o.name}`, String(o.project_dir), { other: true })))
   return { ok: true, project: basename(proj), list: dedupe(list) }
 }
 /** 有主管卡的專案：每張主管卡一項，分組＝專案名；在線的主管寫在 managers */
@@ -1770,7 +1772,7 @@ export function projectCards(): { ok: true; list: CardPick[] } | { ok: false; te
   if (!j) return { ok: false, text: '讀不到專案（scripts/cards.py 沒有回應）' }
   return { ok: true, list: dedupe((j.projects ?? []).flatMap((p: any) => (p.roles ?? []).map((c: any) => pick(c, String(p.name), String(p.project_dir), p.managers?.length ? { managers: p.managers.map(String) } : {})))) }
 }
-const pubCards = (l: CardPick[]) => l.map(({ code, name, desc, group, managers }) => ({ code, name, desc, group, ...(managers ? { managers } : {}) }))
+const pubCards = (l: CardPick[]) => l.map(({ code, name, desc, group, managers, other }) => ({ code, name, desc, group, ...(managers ? { managers } : {}), ...(other ? { other: true } : {}) }))
 const bare = (agent?: string) => (agent ?? '').split(' [')[0]
 /** 這個角色名已經有人在線（session 名稱、名牌、職稱）：回那人的名牌 */
 export function onlineAs(name: string): string | undefined {
@@ -1794,8 +1796,8 @@ export function summonAt(b: any): { ok: boolean; text: string; sid?: string; nee
   if (on) return { ok: false, online: true, text: `${c.name} 已經在線（${on}）：改傳話給他` }
   const L = cardsRun(['launch', '--card', c.file, '--project', c.project]) ?? {}
   const ready = typeof L.ready === 'string' ? L.ready : undefined
-  // 小隊成員：卡上有可用的啟動位置才照卡，否則開在叫的人的資料夾（同團隊視窗 summon_role）；開專案：啟動位置→卡上的退路→專案
-  const cwd = member ? (L.has_start && ready) || (profileOf(who!.id) as { cwd?: string }).cwd || c.project : ready || (typeof L.fallback === 'string' ? L.fallback : undefined) || c.project
+  // 小隊成員：卡上有可用的啟動位置才照卡，否則開在叫的人的資料夾（同團隊視窗 summon_role）；開專案、其他專案的卡：啟動位置→卡上的退路→那張卡的專案
+  const cwd = member && !c.other ? (L.has_start && ready) || (profileOf(who!.id) as { cwd?: string }).cwd || c.project : ready || (typeof L.fallback === 'string' ? L.fallback : undefined) || c.project
   if (!cwd) return { ok: false, text: '找不到要開在哪個資料夾' }
   return summonRole({ name: c.name, card: c.file, cwd, team: member ? bare(who!.agent) || shownName(who!) : undefined, manager: !member, b })
 }

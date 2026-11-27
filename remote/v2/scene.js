@@ -1317,14 +1317,18 @@
     const groups = new Map()
     for (const c of j.cards || []) groups.set(c.group, [...(groups.get(c.group) || []), c])
     const models = (st && st.models) || {}
+    const others = [...groups].filter(([, list]) => list[0].other)
+    const cardRows = list => list.map(c => `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('')
     PO().sheet(title,
       `<div class="note">${kind === 'member' ? `${esc(j.project || '')} 專案的角色卡與小隊；點了在電腦上開一個視窗，掛在 ${esc(p.plate)} 底下` : '有主管卡的專案；點了在電腦上開出那個專案的主管'}</div>` +
       (Object.keys(models).length ? `<label>智力</label><select id="cmodel">${Object.entries(models).map(([k, v]) => `<option value="${esc(k)}"${k === 'opus' ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '') +
       // 在線主管是「這個專案」的，不是某張卡的人：放在專案分組標題那一行（測試 #7）
-      ([...groups].map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
-        return `<h3 class="sec line">${esc(g)}${on.length ? `・在線主管：${on.map(esc).join('、')}` : ''}</h3>` + list.map(c =>
-        `<button class="mrow" data-code="${esc(c.code)}"><span><b>${esc(c.name)}</b>${c.desc ? `<small>${esc(c.desc)}</small>` : ''}</span></button>`).join('') }).join('')
-        || '<div class="note">沒有找到角色卡</div>'), true)
+      ([...groups].filter(([, list]) => !list[0].other).map(([g, list]) => { const on = [...new Set(list.flatMap(c => c.managers || []))]
+        return `<h3 class="sec line">${esc(g)}${on.length ? `・在線主管：${on.map(esc).join('、')}` : ''}</h3>` + cardRows(list) }).join('')
+        || '<div class="note">沒有找到角色卡</div>') +
+      // 其他專案（0.64.2）：預設收起；點開才列，叫出來一樣掛在被點的人底下、開在那張卡自己的專案
+      (others.length ? `<details class="others"><summary class="mrow"><span><b>其他專案</b><small>${others.length} 個專案；叫出來一樣掛在 ${esc(p.plate)} 底下</small></span></summary>` +
+        others.map(([g, list]) => `<h3 class="sec line">${esc(g.replace(/^其他專案・/, ''))}</h3>` + cardRows(list)).join('') + '</details>' : ''), true)
     document.querySelectorAll('#mbody [data-code]').forEach(b => b.addEventListener('click', async () => {
       const sure = (b.dataset.sure || '').split(' ').filter(Boolean)
       const r = await PO().post('/summon', { kind, ...(kind === 'member' ? { id: p.id } : {}), code: b.dataset.code, model: (document.getElementById('cmodel') || {}).value, trustOk: sure.includes('trust') })

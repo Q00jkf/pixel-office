@@ -1,6 +1,6 @@
 """角色卡清單：團隊視窗（關係圖）與手機頁共用（設計 windows-hire 4.；2026-11-26 從 team-window/team_window.py 搬出來，行為不變）。
 
-  python cards.py roster [--session <id>] [--project <資料夾>]     被點的人所在專案的第 1 層卡＋整台電腦的小隊
+  python cards.py roster [--session <id>] [--project <資料夾>]     被點的人所在專案的第 1 層卡＋整台電腦的小隊＋其他專案的第 1 層卡（others，0.64.2）
   python cards.py projects [--root <資料夾> ...] [--people-stdin]   有主管卡（第一階）的專案；--people-stdin 從 stdin 讀 state.json 的 people，標出在線的主管
   python cards.py launch --card <卡> [--project <資料夾>]           卡上「## 啟動位置」解析出的 ready／choices／fallback、has_start
 
@@ -155,8 +155,21 @@ def roster_cards(session_id=None, fallback_project=None):
         options = [{'lead': lead, 'roles': [got.get(g['name'], public(g)) for g in generic]} for lead, got in groups.items()]
         squads.append({'name': name, 'when': when.group(1).strip() if when else '',
                        'roles': [public(g) for g in generic], 'options': options})
-    return {'project': [public(c) for c in cards(roles, '1')], 'squads': squads,
+    return {'project': [public(c) for c in cards(roles, '1')], 'squads': squads, 'others': other_projects(project),
             'project_dir': project, 'from_session': bool(where)}
+
+
+def other_projects(exclude, roots=None):
+    """跨專案叫人（0.64.2，jacky 11-27「有時候我需要跨專案叫人，在當下的主管下面」）：exclude 以外每個專案的第 1 層卡（含主管卡）"""
+    skip = os.path.normcase(os.path.normpath(exclude))
+    found = []
+    for key, project in project_dirs(roots).items():
+        if key == skip:
+            continue
+        roles = [public(c) for c in cards(os.path.join(office_dir(project), 'roles'), '1')]
+        if roles:
+            found.append({'project_dir': project, 'name': os.path.basename(project), 'roles': roles})
+    return sorted(found, key=lambda e: e['name'].lower())
 
 
 def online_managers(people):
@@ -169,10 +182,8 @@ def online_managers(people):
     return online
 
 
-def manager_projects(roots=None, online=None):
-    """關係圖空白處右鍵：有「主管」卡（第一階，top）的專案，開專案從這裡開。
-    找法：roots（預設 ~/.aaproject）底下兩層的 <專案>/.claude/office/roles，加上 ~/.claude/office/projects.json 指定的目錄；
-    online＝online_managers() 的結果，在線的 ★ 主管寫進 managers"""
+def project_dirs(roots=None):
+    """有角色卡資料夾的專案 {normcase: 路徑}：roots（預設 ~/.aaproject）底下兩層的 <專案>/.claude/office/roles，加上 ~/.claude/office/projects.json 指定的目錄"""
     dirs = {}
     for root in roots or [os.path.join(os.path.expanduser('~'), '.aaproject')]:
         for pat in ('*', os.path.join('*', '*')):
@@ -185,8 +196,14 @@ def manager_projects(roots=None, online=None):
                 dirs[os.path.normcase(os.path.normpath(k))] = os.path.normpath(k)
     except (OSError, ValueError, AttributeError):
         pass
+    return dirs
+
+
+def manager_projects(roots=None, online=None):
+    """關係圖空白處右鍵：有「主管」卡（第一階，top）的專案，開專案從這裡開（找法見 project_dirs）。
+    online＝online_managers() 的結果，在線的 ★ 主管寫進 managers"""
     found = []
-    for key, project in dirs.items():
+    for key, project in project_dirs(roots).items():
         top = [public(c) for c in cards(os.path.join(office_dir(project), 'roles'), '1') if c['top']]
         if top:
             found.append({'project_dir': project, 'name': os.path.basename(project), 'managers': (online or {}).get(key, []), 'roles': top})

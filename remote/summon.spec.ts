@@ -5,14 +5,17 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _setOpenRoleRun } from './hr'
-import { _setCardsRun, cardCode, projectCards, summonAt } from './server'
+import { _setCardsRun, cardCode, memberCards, projectCards, summonAt } from './server'
 
 const dir = mkdtempSync(join(tmpdir(), 'po-summon-'))
 const CARD = join(dir, 'roles', '小隊長.md')
+const OTHER = join(dir, 'other-project')
 const calls: string[][] = []
 const oldCards = _setCardsRun(args => {
   calls.push(args)
   if (args[0] === 'projects') return { projects: [{ project_dir: dir, name: 'demo', managers: ['老闆'], roles: [{ name: 'po-summon-測試主管', file: CARD, desc: '管一切', top: true }] }] }
+  if (args[0] === 'roster') return { project_dir: dir, from_session: true, project: [{ name: '本專案員工', file: join(dir, 'roles', '本專案員工.md'), desc: '' }], squads: [],
+    others: [{ project_dir: OTHER, name: 'other', roles: [{ name: '別專案員工', file: join(OTHER, 'roles', '別專案員工.md'), desc: '做別的' }] }] }
   if (args[0] === 'launch') return { ready: null, fallback: null, choices: [], has_start: true }
 })
 const opened: string[][] = []
@@ -46,4 +49,12 @@ test('/summon 開專案：沒有啟動位置就開在專案資料夾、主管身
     expect(a[a.indexOf('--role-type') + 1]).toBe('manager')
   }
   code = 0
+})
+
+test('0.64.2 跨專案叫人：團隊成員清單多「其他專案・<名>」分組，標 other、記那張卡自己的專案', () => {
+  const r = memberCards('someone') as any
+  expect(r.ok).toBe(true)
+  expect(r.list.map((c: any) => c.group)).toEqual(['專案', '其他專案・other'])
+  expect(r.list[0].other).toBeUndefined()
+  expect(r.list[1]).toMatchObject({ name: '別專案員工', other: true, project: OTHER })
 })
