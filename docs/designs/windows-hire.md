@@ -80,7 +80,8 @@ tmux 除了「開」，還負責三件事：
 | 交接換主管（`handover.ts`） | 新人用 1. 開；「等新人真的接手」本來就看名冊，不必改（2026-11-26 實作查到，原本這格寫「看 tmux」是設計寫錯） |
 | 自動多開幫手 | 同 1.；收掉幫手用現有的解雇（`procOf`＋結束程序，0.63.61 已修好） |
 | agy 招聘、叫角色（0.64.5） | `open_role.py --agent agy` 開跑 agy 的視窗；agy 開之前不知道對話 id，預先登記寫 `presets/agp-<8 碼>.json`、用環境變數 `PO_PRESET` 交給 agy 外掛（hook 會繼承 agy 的環境，2026-11-27 實測），座位先釘暫代 id、上線後照狀態檔的 `launch` 換過去（`resolveAgyPins`）。只能員工、行政 |
-| Codex 招聘／交給 App／接回 | **這一期不做**：Codex 那一套（`codexToTmux`、`launchOwner`、鎖）跟 tmux 綁得最深。Windows 手機上照舊灰掉，寫明原因 |
+| Codex 招聘、叫角色（0.64.6） | 同 agy：`open_role.py --agent codex` 開 `codex --no-daemon` 的視窗，暫代 id `cxw-`。外掛改裝 `codex-win/`（`docs/designs/codex.md`）。只能員工、行政 |
+| Codex 交給 App／接回、生圖幫手 | **這一期不做**：Codex 那一套（`codexToTmux`、`launchOwner`、鎖）跟 tmux 綁得最深。Windows 手機上照舊灰掉，寫明原因 |
 
 ### 4. 手機「叫角色」「開專案」（團隊）
 

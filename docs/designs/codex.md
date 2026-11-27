@@ -40,6 +40,10 @@
   codex plugin add pixel-office@pixel-office-codex
   ```
   然後開 Codex，選一次 Trust all。`python codex_office.py install` 會印出這幾行。
+- **Windows（0.64.6）**：`codex-stub/` 只限 macOS／Linux，Windows 改裝 `codex-win/`（同樣五個檔、永遠不改，`remote/codex-win.spec.ts` 釘 sha256，`.gitattributes` 設 `-text` 讓各平台位元組相同）。
+  - `po_launch_win.py` 跑 `<主目錄>/.claude/plugins/cache/pixel-office/pixel-office/<最新版號>/codex/codex_office.py`（照版號比，跳過沒有這支的版本）：`claude plugin update` 就跟著升，不用重裝、不用再信任。不做 Mac 那套逐層權限檢查（Windows 沒有同樣的擁有者／權限位元），信任範圍＝使用者自己的 Claude 外掛 cache。
+  - 安裝：`python codex/codex_office.py install` 在 Windows 印 codex-win 的四行指令；裝完開 Codex 選一次 Trust all。
+  - 手機招聘、用 Codex 叫角色：`open_role.py --agent codex` 開 `codex --no-daemon` 的視窗（不經常駐程式，hook 才拿得到 `PO_PRESET`），預先登記與座位對位同 agy（暫代 id `cxw-`）。沒有 tmux：手機不能按允許、換模型、按鍵、交給 App，只能傳話。
 - 🔴 這次信任的範圍：Codex 只看得到 `codex-stub/` 沒變，看不到上線資料夾（release）的程式換了。按 Trust all 等於同意之後 release 更新的程式都直接跑。所以上線資料夾的權限（只有自己能寫）就是信任範圍的一部分。
 
 ## 設計

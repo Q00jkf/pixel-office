@@ -1,0 +1,20 @@
+{
+  "name": "pixel-office-codex",
+  "interface": {
+    "displayName": "pixel-office (Codex)"
+  },
+  "plugins": [
+    {
+      "name": "pixel-office",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

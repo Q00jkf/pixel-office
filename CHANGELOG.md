@@ -7,6 +7,21 @@
 
 ---
 
+## 0.64.6 — 2026-11-27 — Windows 的 Codex 外掛修好；手機可以招聘 Codex、用 Codex 叫角色（Windows）
+
+- **改了什麼**：
+  - 新增 `codex-win/`（Windows 的 Codex 外掛，五個檔永遠不改）：`po_launch_win.py` 跑 Claude 外掛 cache 最新版的 `codex/codex_office.py`，之後升版不用重裝、不用再按 Trust all。`remote/codex-win.spec.ts` 釘 sha256；`.gitattributes` 讓 `codex-win/` 不轉換換行。
+  - `codex/codex_office.py`：hook 開場讀 `PO_PRESET`（職稱、主管、角色、檢查點檔、名牌、agent、launch），存好狀態才刪；`install` 在 Windows 印 codex-win 的安裝指令。
+  - `scripts/open_role.py` 加 `--agent codex`（`codex --no-daemon … -C <資料夾> -- <開場句>`）、`--agent-arg`、`--cp-file`；暫代 id `cxw-<8 碼>`。
+  - `remote/hr.ts`：`hireWindows` 碰到 Codex 改走 `hireCodexWin`（模型、投入程度、權限照 Mac 版驗；檢查點、開場句同 `codexBrief`）；`summonRole` 可以用 Codex 開角色；`agyByLaunch` 也找 Codex；新增 `codexInstalled`、`LAUNCH_PREFIX`。`CODEX_WIN_TEXT` 只剩生圖幫手用。
+  - `remote/server.ts`：Windows 的 `/hire` 帶 Codex 改走 `hireAt`；狀態多 `hireWin`、`codexSummon`，`noCodexHire` 只在沒裝 codex 時出現；暫代座位對位也認 `cxw-`。
+  - `remote/v2/scene.js`：Windows 上招聘選 Codex 的說明改成「電腦上開一個 Codex 視窗」；角色卡清單的「誰來開」多 Codex。
+- **為什麼**：jacky 11-27「為什麼不能開codex 呢」→「你做好我到codex 上面按即可」。查到兩個原因：① 0.63.60 把 Codex 外掛的設定檔搬到 `codex-stub/`（只給 Mac／Linux），Codex 設定還指著 `codex/`，`codex plugin list` 直接報錯，Windows 的 Codex 進不了辦公室；② Windows 招聘 Codex 原本就延後（Codex 那套靠 tmux）。
+- **代價**：Codex 只能當員工或行政；手機不能替它按允許、換模型、按鍵、交給 App，只能傳話；生圖幫手在 Windows 照舊不行；會花 ChatGPT 的用量。`codex-win` 不做 Mac 那套逐層權限檢查，信任範圍是使用者自己的 Claude 外掛 cache。`remote/codex-stub.spec.ts` 在 Windows 有 4 個失敗，是 Mac／Linux 專用的測試，本來就這樣（沒改 codex-stub）。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：Windows 用 Codex 的：跑 `python <plugin>/codex/codex_office.py install` 照印出的四行重裝 Codex 外掛，開 Codex 選一次 **Trust all**（之後升版不用再按）。重開辦公室伺服器（8767）。
+
 ## 0.64.5 — 2026-11-27 — 手機可以招聘 agy、用 agy 叫角色（Windows）
 
 - **改了什麼**：

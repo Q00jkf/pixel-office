@@ -77,11 +77,12 @@ test('runOpenRole：輸出不是 JSON 時拿 stderr 最後幾行', () => {
   try { expect(runOpenRole(['--role', 'x'])).toEqual({ error: 'Traceback / ValueError: boom', code: 1 }) } finally { reply = keep }
 })
 
-test('參數檢查與 tmux 版一樣；Codex 在 Windows 不能招', () => {
+test('參數檢查與 tmux 版一樣；Codex 在 Windows 的參數錯了不開（0.64.6 起可以招，見 agyhire.spec.ts）', () => {
   expect(hireWindows({ name: '' }).ok).toBe(false)
   expect(hireWindows({ name: 'D', model: 'gpt' }).text).toBe('不認得的智力等級')
   expect(hireWindows({ name: 'D', perm: 'yolo' }).text).toBe('不認得的模式')
-  expect(hireWindows({ name: 'D', agent: 'codex' }).text).toBe(CODEX_WIN_TEXT)
+  expect(hireWindows({ name: 'D', agent: 'codex', perm: 'yolo' }).ok).toBe(false)
+  expect(CODEX_WIN_TEXT).toContain('生圖幫手')
   expect(calls.length).toBe(0)
 })
 

@@ -118,6 +118,27 @@ def apply_fields(s: dict, o: dict, nonce: str = "") -> None:
         s.update(cpFile=o["cpFile"], cpBase=now_ms(), cpWorked=False, cpNoted=False)
 
 
+def apply_preset(s: dict, sid: str):
+    """手機在 Windows 招聘、叫角色開的 Codex（0.64.6）：open_role.py --agent codex 把預先登記寫在 PO_PRESET 指的檔
+    （職稱、主管、角色、檢查點檔、名牌、agent、launch），這個視窗第一個對話開場時套用一次。開之前不知道 thread id，所以靠環境變數；
+    要 --no-daemon，hook 才是這個視窗的 Codex 開的、拿得到環境變數。launch＝伺服器釘座位用的暫代 id（cxw-<8 碼>）。
+    回登記檔的路徑：存好狀態檔才刪（同 agy_office.py）"""
+    f = os.environ.get("PO_PRESET")
+    if not f or s.get("id"):
+        return None
+    pre = load(Path(f))
+    if not pre:
+        return None
+    apply_fields(s, {k: str(v) for k, v in pre.items() if k in ("role", "team", "title", "cpFile") and v})
+    name = str(pre.get("name") or "")
+    if NAME_OK.match(name) and not any(c.get("name") == name and c.get("id") != f"codex-{sid}" for c in live_crew()):
+        s["name"] = name
+    for k in ("agent", "launch"):
+        if pre.get(k):
+            s[k] = str(pre[k])[:64]
+    return Path(f)
+
+
 def apply_order_now(p: Path, s: dict, order) -> bool:
     """看守套人事令：重讀最新的狀態檔再改、條件寫入；寫進去了才標已收（codex-trust 複驗 ①，比照 hook），沒寫成下一輪再套"""
     fresh = load(p) or s
@@ -951,6 +972,7 @@ def hook(event: str) -> None:
                 s.update({"left": True, "ended": True, "updatedAt": now})  # ended：Codex 自己說結束了（看守不會因為鎖還在就叫回來）
                 save_if(p, s, owner0)
                 return
+            used = apply_preset(s, sid)
             mode, tool = state(event, d)
             cwd = str(d.get("cwd") or "")
             # 人事令先套（0.63.15，審查第 6 項）：同一個事件帶來的 cpFile，下面的壓縮提示、每小時提醒才看得到
@@ -990,6 +1012,8 @@ def hook(event: str) -> None:
             s["modeWas"] = mode
             if not save_if(p, s, owner0):  # 讀完到現在 hr.ts 換了 owner：這一輪的狀態作廢
                 return
+            if used:
+                used.unlink(missing_ok=True)
             if order:
                 mark_order(f"codex-{sid}", *order)  # 存好了才記收過
             ensure_watch()
@@ -1088,6 +1112,16 @@ def watch() -> None:
 # ---------------------------------------------------------------- 安裝
 
 def install() -> None:
+    if os.name == "nt":  # Windows（0.64.6）：codex-win/ 啟動器，跑 Claude 外掛 cache 最新版的這支；Claude 外掛升版就跟著升
+        win = Path(__file__).resolve().parent.parent / "codex-win"
+        print("Run these yourself (they change your Codex config), then open Codex and pick Trust all once:")
+        print("  codex plugin marketplace remove pixel-office-codex")
+        print(f"  codex plugin marketplace add {win}")
+        print("  codex plugin remove pixel-office@pixel-office-codex")
+        print("  codex plugin add pixel-office@pixel-office-codex")
+        print("The Windows plugin (codex-win) never changes: it runs codex/codex_office.py from the newest installed")
+        print("Claude Code pixel-office plugin, so later upgrades (claude plugin update) need no reinstall and no new Trust all.")
+        return
     stub = "~/.claude/pixel-office/release/codex-stub"  # 固定寫上線資料夾（trust 審查 ⑤：不從自己的位置推，同步副本、開發資料夾都印同一行）
     print("Run these yourself (they change your Codex config), then open Codex and pick Trust all once:")
     print("  codex plugin marketplace remove pixel-office-codex")

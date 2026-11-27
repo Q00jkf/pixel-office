@@ -19,7 +19,7 @@ import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
 import { accessShouldLog, BROWSER_COOKIE, BrowserLogin, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
-import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, agyInstalled, agyModels, agyByLaunch, AGY_PERMS, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
+import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, agyInstalled, agyModels, agyByLaunch, AGY_PERMS, codexInstalled, LAUNCH_PREFIX, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
 import { answerAsk, helperView, initHelpers, keepHelper, startHelperClock, type HelperDeps } from './helpers'
 import { tickAppTabs, loadTabs, resetAppTabs } from './apptabs'
@@ -238,7 +238,7 @@ export function resolveCodexPins(S: Store, people: { id: string; kind?: string }
 const agpSeen = new Map<string, number>()
 let agpCheck = 0
 export function resolveAgyPins(S: Store, people: { id: string }[], now = Date.now(), byLaunch: (k: string) => string | undefined = agyByLaunch, persist = true): void {
-  const pend = Object.keys(S.pins).filter(k => k.startsWith('agp-'))
+  const pend = Object.keys(S.pins).filter(k => LAUNCH_PREFIX.test(k)) // agy（agp-）、Windows 的 Codex（cxw-，0.64.6）
   if (!pend.length || now - agpCheck < 3000) return
   agpCheck = now
   let dirty = false
@@ -474,7 +474,8 @@ export function roster(now = Date.now()) {
     codexModels: codexModels(),
     efforts: EFFORTS, perms: PERMS, codexEfforts: CODEX_EFFORTS, codexPerms: CODEX_PERMS, // 投入程度＋模式（0.63.9）
     hireDirs: cfg.hireDirs.map(d => ({ name: d.name, path: d.path, ...(d.default ? { default: true } : {}) })),
-    ...(process.platform === 'win32' ? { noCodexHire: CODEX_WIN_TEXT } : {}), // Windows 招聘不能選 Codex（設計 windows-hire 3.）
+    ...(process.platform === 'win32' && !codexInstalled() ? { noCodexHire: '這台電腦沒有 codex 指令（先裝 Codex CLI）' } : {}), // Windows 招聘 Codex（0.64.6；原本一律不行）
+    ...(process.platform === 'win32' ? { hireWin: true, ...(codexInstalled() ? { codexSummon: true } : {}) } : {}), // Windows：Codex 開成視窗、叫角色可以選 Codex（0.64.6）
     ...(agyInstalled() ? { agyHire: true, agyModels: agyModels(), agyPerms: AGY_PERMS } : {}), // 招聘、叫角色可以選 agy（0.64.5，只有 Windows）
   }
   if (bossBack) try { saveStore(officeFile(), S) } catch {}
@@ -2099,7 +2100,7 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
       if (!hp.ok) return json({ ok: false, error: hp.text, text: hp.text }, 403)
       b = hp.b
       if (b.agent !== 'codex') return json(hireAt(b, Date.now(), hire))
-      if (process.platform === 'win32') return json({ ok: false, text: CODEX_WIN_TEXT })
+      if (process.platform === 'win32') return json(hireAt(b, Date.now(), hire)) // 0.64.6：Windows 開成 Codex 視窗（hireWindows → hireCodexWin），沒有 tmux 的開頭檢查
       // Codex 一開就結束（設定檔壞了、沒登入…）要回失敗，附畫面最後幾行和結束碼（0.63.56）
       let cxp: string | undefined
       const r = hireAt(b, Date.now(), (bb, o) => { const x = hireCodex(bb, { ...o, hold: true }); cxp = x.sid; return x })

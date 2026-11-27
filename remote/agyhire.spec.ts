@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _setOpenRoleRun, agyByLaunch, agyInstalled, agyModeArgs, hireWindows, initHr, summonRole, type Person } from './hr'
+import { _setOpenRoleRun, agyByLaunch, agyInstalled, agyModeArgs, codexInstalled, hireWindows, initHr, LAUNCH_PREFIX, summonRole, type Person } from './hr'
 import { resolveAgyPins } from './server'
 import { parseStore } from '../hooks/officeV2'
 
@@ -74,4 +74,33 @@ test('resolveAgyPins：上線了就把座位換過去；30 分鐘沒來放掉', 
   expect(S.pins['agp-dddddddd']).toBe('t1.3')
   resolveAgyPins(S, [], 1_000_000 + 31 * 60e3, look, false)
   expect(S.pins['agp-dddddddd']).toBeUndefined()
+})
+
+// ---------- Windows 的 Codex（0.64.6）：同一套 open_role.py --agent codex＋暫代 id cxw- ----------
+test.skipIf(!(process.platform === 'win32' && codexInstalled()))('招聘 Codex（Windows）：--agent codex、權限用 --agent-arg 帶、檢查點與開場句；不能當主管', () => {
+  _setOpenRoleRun(args => { calls.push(args); return { code: 0, out: JSON.stringify({ sid: 'cxw-1234abcd', pid: 4243 }) + '\n', err: '' } })
+  const r = hireWindows({ agent: 'codex', name: 'Cx1', perm: 'default', team: 'willy主管', task: '看一下' }, { cpFile: join(work, 'cp', 'Cx1.md') })
+  expect(r.ok).toBe(true)
+  expect(r.sid).toBe('cxw-1234abcd')
+  const a = calls[0]
+  expect(arg(a, '--agent')).toBe('codex')
+  expect(arg(a, '--plate')).toBe('Cx1')
+  expect(arg(a, '--cp-file')).toBe(join(work, 'cp', 'Cx1.md'))
+  expect(a).toContain('--agent-arg=-a')
+  expect(a).toContain('--agent-arg=on-request')
+  expect(arg(a, '--add-dir')).toBe(join(work, 'cp'))
+  expect(hireWindows({ agent: 'codex', name: 'Cx2', role: 'manager' }).ok).toBe(false)
+  expect(hireWindows({ agent: 'codex', name: 'Cx3', perm: 'read-only' }).ok).toBe(true)
+  expect(calls[calls.length - 1]).not.toContain('--add-dir') // 唯讀不能帶 --add-dir
+  const s = summonRole({ name: '測試員', card: join(work, '測試員.md'), cwd: work, b: { agent: 'codex' } })
+  expect(s.ok).toBe(true)
+  expect(arg(calls[calls.length - 1], '--agent')).toBe('codex')
+  expect(calls[calls.length - 1]).toContain('--agent-arg=--approve-for-me')
+})
+
+test('agyByLaunch 也找 Codex（cxw-）；LAUNCH_PREFIX 只認 agp-／cxw- 加 8 碼', () => {
+  writeFileSync(join(sess, 'codex-t1.json'), JSON.stringify({ id: 'codex-t1', kind: 'codex', launch: 'cxw-eeeeeeee' }))
+  expect(agyByLaunch('cxw-eeeeeeee', sess)).toBe('codex-t1')
+  expect(LAUNCH_PREFIX.test('cxw-eeeeeeee')).toBe(true)
+  expect(LAUNCH_PREFIX.test('cxp-eeeeeeee')).toBe(false)
 })

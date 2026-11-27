@@ -1,0 +1,63 @@
+{
+  "description": "pixel-office (Windows): runs the pixel office program from the newest installed Claude Code pixel-office plugin (~/.claude/plugins/cache/pixel-office/pixel-office/<version>/codex/codex_office.py) through a launcher that never changes, so upgrades need no reinstall and no new Trust all. Writes this Codex session's status, delivers office mail, marks the session gone on exit. Never blocks Codex.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I -B \"${PLUGIN_ROOT}/po_launch_win.py\" hook SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I -B \"${PLUGIN_ROOT}/po_launch_win.py\" hook UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I -B \"${PLUGIN_ROOT}/po_launch_win.py\" hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I -B \"${PLUGIN_ROOT}/po_launch_win.py\" hook Stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I -B \"${PLUGIN_ROOT}/po_launch_win.py\" hook SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

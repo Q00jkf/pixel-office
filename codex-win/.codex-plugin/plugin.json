@@ -1,0 +1,19 @@
+{
+  "name": "pixel-office",
+  "version": "1.0.0",
+  "description": "Pixel office for Codex CLI on Windows (stable launcher: never changes, so upgrading pixel-office needs no reinstall or new hook trust). Shows this Codex session in the Claude Code pixel office, takes messages from Claude sessions, and gives Codex office tools.",
+  "author": {
+    "name": "pixel-office"
+  },
+  "license": "MIT",
+  "keywords": [
+    "pixel-office",
+    "multi-agent"
+  ],
+  "interface": {
+    "displayName": "pixel-office",
+    "shortDescription": "Show this Codex session in the Claude Code pixel office",
+    "category": "Productivity"
+  },
+  "mcpServers": "./.mcp.json"
+}

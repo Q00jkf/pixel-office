@@ -361,11 +361,11 @@ export function folderTrusted(dir: string, cfgDir?: string, home = homedir()): b
 export const TRUST_TEXT = (path: string, name?: string) => `${name && name !== path ? `「${name}」（${path}）` : `「${path}」`}這個資料夾還沒在 Claude Code 信任過：開了會停在「要不要信任這個資料夾」，要到電腦上按。`
 
 /** Windows 版招聘：參數檢查與 hire() 相同，開視窗交給 open_role.py（預先登記也由它寫） */
-export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[] } = {}): { ok: boolean; text: string; sid?: string; need?: string } {
-  if (b?.agent === 'codex') return { ok: false, text: CODEX_WIN_TEXT }
+export function hireWindows(b: any, opts: { cwd?: string; addDirs?: (string | undefined)[]; cpFile?: string } = {}): { ok: boolean; text: string; sid?: string; need?: string } {
   const name = String(b?.name ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim()
   if (!name || [...name].length > 20) return { ok: false, text: '名字要 1～20 個字' }
   if (b?.agent === 'agy') return hireAgyWin(b, name, opts)
+  if (b?.agent === 'codex') return hireCodexWin(b, name, opts)
   const model = String(b.model ?? 'sonnet')
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
   const dirs = D.hireDirs()
@@ -429,6 +429,19 @@ export function winWindowOf(sid: string, claudePid: number, parentOf: ParentOf =
  * Windows → open_role.py（帶 --card；它自己擋「已經在線」→ 結束碼 3）；Mac／Linux → hire() 帶「你是 <角色>，接手。角色卡：…」
  */
 export function summonRole(o: { name: string; card: string; cwd: string; team?: string; manager?: boolean; b: any }): { ok: boolean; text: string; sid?: string; need?: string; online?: boolean } {
+  if (o.b?.agent === 'codex' && process.platform === 'win32') { // 0.64.6：用 Codex 開這個角色（Windows；Mac／Linux 照舊只開 Claude）
+    if (!codexInstalled()) return { ok: false, text: '這台電腦沒有 codex 指令（先裝 Codex CLI）' }
+    if (o.manager) return { ok: false, text: 'Codex 先只能當員工，主管請用 Claude 開' }
+    if (!existsSync(o.cwd)) return { ok: false, text: `資料夾不存在：${o.cwd}` }
+    const a = codexArgsWin({ perm: o.b?.perm, effort: o.b?.effort, model: o.b?.codexModel })
+    if (typeof a === 'string') return { ok: false, text: a }
+    const r = runOpenRole(['--agent', 'codex', '--role', o.name, '--dir', o.cwd, '--card', o.card, '--role-type', 'staff', ...(o.team ? ['--team', o.team] : []),
+      ...(a.model ? ['--model', a.model] : []), ...a.mode.args.map(x => `--agent-arg=${x}`)])
+    if ('error' in r) return r.code === 3 ? { ok: false, online: true, text: `${o.name} 已經在線：改傳話給他` } : { ok: false, text: `開不起來：${r.error}` }
+    if (r.pid) winLaunchSet(r.sid, r.pid)
+    watchWinHire(r.sid, o.name, r.pid, undefined, undefined, undefined, o.cwd)
+    return { ok: true, text: `📇 用 Codex 叫了 ${o.name}${o.team ? `（掛在 ${o.team} 底下）` : ''}：電腦上開了一個標題「${o.name}」的 Codex 視窗；會花 ChatGPT 的用量`, sid: r.sid }
+  }
   if (o.b?.agent === 'agy') { // 0.64.5：用 agy 開這個角色（開場句一樣是「你是 X，接手。角色卡：…」，agy 外掛有 office_takeover）
     if (!agyInstalled()) return { ok: false, text: '這台電腦沒有 agy（Antigravity CLI）' }
     if (o.manager) return { ok: false, text: 'agy 先只能當員工，主管請用 Claude 開' }
@@ -500,10 +513,11 @@ export function agyModels(): { slug: string; name: string }[] {
   }
   return agyModelCache ?? []
 }
-/** 照暫代 id 找已上線的 agy（狀態檔的 launch，agy_office.py apply_preset 寫的）：回它的辦公室 id（agy-<對話 id>） */
+/** 照暫代 id 找已上線的 agy／Codex（狀態檔的 launch，agy_office.py／codex_office.py 的 apply_preset 寫的）：回它的辦公室 id（agy-…／codex-…） */
+export const LAUNCH_PREFIX = /^(agp|cxw)-[0-9a-f]{8}$/
 export function agyByLaunch(launch: string, dir = join(D.base, 'sessions')): string | undefined {
   let names: string[] = []
-  try { names = readdirSync(dir).filter(n => n.startsWith('agy-') && n.endsWith('.json')) } catch { return }
+  try { names = readdirSync(dir).filter(n => /^(agy|codex)-/.test(n) && n.endsWith('.json')) } catch { return }
   for (const n of names) {
     try { const s = JSON.parse(readFileSync(join(dir, n), 'utf8')); if (s?.launch === launch && !s.left && typeof s.id === 'string') return s.id } catch {}
   }
@@ -534,7 +548,52 @@ function hireAgyWin(b: any, name: string, opts: { cwd?: string; addDirs?: (strin
   watchWinHire(r.sid, name, r.pid, undefined, undefined, undefined, dir.path)
   return { ok: true, text: `🧑‍💼 招聘了 agy ${name}：電腦上開了一個標題「${name}」的 agy 視窗，它第一次動作後進辦公室；會花 Google 的用量`, sid: r.sid }
 }
-export const CODEX_WIN_TEXT = 'Windows 上還不能從手機招聘 Codex（Codex 那一套要靠 tmux 抓畫面、交給 App）：請在電腦上開 Codex'
+/**
+ * Windows 招聘 Codex（0.64.6，jacky 11-27「你做好我到codex 上面按即可」）：open_role.py --agent codex 開一個跑 `codex --no-daemon` 的視窗。
+ * 跟 agy 一樣靠 PO_PRESET 事先登記（職稱、主管、檢查點、名牌、launch），座位先釘暫代 id（cxw-），上線後換過去。
+ * 沒有 tmux：手機不能替它按允許、換模型、按鍵、交給 App，只能傳話（codex queue）。要裝 codex-win 外掛（使用者按一次 Trust all）才進得了辦公室
+ */
+export const codexInstalled = () => process.platform === 'win32' ? !!Bun.which('codex') : existsSync(codexBin())
+function codexArgsWin(b: any): { model: string; mode: { args: string[]; effort?: string; perm: string } } | string {
+  const model = typeof b?.model === 'string' && b.model && b.model !== 'default' ? b.model : ''
+  if (model && (!SLUG.test(model) || !codexAllModels().some(m => m.slug === model))) return '不認得的智力等級'
+  const mode = codexModeArgs(b)
+  if (typeof mode === 'string') return mode
+  if (mode.effort) {
+    const m = model || codexModels()[0]?.slug, lv = codexEffortsOf(m)
+    if (lv && !lv.includes(mode.effort)) return `${m} 沒有這個投入程度`
+  }
+  return { model, mode }
+}
+function hireCodexWin(b: any, name: string, opts: { cwd?: string; addDirs?: (string | undefined)[]; cpFile?: string }): { ok: boolean; text: string; sid?: string } {
+  if (!codexInstalled()) return { ok: false, text: '這台電腦沒有 codex 指令（先裝 Codex CLI）' }
+  if (b.role === 'manager') return { ok: false, text: '主管只能是 Claude；Codex 可以當員工或行政' }
+  const a = codexArgsWin(b)
+  if (typeof a === 'string') return { ok: false, text: a }
+  const dirs = D.hireDirs()
+  const dir = opts.cwd && existsSync(opts.cwd) ? { name: opts.cwd, path: opts.cwd } : dirs.find(d => d.path === b.dir) ?? dirs[0]
+  if (!dir) return { ok: false, text: '沒有可用的上班地點' }
+  const team = typeof b.team === 'string' && b.team.trim() ? b.team.trim().slice(0, 60) : undefined
+  const title = [...(typeof b.title === 'string' && b.title.trim() ? b.title.trim() : name)].slice(0, 16).join('')
+  const cpFile = opts.cpFile ?? join(D.base, 'checkpoints', `${name.replace(/[\\/:*?"<>|\s]+/g, '-')}-${crypto.randomUUID().slice(0, 6)}.md`)
+  const add = a.mode.perm === 'read-only' ? [] : addDirArgs([...(opts.addDirs ?? []), dirname(cpFile)], dir.path).filter((_, i) => i % 2 === 1) // 唯讀不能帶 --add-dir
+  const plate = /^[A-Za-z0-9]{1,12}$/.test(name) ? name : undefined
+  mkdirSync(hrDir(), { recursive: true })
+  const taskFile = join(hrDir(), `task-codex-${crypto.randomUUID()}.txt`)
+  writeFileSync(taskFile, codexBrief({ name, title: b.title, team, role: b.role, task: b.task, cpFile }))
+  const r = (() => {
+    try {
+      return runOpenRole(['--agent', 'codex', '--role', name, '--name-only', '--dir', dir.path, '--title', title, '--role-type', 'staff', ...(plate ? ['--plate', plate] : []),
+        ...(team ? ['--team', team] : []), '--cp-file', cpFile, ...(a.model ? ['--model', a.model] : []), ...a.mode.args.map(x => `--agent-arg=${x}`),
+        ...add.flatMap(d => ['--add-dir', d]), '--task-file', taskFile])
+    } finally { rmSync(taskFile, { force: true }) }
+  })()
+  if ('error' in r) return { ok: false, text: `開不起來：${r.error}` }
+  if (r.pid) winLaunchSet(r.sid, r.pid)
+  watchWinHire(r.sid, name, r.pid, undefined, undefined, undefined, dir.path)
+  return { ok: true, text: `🧑‍💼 招聘了 ${name}（Codex${a.model ? ` ${a.model}` : ''}）：電腦上開了一個標題「${name}」的 Codex 視窗，大約二十秒後進辦公室（會花 ChatGPT 的用量）`, sid: r.sid }
+}
+export const CODEX_WIN_TEXT = 'Windows 上還不能從手機開 Codex 生圖幫手（要靠 tmux 抓畫面、交件）：請在電腦上開 Codex' // 0.64.6 起招聘可以了，只剩生圖幫手用這句
 
 export async function setModel(id: string, model: string): Promise<{ ok: boolean; text: string }> {
   if (!(model in MODELS)) return { ok: false, text: '不認得的智力等級' }
@@ -1396,7 +1455,7 @@ export function watchWinHire(sid: string, name: string, pid?: number, t0 = Date.
   const key = `win-${sid}`
   const check = () => {
     const now = Date.now()
-    if (D.people().some(p => p.id === sid) || (sid.startsWith('agp-') && agyByLaunch(sid)) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
+    if (D.people().some(p => p.id === sid) || (LAUNCH_PREFIX.test(sid) && agyByLaunch(sid)) || (pid && !alive(pid)) || now - t0 > STUCK_KEEP_MS) { stuck.delete(key); return }
     if (now - t0 >= WIN_STUCK_MS && !stuck.has(key)) stuck.set(key, { id: crypto.randomUUID().slice(0, 8), name, session: name, title: '開了但還沒進辦公室', at: now, options: [], win: true, ...(dir ? { dir } : {}) })
     setTimeout(check, every).unref?.()
   }
