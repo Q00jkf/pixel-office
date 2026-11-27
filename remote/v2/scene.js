@@ -1181,6 +1181,8 @@
     // 0.62.20：誰來做（Claude／Codex）；Codex 開在電腦背景的 tmux，會花 ChatGPT 的用量，先只能當員工或行政
     const cxm = s0.codexModels || []
     sheet('招聘新員工',
+      // 從角色卡挑（0.64.4，jacky「按椅子進到招聘新員工時沒有看到 role 的選擇」）：照下面選的座位，有主管的桌＝叫角色到這桌、沒主管的桌＝開主管到這桌、辦公區＝開專案
+      `<button class="mrow" id="hcards"><span><b>從角色卡挑</b><small>照下面選的「坐哪」：有主管的桌列角色卡（含其他專案）、沒主管的桌和辦公區列主管卡；不用卡就照下面填</small></span></button>` +
       `<label>誰來做</label><div class="v2hrole"><label><input type="radio" name="hagent" value="claude" checked>Claude</label><label><input type="radio" name="hagent" value="codex"${s0.noCodexHire ? ' disabled' : ''}>Codex</label></div>` +
       (s0.noCodexHire ? `<div class="v2hnote">${esc(s0.noCodexHire)}</div>` : '') +
       `<div id="hagentnote" class="v2hnote" style="display:none"></div>` +
@@ -1203,6 +1205,13 @@
     const role = () => (document.querySelector('input[name="hrole"]:checked') || {}).value || 'staff'
     const agent = () => (document.querySelector('input[name="hagent"]:checked') || {}).value || 'claude'
     const claudeModels = $('hmodel').innerHTML
+    $('hcards').addEventListener('click', () => {
+      const v = $('hseat').value, t = tables.find(x => String(x.id) === v), b = t && bossOf(t)
+      if (t && b && !b.kind) openCardsV2('member', b, t.id)
+      else if (t && !b) openCardsV2('project', undefined, t.id)
+      else if (t) toast('這桌的主管不是 Claude，只能照下面填的招聘')
+      else openCardsV2('project')
+    })
     $('hkv').onerror = () => { $('hkvbox').hidden = true }
     $('hkv').onload = () => { $('hkvbox').hidden = false }
     // 投入程度（預設中）、模式（預設自動）：Codex 換成它自己的清單（伺服器給；沒給就不顯示、不送）
