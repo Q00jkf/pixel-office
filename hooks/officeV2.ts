@@ -83,12 +83,18 @@ export function seatExists(S: Store, key: string): boolean {
   return !!t && +m[2] < t.size
 }
 
-/** 主管（role＝manager、有 agent）＋掛在他底下的員工（team＝主管的 agent／名牌）＝一個團隊；只有主管一個人不算 */
+/**
+ * 主管（role＝manager、有 agent）＋掛在他底下的員工（team＝主管的 agent／名牌）＝一個團隊；只有主管一個人不算。
+ * 部門主管（自己底下也有人）只算自己那一隊，不算上一層主管的組員（0.64.7：原本兩隊都算，② 先排到上一層那桌，
+ * 部門主管坐進上一層的桌、自己那桌的 0 號空著、組員多的坐不下；跟 scene.ts 的 isDeptLead「底下有人才自成一隊」一致）
+ */
 export function teamsOf<P extends Seatable>(people: P[]): Map<string, P[]> {
+  const under = (m: P) => people.filter(p => p.id !== m.id && p.team && (p.team === m.agent || p.team === m.plate || p.team === m.name))
+  const leads = new Set(people.filter(m => m.role === 'manager' && m.agent && under(m).length).map(m => m.id))
   const out = new Map<string, P[]>()
-  for (const m of people) if (m.role === 'manager' && m.agent) {
-    const members = people.filter(p => p.id !== m.id && p.team && (p.team === m.agent || p.team === m.plate || p.team === m.name))
-    if (members.length) out.set(m.agent, [m, ...members])
+  for (const m of people) if (leads.has(m.id)) {
+    const members = under(m).filter(p => !leads.has(p.id))
+    if (members.length) out.set(m.agent!, [m, ...members])
   }
   return out
 }

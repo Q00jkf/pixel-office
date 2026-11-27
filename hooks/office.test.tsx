@@ -3565,6 +3565,24 @@ test('art A #14 review: a manager whose name is a command still keeps his team a
 import { baseName, claimTables, moveSeat, parseStore, pinSeat, retarget, teamsOf } from './officeV2'
 const v2table = (id: number, team: string | undefined, extra: Record<string, unknown> = {}) => ({ id, name: `桌${id}`, size: 4, ...(team ? { team } : {}), ...extra }) as any
 
+test('0.64.7: a department lead (manager with own members, team=upper manager) sits at the head of its own table, not at the upper manager table', () => {
+  const top = { id: 'top', plate: 'T', name: 'T', role: 'manager', agent: 'willy主管' }
+  const mate = { id: 'mate', plate: 'O', role: 'staff', team: 'willy主管' }
+  const lead = { id: 'lead', plate: 'D', name: 'D', role: 'manager', agent: 'willy設計', team: 'willy主管' }
+  const a = { id: 'a', plate: 'A', role: 'staff', team: 'willy設計' }
+  const b = { id: 'b', plate: 'B', role: 'staff', team: 'willy設計' }
+  const people = [top, mate, lead, a, b] as any
+  expect(teamsOf(people).get('willy主管')!.map(p => p.id)).toEqual(['top', 'mate'])
+  expect(teamsOf(people).get('willy設計')!.map(p => p.id)).toEqual(['lead', 'a', 'b'])
+  const S = v2empty()
+  const { map } = v2assign(S, people, 0)
+  const own = S.tables.find(t => t.team === 'willy設計')!
+  expect(map.get('lead')).toBe(`t${own.id}.0`)
+  expect([map.get('a'), map.get('b')].every(k => k?.startsWith(`t${own.id}.`))).toBe(true)
+  // 部門主管底下沒人：照舊是上一層的組員
+  expect(teamsOf([top, mate, lead] as any).get('willy主管')!.map(p => p.id)).toEqual(['top', 'mate', 'lead'])
+})
+
 test('0.63.57: a table still named after the old manager goes to the new manager pinned at its head seat; old group cleared; Codex member sits there too', () => {
   const S = v2empty()
   S.tables = [v2table(2, '主管（接續）', { group: { boss: 'old', team: '主管（接續）', notified: [], at: 0, complete: true } })]

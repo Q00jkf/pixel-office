@@ -1142,7 +1142,7 @@ function clashNotes(list: Coworker[]): string[] {
 const TITLE_STALE_MS = 30 * 60000 // title 超過這麼久沒更新、又來新指令 = 可能換了工作
 const ERROR_SHOWN_MS = 10 * 60000 // 錯誤摘要在名單上留這麼久
 /** 本外掛版號，＝ .claude-plugin/plugin.json 的 version（升版兩處一起改；測試讀不到 json，沒有自動比對） */
-export const VERSION = '0.64.6'
+export const VERSION = '0.64.7'
 
 // 系統提示那段（英文較省 token；2026-10-31 jacky 裁示從 900 縮到約 340 字元：細節在 skill 與工具說明）
 export const ROLE_SECTION =
