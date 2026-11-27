@@ -17,7 +17,7 @@ import { MIN_ROWS, assignSeats, isDeptLead, layout, setSpread, shownName } from 
 import { STALE_MS, parseStatus } from '../hooks/status'
 import { drawVector, sameNameNumbers, vectorSvg } from '../hooks/vector'
 import { accessKeys, verifyAccessJwt, type KeySource } from './access'
-import { accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
+import { accessShouldLog, BROWSER_COOKIE, BrowserLogin, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
 import { APPROVE_COOLDOWN_MS, approveChatLine, approveLog, phoneOffCard, phoneOffWhy, claudeApproval, claudeDecision, codexApproval, codexPress, codexPrompt, parseSlip, phoneBeat, type ApprovalInfo } from './approve'
 import { CXP_ORDER_MAX_KEEP_MS, planCxpOrders, sessionListCache, type SessionList, closeCodexHelper, codexStarted, launchOwner, launchState, codexCtl, codexFire, codexKey, codexModel, codexModels, codexProc, hireCodex, stuckView, pressStuck, writeOrder, pendingOrder, takesOrders, EFFORTS, PERMS, CODEX_EFFORTS, CODEX_PERMS, ctlGet, codexSettings, codexEffortsOf, withPane, appTabOf, pidAlive, pidStart, codexToApp, codexToTmux, READONLY_TEXT, codexAway, codexHandoffs, rememberPlates, codexSession, underHome, paneFor, spawnBounded, inAppOf, settlePending, setEffort, setPerm, codexEffort, codexPerm, codexCap, agyCap, codexLineItems, codexTranscript, pageChat, daysText, CODEX_WIN_TEXT, spawnSyncW, summonRole, closeSession, hookSkipOf, EXT_TIMEOUT_MS, MODELS, chatOf, editShift, fire, hire, hrOf, initHr, pressKey, profileOf, setModel, shifts, staffing, startShiftClock } from './hr'
 import { v2PanelSvg } from '../hooks/v2panel'
@@ -1829,6 +1829,8 @@ async function peerProc(req: Request, srv?: PeerIP): Promise<{ pid?: number; exe
 /** 存取紀錄（0.63.56 起；0.63.60 改照顧問裁示）：寫入一律記、讀同一組 (via, exe, parent, path) 10 分鐘記一筆（gate.ts accessShouldLog）；
  *  access-log.jsonl（0600），超過 5 MB 換新檔、最多留 3 份；不記內容 */
 const accessSeen = new Map<string, number>()
+/** 本機瀏覽器登入（0.64.1）：一次性連結與 cookie 都只在記憶體，重開伺服器全部作廢 */
+export const browserLogin = new BrowserLogin()
 function logAccess(e: Record<string, unknown>) {
   const f = gatePatch?.log ?? join(BASE, 'access-log.jsonl')
   try { rotateLog(f); appendFileSync(f, JSON.stringify(e) + '\n', { mode: 0o600 }); chmodSync(f, 0o600) } catch {}
@@ -1884,7 +1886,9 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
     jwt ??= await phoneAuth(req.headers)
     const key = keyMatches(req.headers.get('x-po-key'), gatePatch && 'key' in gatePatch ? gatePatch.key : serverKey())
     const dev = gatePatch?.dev ?? devMode(process.env.PO_DEV, cfg.port).dev
-    let g = gate(req.method, url.pathname, { jwt: jwt.ok, key }, { dev, tailscale: gatePatch?.tailscale ?? cfg.tailscale === true })
+    // 本機瀏覽器的 cookie（0.64.1）：只在本機網址算數；跨來源的寫入由下面寫入前的 sameOrigin(req) 擋
+    const browser = local && browserLogin.valid(req.headers.get('cookie'))
+    let g = gate(req.method, url.pathname, { jwt: jwt.ok, key, browser }, { dev, tailscale: gatePatch?.tailscale ?? cfg.tailscale === true })
     // 測試埠的示意請求（body 帶 demo）：示意分支只改記憶體裡的示意資料或回一句話，讓 e2e 的示意模式跑得完；真的寫入照樣要金鑰（/approve 連示意都不放）
     if (!g.ok && dev && req.method === 'POST') {
       const peek = await req.clone().json().catch(() => null)
@@ -1903,6 +1907,19 @@ async function handleReq(req: Request, srv?: PeerIP): Promise<Response> {
   const json = (j: unknown, status = 200) => Response.json(j, { status, headers: nocache })
   const body = async () => (await req.json().catch(() => ({}))) ?? {}
   const num = (k: string) => { const v = url.searchParams.get(k); return v !== null && /^\d+$/.test(v) ? Number(v) : undefined }
+  // 本機瀏覽器登入（0.64.1）：POST /login-link（要金鑰或 JWT）發一次性連結；GET /login?t= 換 cookie 後轉回首頁
+  if (url.pathname === '/login-link' && req.method === 'POST') {
+    // 只給本機金鑰或 JWT；瀏覽器 cookie 不能再要新連結
+    if (!jwt?.ok && !keyMatches(req.headers.get('x-po-key'), gatePatch && 'key' in gatePatch ? gatePatch.key : serverKey())) return json({ ok: false, text: '要本機金鑰' }, 403)
+    return json({ ok: true, url: `http://127.0.0.1:${cfg0.port}/login?t=${browserLogin.link()}` })
+  }
+  if (url.pathname === '/login' && req.method === 'GET') {
+    const html = (t: string, status: number) => new Response(`<!doctype html><meta charset="utf-8"><title>pixel-office</title><p>${t}</p>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', ...nocache } })
+    if (!local) return html('只能在這台電腦用 127.0.0.1 登入', 403)
+    const sid = browserLogin.redeem(url.searchParams.get('t'))
+    if (!sid) return html('登入連結無效或過期（60 秒、只能用一次）：重跑 scripts/open_office.py', 401)
+    return new Response(null, { status: 302, headers: { location: '/', 'set-cookie': `${BROWSER_COOKIE}=${sid}; Path=/; HttpOnly; SameSite=Strict`, ...nocache } })
+  }
   // v2 預覽時期的網址（/v2/、/v2/?demo=12）：預覽已併進來，轉回首頁、參數照帶
   if (url.pathname === '/v2' || url.pathname === '/v2/') return new Response(null, { status: 302, headers: { location: '/' + url.search } })
   if (url.pathname === '/') return new Response(pageHtml(), { headers: { 'content-type': 'text/html; charset=utf-8', ...nocache } })

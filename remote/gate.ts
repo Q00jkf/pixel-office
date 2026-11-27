@@ -4,6 +4,7 @@
 // - 不用驗證：頁面本身、程式與樣式、素材圖、icon、manifest
 // PO_DEV=1 只在測試埠 8781／8782 生效：沒帶驗證的本機請求可以讀「JWT 或金鑰」那一類（寫入照樣要金鑰；示意請求另外放行）。
 // tailscale（remote.json "tailscale": true）：沒帶驗證的請求只能讀（GET 資料端點），寫一律 403
+// 本機瀏覽器（0.64.1）：帶本機金鑰要一條一次性登入連結（/login-link），瀏覽器開 /login?t= 換成 cookie po_b；權限同本機金鑰，只在本機網址算數
 import { closeSync, existsSync, lstatSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 
@@ -56,16 +57,17 @@ export function gateClass(method: string, path: string): GateClass {
     if (/^\/icon-[a-z0-9-]+\.png$/.test(path)) return 'open'
     if (/^\/vendor\/[a-z0-9.-]+\.js$/.test(path)) return 'open'
     if (/^\/v2\/(scene\.js|scene\.css|assets\/[A-Za-z0-9_.-]+)$/.test(path)) return 'open'
+    if (path === '/login') return 'open' // 一次性連結換 cookie；連結本身就是憑證（server.ts 驗）
   }
   return 'either'
 }
 
-export type Who = { jwt: boolean; key: boolean; email?: string }
+export type Who = { jwt: boolean; key: boolean; browser?: boolean; email?: string }
 export type GateOpts = { dev: boolean; tailscale: boolean }
-export type GateResult = { ok: true; via: 'jwt' | 'key' | 'dev' | 'tailscale' | 'open' } | { ok: false; status: 401 | 403; text: string }
+export type GateResult = { ok: true; via: 'jwt' | 'key' | 'browser' | 'dev' | 'tailscale' | 'open' } | { ok: false; status: 401 | 403; text: string }
 
 const NEED_JWT = '這個動作只能在經 Cloudflare 登入的手機頁按'
-const NEED_ANY = '請用 Cloudflare 網址開（本機程式要帶本機金鑰：標頭 X-PO-Key，金鑰在 ~/.claude/pixel-office/local-key）'
+const NEED_ANY = '還沒登入：這台電腦的瀏覽器請跑 python <pixel-office>/scripts/open_office.py 開（會自動登入）；手機用 Cloudflare 網址開；本機程式帶標頭 X-PO-Key（金鑰在 ~/.claude/pixel-office/local-key）'
 const TS_READ_ONLY = 'Tailscale 連進來只能看，不能改'
 
 /** 放不放行；寫入算 POST（或 GET、HEAD 以外的方法） */
@@ -75,6 +77,7 @@ export function gate(method: string, path: string, who: Who, o: GateOpts): GateR
   if (who.jwt) return { ok: true, via: 'jwt' }
   if (cls === 'jwt') return { ok: false, status: 403, text: NEED_JWT }
   if (who.key) return { ok: true, via: 'key' }
+  if (who.browser) return { ok: true, via: 'browser' }
   const read = method === 'GET' || method === 'HEAD'
   // PO_DEV（測試埠）只放行讀；寫入照樣要金鑰（主管 11-26 裁示，安全審 F-1：測試埠開在真資料上時，本機程式改不了東西）。示意 POST 由 server.ts 另外放行
   if (o.dev && read) return { ok: true, via: 'dev' }
@@ -127,4 +130,48 @@ export function hostOk(host: string | null, port: number, publicHosts: string[],
   const name = h.replace(/:443$/, '')
   if (!/^[a-z0-9.-]+$/.test(name)) return false
   return publicHosts.includes(name) || jwtOk
+}
+
+/**
+ * 本機瀏覽器登入（0.64.1）：一次性連結 60 秒、用一次就失效；換到的 cookie 存在伺服器記憶體，伺服器重開就要重登。
+ * 憑證都是 32 bytes 亂數 hex；比對用定長比對
+ */
+export const LOGIN_LINK_MS = 60e3
+export const BROWSER_COOKIE = 'po_b'
+export class BrowserLogin {
+  links = new Map<string, number>()
+  sessions = new Set<string>()
+  static token = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex')
+  link(now = Date.now()): string {
+    for (const [t, exp] of this.links) if (exp <= now) this.links.delete(t)
+    const t = BrowserLogin.token()
+    this.links.set(t, now + LOGIN_LINK_MS)
+    return t
+  }
+  /** 連結換 session：對了回新的 session token，連結隨即作廢；不對、過期回 undefined */
+  redeem(given: string | null, now = Date.now()): string | undefined {
+    if (!given || !KEY_RE.test(given)) return undefined
+    for (const [t, exp] of this.links) {
+      if (!timingSafeEqual(Buffer.from(given), Buffer.from(t))) continue
+      this.links.delete(t)
+      if (exp <= now) return undefined
+      const s = BrowserLogin.token()
+      this.sessions.add(s)
+      return s
+    }
+    return undefined
+  }
+  valid(cookieHeader: string | null): boolean {
+    const v = cookieValue(cookieHeader, BROWSER_COOKIE)
+    if (!v || !KEY_RE.test(v)) return false
+    for (const s of this.sessions) if (timingSafeEqual(Buffer.from(v), Buffer.from(s))) return true
+    return false
+  }
+}
+export function cookieValue(header: string | null, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const i = part.indexOf('=')
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim()
+  }
+  return undefined
 }

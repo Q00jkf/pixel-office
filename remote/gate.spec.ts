@@ -3,8 +3,8 @@ import { afterAll, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ACCESS_DEDUP_MS, accessShouldLog, devMode, gate, gateClass, highRisk, hostOk, keyMatches, loadLocalKey, rotateLog } from './gate'
-import { _setGatePatch, handle, hirePerm, redactKey } from './server'
+import { ACCESS_DEDUP_MS, accessShouldLog, BrowserLogin, cookieValue, devMode, gate, gateClass, highRisk, hostOk, keyMatches, LOGIN_LINK_MS, loadLocalKey, rotateLog } from './gate'
+import { _setGatePatch, browserLogin, handle, hirePerm, redactKey } from './server'
 import { confirmScreen, typeLine } from './hr'
 
 const dir = mkdtempSync(join(tmpdir(), 'po-gate-'))
@@ -25,7 +25,7 @@ test('gate: JWT passes everything; key passes all but JWT-only; nothing → 401 
   expect(gate('POST', '/command', { jwt: false, key: true }, off)).toEqual({ ok: true, via: 'key' })
   const r = gate('GET', '/state.json', none, off) as any
   expect(r).toMatchObject({ ok: false, status: 401 })
-  expect(r.text).toContain('請用 Cloudflare 網址開')
+  expect(r.text).toContain('open_office.py')
   expect(gate('GET', '/state.json', none, { dev: true, tailscale: false })).toEqual({ ok: true, via: 'dev' })
   expect(gate('POST', '/command', none, { dev: true, tailscale: false })).toMatchObject({ ok: false, status: 401 }) // PO_DEV 只放行讀
   expect(gate('GET', '/chat.json', none, { dev: false, tailscale: true })).toEqual({ ok: true, via: 'tailscale' })
@@ -84,7 +84,7 @@ test('through handle(): no auth → 401 on data and writes, page still served; r
   expect((await get('/')).status).toBe(200)
   const s = await get('/state.json')
   expect(s.status).toBe(401)
-  expect((await s.json()).text).toContain('請用 Cloudflare 網址開')
+  expect((await s.json()).text).toContain('open_office.py')
   expect((await get('/chat.json?id=x')).status).toBe(401)
   expect((await get('/phone-live')).status).toBe(401)
   expect((await post('/command', { id: 'nobody', text: 'hi' })).status).toBe(401)
@@ -252,4 +252,54 @@ test('0.63.60 through handle(): a second identical key read within 10 minutes is
   const lines = readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l))
   expect(lines.map(l => `${l.method} ${l.path}`)).toEqual(['GET /approve-result', 'POST /command', 'POST /command'])
   expect(JSON.stringify(lines)).not.toContain('n=1') // 不記查詢字串
+})
+
+test('0.64.1 browser login: link is one-time and expires in 60 s; session cookie passes like the key but never opens /approve, /stuck, /perm', () => {
+  const b = new BrowserLogin()
+  const t = b.link(1000)
+  expect(b.redeem('f'.repeat(64), 1000)).toBeUndefined()
+  expect(b.redeem(t, 1000 + LOGIN_LINK_MS)).toBeUndefined() // 過期
+  expect(b.redeem(t, 1000)).toBeUndefined() // 過期那次已作廢
+  const t2 = b.link(5000)
+  const sid = b.redeem(t2, 5001)!
+  expect(sid).toMatch(/^[0-9a-f]{64}$/)
+  expect(b.redeem(t2, 5002)).toBeUndefined() // 只能用一次
+  expect(b.valid(`a=1; po_b=${sid}`)).toBe(true)
+  expect(b.valid('po_b=' + 'e'.repeat(64))).toBe(false)
+  expect(b.valid(null)).toBe(false)
+  expect(cookieValue(' x=1 ;po_b=abc', 'po_b')).toBe('abc')
+  const off = { dev: false, tailscale: false }, br = { jwt: false, key: false, browser: true }
+  expect(gate('GET', '/state.json', br, off)).toEqual({ ok: true, via: 'browser' })
+  expect(gate('POST', '/command', br, off)).toEqual({ ok: true, via: 'browser' })
+  for (const p of ['/approve', '/stuck', '/perm']) expect(gate('POST', p, br, off)).toMatchObject({ ok: false, status: 403 })
+  expect(gateClass('GET', '/login')).toBe('open')
+  expect(gateClass('POST', '/login-link')).toBe('either')
+})
+
+test('0.64.1 browser login through handle(): key gets a link, /login sets the cookie, the cookie reads data; other hosts, other origins, bad links refused', async () => {
+  const key = 'c'.repeat(64)
+  _setGatePatch({ key, dev: false, tailscale: false, log: join(dir, 'access-log-browser.jsonl') })
+  const at = (p: string, init: RequestInit = {}, host = '127.0.0.1:8767') => handle(new Request(`http://127.0.0.1:8767${p}`, { ...init, headers: { host, ...(init.headers as any) } }))
+  expect((await at('/login-link', { method: 'POST', body: '{}' })).status).toBe(401) // 沒金鑰拿不到連結
+  const r = await (await at('/login-link', { method: 'POST', body: '{}', headers: { 'x-po-key': key } })).json() as any
+  expect(r.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/login\?t=[0-9a-f]{64}$/)
+  const t = new URL(r.url).searchParams.get('t')!
+  expect((await at(`/login?t=${t}`, {}, 'evil.example')).status).toBe(403) // 本機網址以外不換
+  const ok = await at(`/login?t=${t}`)
+  expect(ok.status).toBe(302)
+  const set = ok.headers.get('set-cookie')!
+  expect(set).toContain('HttpOnly')
+  expect(set).toContain('SameSite=Strict')
+  expect((await at(`/login?t=${t}`)).status).toBe(401) // 用過了
+  const cookie = set.split(';')[0]
+  expect((await at('/state.json')).status).toBe(401)
+  expect((await at('/state.json', { headers: { cookie } })).status).toBe(200)
+  expect((await at('/state.json', { headers: { cookie } }, 'localhost:8767')).status).toBe(200)
+  // 寫入：同源才算；別的埠、別的網站帶著 cookie 送不進來
+  const cmd = (h: Record<string, string>) => at('/command', { method: 'POST', body: JSON.stringify({ id: 'nobody', text: 'hi' }), headers: { 'content-type': 'application/json', cookie, ...h } })
+  expect((await cmd({ origin: 'http://127.0.0.1:8767' })).status).toBe(400) // 過了身分這關：這位不在線
+  expect((await cmd({ origin: 'http://127.0.0.1:9999' })).status).toBe(403) // 原本的同源檢查擋
+  expect((await at('/perm', { method: 'POST', body: '{}', headers: { cookie, origin: 'http://127.0.0.1:8767' } })).status).toBe(403)
+  expect((await at('/login-link', { method: 'POST', body: '{}', headers: { cookie } })).status).toBe(403) // cookie 不能再要連結
+  expect(browserLogin.sessions.size).toBeGreaterThan(0)
 })

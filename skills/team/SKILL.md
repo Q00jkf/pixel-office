@@ -84,7 +84,7 @@ po http://127.0.0.1:8767/command '{"id":"<session id>","text":"<要說的話>"}'
 ```
 
 - 金鑰由伺服器第一次啟動時產生（`~/.claude/pixel-office/local-key`，Mac／Linux 權限 600；Windows 沒有這種權限，不檢查）。不要貼進對話、檔案、commit 或 issue；不要改它的權限（太寬伺服器就不用它，本機呼叫全部回 401）。
-- 沒帶金鑰回 401「請用 Cloudflare 網址開…」；Mac 上直接用瀏覽器開 127.0.0.1 也一樣，請改用 Cloudflare 網址。
+- 沒帶金鑰回 401「還沒登入…」。使用者要用這台電腦的瀏覽器看：請他跑 `python <pixel-office>/scripts/open_office.py`（一次性登入連結，0.64.1），不要把金鑰給瀏覽器。
 - `/approve`（按允許）、`/stuck`（替新員工按確認畫面）、`/perm`（換模式）只能在經 Cloudflare 登入的手機頁按，帶金鑰也回 403：這三個要使用者本人。
 - `/hire`、`/helper`、`/perm`、`/stuck` 每次都記一筆，用金鑰的本機呼叫也每次都記（`~/.claude/pixel-office/access-log.jsonl`：時間、端點、來源程序）。
 - 測試埠（8781／8782）用 `PO_DEV=1 PO_PORT=8782 bun remote/server.ts` 開，可以不帶金鑰；其他埠設了 `PO_DEV` 也不理。

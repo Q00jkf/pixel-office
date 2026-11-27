@@ -7,6 +7,19 @@
 
 ---
 
+## 0.64.1 — 2026-11-27 — 這台電腦的瀏覽器也能開辦公室（不用 Cloudflare）
+
+- **改了什麼**：
+  - 新增 `scripts/open_office.py`：讀本機金鑰，`POST /login-link` 要一條一次性登入連結（60 秒、用一次），用預設瀏覽器打開；`GET /login?t=` 只收本機網址（127.0.0.1／localhost＋埠），換成 cookie `po_b`（HttpOnly、SameSite=Strict）後轉回首頁。之後這個瀏覽器直接開 `127.0.0.1:8767` 就行。
+  - `remote/gate.ts`：多一種身分 `browser`（`BrowserLogin`：連結與 cookie 都只在伺服器記憶體，重開全部作廢），權限同本機金鑰：`/approve`、`/stuck`、`/perm` 照舊只認 JWT；cookie 只在本機網址算數，跨來源寫入照舊被 `sameOrigin(req)` 擋；`/login-link` 只給金鑰或 JWT，cookie 不能再要連結。
+  - 沒登入的 401 文字改成說怎麼登入；手機頁（`remote/page.html`）收到 401 直接把這段顯示在頂端，不再只寫「還沒連上過」。
+  - 文件：`docs/使用說明.md` 手機版一節、`skills/team/SKILL.md` 本機呼叫一節。
+- **為什麼**：jacky 11-27：0.63.56 起本機瀏覽器開 `127.0.0.1:8767` 拿不到資料（畫面出來但一直沒連上），「讓沒有 cloudflare 的人能夠使用瀏覽器去看」。不退回「本機不驗證」：那是 0.63.56 刻意補的洞（本機任何程式都能當擁有者）。
+- **代價**：同帳號能讀金鑰檔的程式也能自己要連結（跟 0.63.56 一樣，不更鬆）；cookie 不分埠，同一台電腦別的埠上的伺服器會收到它（本機程式，信任等級同上）；瀏覽器擴充功能看得到頁面。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：重開辦公室伺服器（8767）才生效。要用電腦瀏覽器看的人跑一次 `python <plugin>/scripts/open_office.py`。
+
 ## 0.64.0 — 2026-11-27 — Windows 上從手機開人（招聘、交接、幫手、解雇）＋手機叫角色、團隊、開專案、關係圖
 
 - **改了什麼**（設計 `docs/designs/windows-hire.md`；分支 `feat/windows-hire` 合併）：

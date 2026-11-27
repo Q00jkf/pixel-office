@@ -143,7 +143,7 @@
   cap = setTimeout(done, 20000)
 })()
 </script>
-<header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span><button id="hrbtn" type="button">☰ 人事室</button></header>
+<header><span id="count">像素辦公室</span><span id="stale">連線中斷，畫面停在 <b id="at"></b></span><span id="login" style="display:none;color:#c33"></span><button id="hrbtn" type="button">☰ 人事室</button></header>
 <main></main>
 <div id="card"><div id="c1"><div class="tbar"><img id="cchibi" class="kvchibi" alt="" hidden><h2 id="cname"></h2><button id="close" class="tclose" aria-label="關閉"></button></div><div id="info"></div>
   <div id="reply"></div>
@@ -256,6 +256,12 @@
     busy = true
     try {
       const r = await fetch(DEMO ? `/state.json?demo=${demoN}` : '/state.json', { cache: 'no-store' })
+      if (r.status === 401 && !DEMO) { // 沒登入（0.64.1）：本機瀏覽器跑 open_office.py、手機用 Cloudflare 網址；把伺服器的說明直接顯示
+        const t = await r.json().then(j => j.text).catch(() => '')
+        $('login').textContent = t || '還沒登入'
+        $('login').style.display = 'inline'
+        return
+      }
       if (!r.ok) throw new Error(r.status)
       st = await r.json()
       if (typeof st.now === 'number') skew = st.now - Date.now() // 伺服器時間（0.63.56）：允許卡倒數照伺服器的鐘，手機時鐘不準也一樣
@@ -264,6 +270,7 @@
       const waiting = people().filter(p => p.mode === 'waiting').length
       $('count').textContent = `${people().length} 人在線` + (waiting ? ` · ${waiting} 位等你` : '')
       $('stale').style.display = 'none'
+      $('login').style.display = 'none'
       lastOk = new Date()
       listeners.forEach(f => { try { f(st) } catch (e) { console.error(e) } })
     } catch {
