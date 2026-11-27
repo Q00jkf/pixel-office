@@ -7,6 +7,15 @@
 
 ---
 
+## 0.64.8 — 2026-11-27 — 修：Windows 有 Codex 在線時手機頁斷線
+
+- **改了什麼**：`remote/hr.ts` 的 `sharedPid` 在 Windows 不叫 `ps`，照 Codex 狀態檔的 `shared`；`sharedPid`、`psUnix` 叫不起來 `ps` 時不丟例外。測試 `remote/agyhire.spec.ts`「sharedPid」。
+- **為什麼**：jacky 11-27「office斷線了為什麼」。0.64.6 起 Windows 的 Codex 進得了辦公室，`/state.json` 算 Codex 狀態時叫 `ps`；8767 是從 PowerShell 啟動的，PATH 裡沒有 `ps`，`Bun.spawnSync` 丟「Executable not found in $PATH: "ps"」，整個 `/state.json` 回 500，手機頁顯示斷線。從 Git Bash 啟動的伺服器有 `ps`，所以測試伺服器重現不出來。
+- **代價**：Windows 上分不出 Codex 是不是共用的常駐程式開的，照狀態檔記的（Windows 招聘一律 `--no-daemon`，本來就不是）。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：重開辦公室伺服器（8767）。
+
 ## 0.64.7 — 2026-11-27 — 部門主管坐回自己那桌；自動開的桌照人數加大
 
 - **改了什麼**：`hooks/officeV2.ts` 的 `teamsOf`：部門主管（自己底下有人、team 掛上一層主管）只算自己那一隊，不再同時算上一層主管的組員。`assign`：自動開的桌（`auto`）組員比桌子多時照人數加大（2／4／6／8，最多 8），使用者建的桌不動、不縮小。測試 `hooks/office.test.tsx`「0.64.7」。

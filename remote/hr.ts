@@ -1236,10 +1236,14 @@ export function isSharedCmd(cmd: string): boolean {
   return false
 }
 const sharedSeen = new Map<number, { v: boolean; at: number }>()
-function sharedPid(pid: number, now = Date.now()): boolean | undefined {
+// Windows 沒有 ps（0.64.8：從 PowerShell 啟動的伺服器 PATH 裡沒有 Git Bash 的 ps，丟例外讓整個 /state.json 回 500）：
+// Windows 一律回 undefined，照狀態檔的 shared；其他平台 ps 叫不起來也一樣
+export function sharedPid(pid: number, now = Date.now()): boolean | undefined {
+  if (process.platform === 'win32') return
   const c = sharedSeen.get(pid)
   if (c && now - c.at < 60e3) return c.v
-  const r = Bun.spawnSync(['ps', '-o', 'command=', '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' })
+  let r: ReturnType<typeof Bun.spawnSync>
+  try { r = Bun.spawnSync(['ps', '-o', 'command=', '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' }) } catch { return }
   if (r.exitCode !== 0) return
   const v = isSharedCmd(r.stdout.toString())
   sharedSeen.set(pid, { v, at: now })
@@ -1826,7 +1830,7 @@ function winProc(pid: number) {
   return winTable.m.get(pid)
 }
 const psOf = (pid: number, field: 'ppid' | 'lstart') => process.platform === 'win32' ? (field === 'ppid' ? winProc(pid)?.ppid : winProc(pid)?.start) ?? '' : psUnix(pid, field)
-const psUnix = (pid: number, field: string) => { const r = Bun.spawnSync(['ps', '-o', `${field}=`, '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' }); return r.exitCode === 0 ? r.stdout.toString().trim() : '' }
+const psUnix = (pid: number, field: string) => { try { const r = Bun.spawnSync(['ps', '-o', `${field}=`, '-p', String(pid)], { stdout: 'pipe', stderr: 'pipe', timeout: EXT_TIMEOUT_MS, killSignal: 'SIGKILL' }); return r.exitCode === 0 ? r.stdout!.toString().trim() : '' } catch { return '' } }
 const tabSeen = new Map<number, { host: number; hostStart: string; at: number }>()
 /** 這位是不是 Claude app 的分頁（entrypoint＝sdk-cli；Remote Control 接起來的對話也是）：是就回它的程序、父程序與父程序的啟動時間 */
 export function appTabOf(id: string, now = Date.now()): { pid: number; host: number; hostStart: string } | undefined {

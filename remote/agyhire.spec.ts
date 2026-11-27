@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { _setOpenRoleRun, agyByLaunch, agyInstalled, agyModeArgs, codexInstalled, hireWindows, initHr, LAUNCH_PREFIX, summonRole, type Person } from './hr'
+import { _setOpenRoleRun, sharedPid, agyByLaunch, agyInstalled, agyModeArgs, codexInstalled, hireWindows, initHr, LAUNCH_PREFIX, summonRole, type Person } from './hr'
 import { resolveAgyPins } from './server'
 import { parseStore } from '../hooks/officeV2'
 
@@ -96,6 +96,13 @@ test.skipIf(!(process.platform === 'win32' && codexInstalled()))('招聘 Codex�
   expect(s.ok).toBe(true)
   expect(arg(calls[calls.length - 1], '--agent')).toBe('codex')
   expect(calls[calls.length - 1]).toContain('--agent-arg=--approve-for-me')
+})
+
+test('sharedPid：Windows 不叫 ps（PowerShell 開的伺服器沒有 ps，0.64.8 曾讓 /state.json 回 500）', () => {
+  const path = process.env.PATH
+  process.env.PATH = ''
+  try { expect(() => sharedPid(process.pid)).not.toThrow() } finally { process.env.PATH = path }
+  if (process.platform === 'win32') expect(sharedPid(process.pid)).toBeUndefined()
 })
 
 test('agyByLaunch 也找 Codex（cxw-）；LAUNCH_PREFIX 只認 agp-／cxw- 加 8 碼', () => {
