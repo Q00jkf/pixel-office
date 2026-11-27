@@ -74,7 +74,7 @@ header { flex-wrap: wrap; gap: 4px 8px; }
 #hrroom .hr-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 44px; border: 1.5px solid #d8c3a2; border-radius: 12px; background: #f6ecdd; }
 #hrroom .hr-search input { flex: 1; border: 0; background: none; font: 16px system-ui, "Noto Sans TC", sans-serif; color: #3b2412; outline: none; min-width: 0; }
 #hrroom .hr-quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-#hrroom .hr-quick button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 48px; border: 2px solid #5f9a90; border-radius: 12px; background: #f9f3e7; box-shadow: inset 0 -3px 0 #e8dcc6; color: #3b2412; font: 800 15px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
+#hrroom .hr-quick button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 48px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_btn_secondary.png) 12 fill / 6px; background: none; color: #3b2412; font: 800 15px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
 /* 入口圖示：從定稿概念圖剪下來的（協作桌、月曆、帳單金幣） */
 #hrroom .hr-quick img.hr-ic { width: auto; height: 32px; display: inline-block; image-rendering: auto; }
 #hrroom .hr-quick img { width: 26px; height: 22px; object-fit: contain; }
@@ -679,12 +679,12 @@ html body #chat #chbtns .chip::after { content: ''; position: absolute; inset: -
 #hrroom .hr-l1 .hr-sec h2 { margin: 2px 0 8px; font-size: 18px; }
 #hrroom .hr-more { display: block; width: 100%; padding: 8px 12px; border: 1.5px dashed #d8c3a2; border-radius: 12px; background: #fffaf0; color: #b0561c; font: 700 15px/1.3 system-ui, "Noto Sans TC", sans-serif; text-align: right; cursor: pointer; }
 #hrroom .hr-ents { display: flex; flex-direction: column; gap: 8px; }
-#hrroom .hr-ent { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 12px 6px 10px; border: 2px solid #5f9a90; border-radius: 14px; background: #fff; color: #3b2412; text-align: left; cursor: pointer; }
-#hrroom .hr-ent:active { background: #e9f3f1; }
+#hrroom .hr-ent { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 2px 8px 2px 6px; border: 6px solid transparent; border-radius: 0; border-image: url(/v2/assets/ui_card.png) 12 fill / 6px; background: none; color: #3b2412; text-align: left; cursor: pointer; }
+#hrroom .hr-ent:active { translate: 0 1px; filter: brightness(.95); } /* 0.64.4 木頭風：跟其他清單列同一套邊框 */
 #hrroom .hr-ent .hr-ei, #hrroom .hr-ent img.hr-ic { flex: none; width: 36px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 24px; line-height: 1; object-fit: contain; background: none; image-rendering: auto; }
 #hrroom .hr-ent .hr-ei .ico { width: 28px; height: 28px; margin: 0; } /* 素材表的像素圖示（開專案＝筆記本），不用 emoji（測試 #6） */
 #hrroom .hr-ent .hr-txt b { font-size: 17px; }
-#hrroom .hr-ent .hr-txt small { color: #386d66; }
+#hrroom .hr-ent .hr-txt small { color: #7a5a3a; }
 #hrroom .hr-l2bar { position: sticky; top: -14px; z-index: 2; display: flex; align-items: center; gap: 10px; margin: -14px -14px 10px; padding: 10px 14px; background: #fbf4e8; border-bottom: 1px solid #e3d3b8; }
 #hrroom .hr-l2back { flex: none; height: 36px; padding: 0 12px; border: 1.5px solid #d8c3a2; border-radius: 10px; background: #fff; color: #3b2412; font: 600 15px/1 system-ui, "Noto Sans TC", sans-serif; cursor: pointer; }
 #hrroom .hr-l2title { flex: 1; min-width: 0; margin: 0; font: 800 19px/1.3 system-ui, "Noto Sans TC", sans-serif; color: #3b2412; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -771,3 +771,4 @@ main { padding-bottom: calc(50px + env(safe-area-inset-bottom)); }
 #relroom .rdot.work, #relroom .rdot.done { background-image: url(/v2/assets/ui_dot_green.png); }
 #relroom .rdot.wait, #relroom .rdot.err { background-image: url(/v2/assets/ui_dot_yellow.png); }
 @media (prefers-reduced-motion: reduce) { #relroom .rnode:active { translate: none; } }
+#hrroom .hr-quick button:active { border-image-source: url(/v2/assets/ui_btn_secondary_down.png); }
