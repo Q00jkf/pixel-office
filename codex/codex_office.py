@@ -763,6 +763,22 @@ def caller(params: dict) -> str:
     return sid
 
 
+def resolve_team(team: str, crew: list) -> str:
+    """主管只能掛現在在線的主管（0.64.10，jacky 11-28「只能用當前存在的主管」）：ListAgents 名稱、名牌、名字完全相同 → 回他的 ListAgents 名稱；
+    都不同但只有一位在線主管的 ListAgents 名稱或名字包含它（「GUANGUAN」→「接手GUANGUAN主管位置」）→ 也認他；對不到 → ValueError（不存）"""
+    t = re.sub(r"\s*\[[0-9a-f]+\]$", "", team.strip(), flags=re.I)
+    bosses = [c for c in crew if c.get("role") == "manager" and c.get("agent")]
+    for c in bosses:
+        if t in (c.get("agent"), c.get("name"), c.get("plate")):
+            return c["agent"]
+    part = [c for c in bosses if t and (t in str(c.get("agent")) or t in str(c.get("name") or ""))]
+    if len(part) == 1:
+        return part[0]["agent"]
+    names = ", ".join(sorted({c["agent"] for c in bosses})) or "none"
+    raise ValueError(f"No online manager is named {t}; team was not changed. Online managers (ListAgents names): {names}. "
+                     "Use one of them exactly (a manager must be online to join their team)")
+
+
 def tool_profile(sid: str, a: dict) -> str:
     p = status_file(sid)
     name, title, team = a.get("name"), a.get("title"), a.get("team")
@@ -774,6 +790,8 @@ def tool_profile(sid: str, a: dict) -> str:
             raise ValueError(f"Nameplate {name} is taken, pick another")
     if team is not None:
         team = str(team).strip()
+        if team.lower() not in ("", "off"):  # 在鎖外先比對：對不到就報錯、什麼都不存
+            team = resolve_team(team, [c for c in live_crew() if c.get("id") != f"codex-{sid}"])
     done = {}
 
     def fn(s):  # 在鎖裡重讀最新的狀態檔再改（第三輪複驗 ②）

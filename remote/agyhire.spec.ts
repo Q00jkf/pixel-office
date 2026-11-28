@@ -105,18 +105,27 @@ test('sharedPid：Windows 不叫 ps（PowerShell 開的伺服器沒有 ps，0.64
   if (process.platform === 'win32') expect(sharedPid(process.pid)).toBeUndefined()
 })
 
-test('resolve_team（agy 的 office_profile）：全名、名牌照認；部分名字只對到一位才認；對不到原樣存＋列在線主管', () => {
-  const crew = [{ role: 'manager', agent: '接手GUANGUAN主管位置', name: '接手GUANGUAN' }, { role: 'manager', agent: 'willy主管', name: 'willy主管' }, { role: 'manager', agent: 'willy設計', name: 'willy設計' }, { role: 'staff', agent: 'GUANGUANx' }]
-  const py = (team: string) => JSON.parse(Bun.spawnSync(['python', '-I', '-B', '-c',
-    `import sys,json,runpy;sys.stdout.reconfigure(encoding='utf-8');m=runpy.run_path(sys.argv[1]);print(json.dumps(m['resolve_team'](sys.argv[2],json.loads(sys.argv[3])),ensure_ascii=False))`,
-    join(import.meta.dir, '..', 'agy', 'agy_office.py'), team, JSON.stringify(crew)]).stdout.toString())
-  expect(py('接手GUANGUAN主管位置')).toEqual(['接手GUANGUAN主管位置', ''])
-  expect(py('接手GUANGUAN [5162ca]')).toEqual(['接手GUANGUAN主管位置', ''])
-  expect(py('GUANGUAN')[0]).toBe('接手GUANGUAN主管位置')
-  expect(py('willy')[0]).toBe('willy') // 對到兩位以上不猜
-  expect(py('willy')[1]).toContain('willy主管')
-  expect(py('nobody')[1]).toContain('no online manager')
-})
+for (const plugin of ['agy/agy_office.py', 'codex/codex_office.py']) {
+  test(`resolve_team（${plugin}）：只能掛在線主管；全名、名牌照認，部分名字只對到一位才認，其他報錯`, () => {
+    const crew = [{ role: 'manager', agent: '接手GUANGUAN主管位置', name: '接手GUANGUAN' }, { role: 'manager', agent: 'willy主管', name: 'willy主管' }, { role: 'manager', agent: 'willy設計', name: 'willy設計' }, { role: 'staff', agent: 'GUANGUANx' }]
+    const code = [
+      'import sys, json, runpy',
+      "sys.stdout.reconfigure(encoding='utf-8')",
+      'm = runpy.run_path(sys.argv[1])',
+      'try:',
+      "    print(json.dumps({'team': m['resolve_team'](sys.argv[2], json.loads(sys.argv[3]))}, ensure_ascii=False))",
+      'except ValueError as e:',
+      "    print(json.dumps({'error': str(e)}, ensure_ascii=False))",
+    ].join('\n')
+    const py = (team: string) => JSON.parse(Bun.spawnSync(['python', '-I', '-B', '-c', code, join(import.meta.dir, '..', plugin), team, JSON.stringify(crew)]).stdout.toString())
+    expect(py('接手GUANGUAN主管位置')).toEqual({ team: '接手GUANGUAN主管位置' })
+    expect(py('接手GUANGUAN [5162ca]')).toEqual({ team: '接手GUANGUAN主管位置' })
+    expect(py('GUANGUAN')).toEqual({ team: '接手GUANGUAN主管位置' })
+    expect(py('willy').error).toContain('willy主管, willy設計') // 對到兩位以上不猜
+    expect(py('GUANGUANx').error).toContain('No online manager') // 員工不算主管
+    expect(py('nobody').error).toContain('team was not changed')
+  })
+}
 
 test('agyByLaunch 也找 Codex（cxw-）；LAUNCH_PREFIX 只認 agp-／cxw- 加 8 碼', () => {
   writeFileSync(join(sess, 'codex-t1.json'), JSON.stringify({ id: 'codex-t1', kind: 'codex', launch: 'cxw-eeeeeeee' }))

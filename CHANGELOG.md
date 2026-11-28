@@ -7,17 +7,18 @@
 
 ---
 
-## 0.64.10 — 2026-11-28 — agy 設主管對到在線主管；關係圖也認名牌
+## 0.64.10 — 2026-11-28 — 設主管只能掛在線主管（Claude、Codex、agy）；關係圖也認名牌
 
 - **改了什麼**：
-  - `agy/agy_office.py`：新增 `resolve_team`，`office_profile` 的 team 對到在線主管（ListAgents 名稱、名牌、名字；只有一位主管包含這段名字時也認），存成他的 ListAgents 名稱；對不到照存，回覆列出在線主管請它改。
+  - 三邊的 `office_profile` 設 team 時先比對在線主管：ListAgents 名稱、名牌、名字完全相同 → 存成他的 ListAgents 名稱；只有一位在線主管的 ListAgents 名稱或名字包含它（「GUANGUAN」→「接手GUANGUAN主管位置」）→ 也認他；其他（打錯、不在線、員工、對到好幾位）一律報錯、不存，回覆列出在線主管。Claude：`hooks/register.tsx` 的 `resolveTeam`；agy、Codex：`agy/agy_office.py`、`codex/codex_office.py` 的 `resolve_team`。
+  - 只檢查 AI 自己呼叫的 `office_profile` 工具。系統寫的不檢查：招聘、叫角色事先登記（`PO_PRESET`、`open_role.py --team`）、手機人事令、主管改名後跟著改；使用者自己打的 `/office team` 也照寫。
   - `remote/v2/scene.js` 的 `relTree`：team 寫主管的名牌或名字也認（跟排座位的 `teamsOf` 一致）。
-  - 測試：`remote/agyhire.spec.ts`「resolve_team」、`remote/reltree.spec.ts`「0.64.10」。
-- **為什麼**：jacky 11-28「我有開一個AGY 我開在GUANGUAN 下面 但是關係圖卻是在無主管那邊」。手機招聘時 team 登記的是「接手GUANGUAN主管位置」，agy（GG）進來後自己呼叫 office_profile 改成「GUANGUAN」，對不到任何在線主管：座位是招聘時釘的，照樣坐那桌，關係圖照 team 找主管，放到「沒掛主管」。
-- **代價**：部分名字對到一位就自動認，萬一使用者真的要掛一位還沒上線、名字剛好是在線主管名字一部分的人，會掛錯（回覆會說「matched online manager …」）。Claude 的 office_profile 沒改（Claude 照 ListAgents 名稱填，沒這個問題）。
+  - 測試：`hooks/office.test.tsx`「0.64.10」、`remote/agyhire.spec.ts`「resolve_team」（agy、Codex 各跑一次）、`remote/reltree.spec.ts`「0.64.10」。
+- **為什麼**：jacky 11-28「我有開一個AGY 我開在GUANGUAN 下面 但是關係圖卻是在無主管那邊」。手機招聘時 team 登記的是「接手GUANGUAN主管位置」，agy（GG）進來後自己呼叫 office_profile 改成「GUANGUAN」，對不到任何在線主管：座位是招聘時釘的，照樣坐那桌，關係圖照 team 找主管，放到「沒掛主管」。三邊的 office_profile 原本都不檢查名字。jacky 裁示「只能用當前存在的主管」：主管暫時不在線也不能掛。
+- **代價**：主管暫時關視窗時，底下的人（含部門主管）不能用 office_profile 掛過去，要等主管上線；原本「先掛著、等主管回來」的用法沒了（排座位、信箱那邊的處理照舊，只是 office_profile 不再寫入這種 team）。部分名字對到一位就自動認，回覆的 team 會是完整的 ListAgents 名稱。
 - **commit**：見本版 commit
 - **issue**：無
-- **升級要做的**：重開辦公室伺服器（8767）。開著的 agy 視窗重開後才用新的 office_profile。
+- **升級要做的**：重開辦公室伺服器（8767）。開著的 Claude 視窗 `/reload-plugins` 或重開、agy／Codex 視窗重開後才會檢查。
 
 ## 0.64.9 — 2026-11-28 — 手機清單頭像跟座位上的人同一張臉（共用一支 faceOf）
 

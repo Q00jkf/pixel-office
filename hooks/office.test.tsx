@@ -3563,6 +3563,21 @@ test('art A #14 review: a manager whose name is a command still keeps his team a
 })
 
 import { baseName, claimTables, moveSeat, parseStore, pinSeat, retarget, teamsOf } from './officeV2'
+import { resolveTeam } from './register'
+
+test('0.64.10: office_profile team must be an online manager: exact ListAgents name or name; a unique partial match is accepted; otherwise refused', () => {
+  const crew = [
+    { id: 'g', name: '接手GUANGUAN', agent: '接手GUANGUAN主管位置', role: 'manager' },
+    { id: 'w', name: 'willy主管', agent: 'willy主管', role: 'manager' },
+    { id: 'd', name: 'willy設計', agent: 'willy設計', role: 'manager' },
+    { id: 's', name: 'GUANGUANx', agent: 'GUANGUANx', role: 'staff' },
+  ] as any
+  expect(resolveTeam('接手GUANGUAN主管位置', crew)).toEqual({ team: '接手GUANGUAN主管位置' })
+  expect(resolveTeam('接手GUANGUAN', crew)).toEqual({ team: '接手GUANGUAN主管位置' })
+  expect(resolveTeam('GUANGUAN', crew)).toEqual({ team: '接手GUANGUAN主管位置' })
+  expect((resolveTeam('willy', crew) as any).error).toContain('willy主管, willy設計')
+  expect((resolveTeam('GUANGUANx', crew) as any).error).toContain('No online manager')
+})
 const v2table = (id: number, team: string | undefined, extra: Record<string, unknown> = {}) => ({ id, name: `桌${id}`, size: 4, ...(team ? { team } : {}), ...extra }) as any
 
 test('0.64.7: a department lead (manager with own members, team=upper manager) sits at the head of its own table, not at the upper manager table', () => {

@@ -1507,16 +1507,35 @@ export function validName(name: string): boolean {
 }
 
 // 角色與名牌：/office 指令和模型工具共用；依 session 編號記在 $.store
+/**
+ * 主管只能掛現在在線的主管（0.64.10，jacky 11-28「只能用當前存在的主管」；agy／Codex 的 resolve_team 同一套）：
+ * ListAgents 名稱、名字完全相同 → 他的 ListAgents 名稱；都不同但只有一位在線主管的 ListAgents 名稱或名字包含它 → 也認他；對不到回 error（不存）
+ */
+export function resolveTeam(t: string, crew: Coworker[]): { team: string } | { error: string } {
+  const bosses = crew.filter(c => c.role === 'manager' && c.agent)
+  const hit = bosses.find(c => t === c.agent || t === c.name)
+  if (hit) return { team: hit.agent! }
+  const part = bosses.filter(c => t && (c.agent!.includes(t) || c.name.includes(t)))
+  if (part.length === 1) return { team: part[0].agent! }
+  const names = [...new Set(bosses.map(c => c.agent!))].sort().join(', ') || 'none'
+  return { error: `No online manager is named ${t}; team was not changed. Online managers (ListAgents names): ${names}. Use one of them exactly (a manager must be online to join their team).` }
+}
+
 async function applyProfile(
   $: EngineInterface,
   input: { role?: string; name?: string; agent?: string; ref?: string; title?: string; auto?: boolean; team?: string },
+  checkTeam = false, // 只有模型自己呼叫 office_profile 工具時檢查；事先登記、跟著改名、手機人事令、使用者打的 /office team 照寫
 ): Promise<string> {
   const notes: string[] = []
   let team = me.team
   if (input.team !== undefined) {
     const t = input.team.trim().replace(/\s*\[[0-9a-f]+\]$/i, '')
     if (t.length > 64) return `team "${input.team}" is too long: use the manager's ListAgents name.`
-    team = t.length > 0 && t !== 'off' ? t : undefined
+    if (t.length > 0 && t !== 'off' && checkTeam) {
+      const r = resolveTeam(t, everyone().filter(c => c.id !== me.id))
+      if ('error' in r) return r.error
+      team = r.team
+    } else team = t.length > 0 && t !== 'off' ? t : undefined
     notes.push(team ? `team=${team} (${(input.role !== undefined ? parseRole(input.role) : me.role) === 'manager' ? 'department lead, sits in its own area' : 'sits in the team area'})` : 'team cleared')
   }
   let auto = me.auto
@@ -2253,7 +2272,7 @@ export const register: Register = on => {
           agent: { type: 'string', description: 'Your ListAgents name (X in "This session is X"); the full string with [ref] is fine' },
           ref: { type: 'string', description: 'Code after your ListAgents name (e.g. 180a9b); tells same-named sessions apart' },
           title: { type: 'string', description: 'Your current job, max 16 chars, Chinese OK' },
-          team: { type: 'string', description: "Your manager's ListAgents name (a manager who sets it becomes a department lead); off to leave" },
+          team: { type: 'string', description: "An online manager's ListAgents name (offline or unknown names are refused; a manager who sets it becomes a department lead); off to leave" },
           auto: { type: 'boolean', description: 'true if your system prompt says auto mode is active' },
         },
       },
@@ -2626,7 +2645,7 @@ export const register: Register = on => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as { role?: string; name?: string; agent?: string; title?: string; auto?: unknown; team?: string }
     const auto = input.auto === true || input.auto === 'true' ? true : input.auto === false || input.auto === 'false' ? false : undefined
-    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, ref: input.ref, title: input.title, auto, team: input.team })
+    const text = await applyProfile($, { role: input.role, name: input.name, agent: input.agent, ref: input.ref, title: input.title, auto, team: input.team }, true)
 
     // 自訂工具的 result 只能是字串或內容區塊陣列，不能是物件（實測：物件會被引擎判為格式錯誤）
     return { result: `${text} (now: ${ROLE_LABEL[me.role]}, nameplate ${me.name}, session ${me.id.slice(0, 8)})` }
