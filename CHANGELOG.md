@@ -7,6 +7,15 @@
 
 ---
 
+## 0.64.9 — 2026-11-28 — 手機清單頭像跟座位上的人同一張臉（共用一支 faceOf）
+
+- **改了什麼**：`remote/v2/scene.js` 的 `faceOf`：清單頭像（關係圖、人事室、桌子成員、開會名單、等你回覆）照實際用的 AI（`species`；Codex 是 ChatGPT），跟辦公室座位上畫的一樣；拿掉照 id 輪四張臉。座位上、走動的全身圖、清單頭像改成都走 `faceOf`（桌上 AI 商標照舊照 AI 種類）：jacky「之後可能會出其他種的同AI換皮腳色」，換皮只改 `faceOf` 一處，兩邊不會再不一樣。
+- **為什麼**：jacky 11-28「為什麼關係圖上面頭貼與實際不同呢」→「改成跟座位相同的頭貼」。0.63.60（美術 A #15）讓 Claude 員工在清單上照 id 輪 Claude／ChatGPT／Gemini／DeepSeek 四張臉，好分辨誰是誰；但臉同時代表用哪個 AI，現在 Windows 能招 agy、Codex 了，Claude 員工頂著 Gemini／ChatGPT 的臉會被當成別的 AI。
+- **代價**：清單上的 Claude 員工又都是同一張 Claude 臉，分辨人要看名牌（推翻美術 A #15）。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：重開辦公室伺服器（8767），手機頁重新整理。
+
 ## 0.64.8 — 2026-11-27 — 修：Windows 有 Codex 在線時手機頁斷線
 
 - **改了什麼**：`remote/hr.ts` 的 `sharedPid` 在 Windows 不叫 `ps`，照 Codex 狀態檔的 `shared`；`sharedPid`、`psUnix` 叫不起來 `ps` 時不丟例外。測試 `remote/agyhire.spec.ts`「sharedPid」。

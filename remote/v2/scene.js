@@ -34,15 +34,12 @@
   const SCREEN = { idle: '#6fb7e0', typing: '#8fe4ff', thinking: '#a9b6ff', reading: '#b5e8c8', waiting: '#ffb35c', blocked: '#ff7a7a', done: '#9be59b' }
   const ICON = { waiting: 'hand', thinking: 'think', reading: 'book', done: 'done', blocked: 'error' }
   const SIZES = [2, 4, 6, 8]
-  // 清單頭像（美術 A #15）：真資料裡 Claude 員工的 species 都是 claude，人事室一排同一張臉分不出誰；
-  // 外型沒特別指定（claude）的照 id 雜湊輪四種角色，Codex 固定 ChatGPT、其他指定的照指定。只換清單頭像，場景裡的人物不變
-  const FACES = ['claude', 'chatgpt', 'gemini', 'deepseek']
+  // 這個人長什麼樣：座位上、走動的全身圖、清單頭像（關係圖、人事室、桌子成員、開會名單）全部只用這一支（0.64.9，jacky 11-28「改成跟座位相同的頭貼」）。
+  // 以後同一種 AI 出換皮角色，只改這裡，兩邊自動一致。桌上的 AI 商標（logo_）照 AI 種類，不走這支。
+  // 0.63.60（美術 A #15）曾讓清單上的 Claude 員工照 id 輪四張臉，跟座位上的不一樣，還會被當成 agy／Codex
   function faceOf(p) {
     if (p.kind === 'codex') return 'chatgpt'
-    const sp = p.species || 'claude'
-    if (sp !== 'claude' || !p.id) return sp
-    let h = 0; for (const c of String(p.id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
-    return FACES[h % FACES.length]
+    return p.species || 'claude'
   }
 
   // ---------- 載入圖片 ----------
@@ -656,7 +653,7 @@
   function movers(now, layer, far) {
     const out = []
     for (const tr of trips.values()) {
-      const p = st && st.people.find(x => x.id === tr.id); if (!p || !hasFull(p.species || 'claude')) continue
+      const p = st && st.people.find(x => x.id === tr.id); if (!p || !hasFull(faceOf(p))) continue
       const q = motion.pose(tr, now)
       if (q.pose === 'sit' && !q.phase) continue
       if (motion.layerOf(q) !== layer || (layer === 'seat' && q.far !== far)) continue
@@ -666,7 +663,7 @@
   }
   const walking = id => { const tr = trips.get(id); if (!tr) return false; const q = motion.pose(tr, Date.now()); return q.pose !== 'sit' || !!q.phase }
   function drawSeated(key, p, s, bob) {
-    const sp = p.species || 'claude'
+    const sp = faceOf(p)
     if (!hasFull(sp)) return drawChar(p, s, bob)
     if (walking(p.id)) return
     const an = motion.anchors(key), a = an.sit, nu = newSit(sp, a.facing)
@@ -681,7 +678,7 @@
     if (clip) g.restore()
   }
   function drawChar(p, s, bob) {
-    const name = `${p.species || 'claude'}_${s.far ? 'front' : 'back'}`, im = img[name] || img[`claude_${s.far ? 'front' : 'back'}`]
+    const name = `${faceOf(p)}_${s.far ? 'front' : 'back'}`, im = img[name] || img[`claude_${s.far ? 'front' : 'back'}`]
     if (!im) return
     const w = CHAR_W, h = w * ar(name), b = bumpOf(p.id)
     const y = (s.far ? s.bottom - h : s.top) + bob + b.dy
@@ -727,7 +724,7 @@
       }
     } else if (img.boss_chair) for (const [k, p] of seats) { const s = geo.get(k); if (s && s.far && s.boss && p.role === 'manager' && !walking(p.id)) g.drawImage(img.boss_chair, s.boss.x, s.boss.y, s.boss.w, s.boss.h) }
     for (const [k, p] of seats) { const s = geo.get(k); if (s && s.far) drawSeated(k, p, s, bob(p)) }
-    for (const m of movers(now, 'seat', true)) drawFull(m.p.species || 'claude', m.q, tick)
+    for (const m of movers(now, 'seat', true)) drawFull(faceOf(m.p), m.q, tick)
     g.setTransform(1, 0, 0, 1, 0, 0)
     g.drawImage(layers.front, 0, 0)
     g.setTransform(K, 0, 0, K, 0, 0)
@@ -742,9 +739,9 @@
     }
     for (const [k, p] of seats) { const s = geo.get(k); if (s && !s.far) drawSeated(k, p, s, bob(p)) }
     for (const m of movers(now, 'seat', false)) {
-      const s = m.q.pose === 'sit' && m.q.seat && !newSit(m.p.species || 'claude', m.q.facing) ? seatXY(m.q.seat) : null
+      const s = m.q.pose === 'sit' && m.q.seat && !newSit(faceOf(m.p), m.q.facing) ? seatXY(m.q.seat) : null
       if (s && s.clipY != null) { g.save(); g.beginPath(); g.rect(0, 0, L.w, s.clipY + motion.chairOut(m.q.seat, now)); g.clip() }
-      drawFull(m.p.species || 'claude', m.q, tick)
+      drawFull(faceOf(m.p), m.q, tick)
       if (s && s.clipY != null) g.restore()
     }
     g.setTransform(1, 0, 0, 1, 0, 0)
@@ -773,12 +770,12 @@
         }
       }
     }
-    for (const m of movers(now, 'top', null)) drawFull(m.p.species || 'claude', m.q, tick)
+    for (const m of movers(now, 'top', null)) drawFull(faceOf(m.p), m.q, tick)
     for (const [k, p] of seats) {
       const ic = ICON[p.mode]; if (!ic || !img['icon_' + ic]) continue
       const s = geo.get(k); if (!s) continue
       const sz = p.mode === 'waiting' ? 10 : 7.5, lift = p.mode === 'waiting' && slow % 2 ? 0.8 : 0
-      const tr = trips.get(p.id), q = tr && hasFull(p.species || 'claude') ? motion.pose(tr, now) : null
+      const tr = trips.get(p.id), q = tr && hasFull(faceOf(p)) ? motion.pose(tr, now) : null
       if (q && (q.pose !== 'sit' || q.phase)) { g.drawImage(img['icon_' + ic], q.x + 5, q.y - (q.pose === 'sit' ? SIT_H : STAND_H) - lift, sz, sz); continue }
       g.drawImage(img['icon_' + ic], s.cx + 5, (s.far ? s.top : s.top - 4) - lift, sz, sz)
     }
@@ -807,7 +804,7 @@
   function followTags(now) {
     const live = new Set()
     for (const tr of trips.values()) {
-      const p = st && st.people.find(x => x.id === tr.id); if (!p || !hasFull(p.species || 'claude')) continue
+      const p = st && st.people.find(x => x.id === tr.id); if (!p || !hasFull(faceOf(p))) continue
       const q = motion.pose(tr, now); if (q.pose === 'sit' && !q.phase) continue
       live.add(p.id)
       let w = walkTags.get(p.id)
@@ -1448,7 +1445,7 @@
   if (DEBUG) setInterval(() => { if (st && layers) draw() }, 120)
   // 走路、紙飛機每 100ms；點人物跳一下那 0.3 秒每 50ms
   let half = 0
-  if (!DEBUG) setInterval(() => { if (document.hidden || !st || !layers) return; half ^= 1; if (bumps.size || (half && (mailBusy() || [...trips.values()].some(t => { const p = st.people.find(x => x.id === t.id); return p && hasFull(p.species || 'claude') })))) draw() }, 50)
+  if (!DEBUG) setInterval(() => { if (document.hidden || !st || !layers) return; half ^= 1; if (bumps.size || (half && (mailBusy() || [...trips.values()].some(t => { const p = st.people.find(x => x.id === t.id); return p && hasFull(faceOf(p)) })))) draw() }, 50)
   addEventListener('resize', () => { ovKey = ''; render() })
 
   // ---------- 協作桌：清單（人事室、協作區標示）與單張桌子的選單 ----------
