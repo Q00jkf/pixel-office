@@ -7,6 +7,18 @@
 
 ---
 
+## 0.64.10 — 2026-11-28 — agy 設主管對到在線主管；關係圖也認名牌
+
+- **改了什麼**：
+  - `agy/agy_office.py`：新增 `resolve_team`，`office_profile` 的 team 對到在線主管（ListAgents 名稱、名牌、名字；只有一位主管包含這段名字時也認），存成他的 ListAgents 名稱；對不到照存，回覆列出在線主管請它改。
+  - `remote/v2/scene.js` 的 `relTree`：team 寫主管的名牌或名字也認（跟排座位的 `teamsOf` 一致）。
+  - 測試：`remote/agyhire.spec.ts`「resolve_team」、`remote/reltree.spec.ts`「0.64.10」。
+- **為什麼**：jacky 11-28「我有開一個AGY 我開在GUANGUAN 下面 但是關係圖卻是在無主管那邊」。手機招聘時 team 登記的是「接手GUANGUAN主管位置」，agy（GG）進來後自己呼叫 office_profile 改成「GUANGUAN」，對不到任何在線主管：座位是招聘時釘的，照樣坐那桌，關係圖照 team 找主管，放到「沒掛主管」。
+- **代價**：部分名字對到一位就自動認，萬一使用者真的要掛一位還沒上線、名字剛好是在線主管名字一部分的人，會掛錯（回覆會說「matched online manager …」）。Claude 的 office_profile 沒改（Claude 照 ListAgents 名稱填，沒這個問題）。
+- **commit**：見本版 commit
+- **issue**：無
+- **升級要做的**：重開辦公室伺服器（8767）。開著的 agy 視窗重開後才用新的 office_profile。
+
 ## 0.64.9 — 2026-11-28 — 手機清單頭像跟座位上的人同一張臉（共用一支 faceOf）
 
 - **改了什麼**：`remote/v2/scene.js` 的 `faceOf`：清單頭像（關係圖、人事室、桌子成員、開會名單、等你回覆）照實際用的 AI（`species`；Codex 是 ChatGPT），跟辦公室座位上畫的一樣；拿掉照 id 輪四張臉。座位上、走動的全身圖、清單頭像改成都走 `faceOf`（桌上 AI 商標照舊照 AI 種類）：jacky「之後可能會出其他種的同AI換皮腳色」，換皮只改 `faceOf` 一處，兩邊不會再不一樣。

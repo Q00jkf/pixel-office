@@ -443,7 +443,7 @@ TOOLS = [
     {"name": "office_profile",
      "description": "Set your nameplate, job title and/or manager in the pixel office (shown to every Claude/agy session). "
                     "name: 1-12 ASCII letters/digits. title: what you are working on, max 16 chars, Chinese OK. "
-                    "team: your manager's name from office_roster (you sit in its team); off to leave.",
+                    "team: your manager's ListAgents name from office_roster (you sit in its team); off to leave.",
      "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}, "team": {"type": "string"}}}},
     TAKEOVER_TOOL,
     {"name": "office_roster",
@@ -454,6 +454,22 @@ TOOLS = [
                     "After sending, this turn waits up to 90 s for a reply at its end.",
      "inputSchema": {"type": "object", "properties": {"to": {"type": "string"}, "text": {"type": "string"}}, "required": ["to", "text"]}},
 ]
+
+
+def resolve_team(team: str, crew: list) -> tuple:
+    """主管名字對到在線主管（0.64.10）：ListAgents 名稱、名牌、名字完全相同 → 回他的 ListAgents 名稱；
+    都不同但只有一位主管的 ListAgents 名稱或名牌包含它（「GUANGUAN」→「接手GUANGUAN主管位置」）→ 也認他；
+    對不到 → 原樣存，另回在線主管名單（主管暫時離線時照樣能掛）。回 (要存的 team, 給模型看的附註)"""
+    t = re.sub(r"\s*\[[0-9a-f]+\]$", "", team.strip(), flags=re.I)
+    bosses = [c for c in crew if c.get("role") == "manager" and c.get("agent")]
+    for c in bosses:
+        if t in (c.get("agent"), c.get("name"), c.get("plate")):
+            return c["agent"], ""
+    part = [c for c in bosses if t and (t in str(c.get("agent")) or t in str(c.get("name") or ""))]
+    if len(part) == 1:
+        return part[0]["agent"], f" (matched online manager {part[0]['agent']})"
+    names = ", ".join(sorted({c["agent"] for c in bosses})) or "none"
+    return t, f". Warning: no online manager is named {t}; online managers (ListAgents names): {names}. If you meant one of them, call office_profile again with that exact name"
 
 
 def tool_profile(cid: str, a: dict) -> str:
@@ -471,15 +487,16 @@ def tool_profile(cid: str, a: dict) -> str:
         s["name"] = name
     if title is not None:
         s.update(title=str(title).strip()[:16], titleAuto=False, titleAt=now_ms())
-    team = a.get("team")
+    team, warn = a.get("team"), ""
     if team is not None:  # 掛到主管底下（Claude 的 office_profile 同一欄）；off 或空字串拿掉
         team = str(team).strip()
         if team.lower() in ("", "off"):
             s.pop("team", None)
         else:
+            team, warn = resolve_team(team, [c for c in live_crew() if c.get("id") != s["id"]])
             s["team"] = team[:64]
     save(p, s)
-    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}, team {s.get('team') or '—'}"
+    return f"Registered: nameplate {s.get('name')}, title {s.get('title')}, team {s.get('team') or '—'}{warn}"
 
 
 def tool_takeover(cid: str, a: dict) -> str:

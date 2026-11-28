@@ -9,6 +9,15 @@ const relTree: (people: any[]) => { roots: any[]; kids: Map<string, any[]> } = n
 const P = (id: string, o: object = {}) => ({ id, plate: id, ...o })
 const ids = (l: any[]) => l.map(p => p.id)
 
+test('team 寫主管的名牌或名字也認（0.64.10）', () => {
+  const { roots, kids } = relTree([
+    { id: 'b', plate: '接手GUANGUAN', name: '接手GUANGUAN', agent: '接手GUANGUAN主管位置', role: 'manager' },
+    { id: 's', plate: 'GG', agent: 'GG', team: '接手GUANGUAN', role: 'staff' },
+  ])
+  expect(roots.map(p => p.id)).toEqual(['b'])
+  expect(kids.get('b').map(p => p.id)).toEqual(['s'])
+})
+
 test('主管 → 部門主管 → 員工；team 帶 [ref] 也認得；找不到主管的當根', () => {
   const t = relTree([P('w', { role: 'manager', agent: 'willy主管' }), P('d', { role: 'manager', agent: 'office設計 [26d674]', team: 'willy主管' }), P('s', { team: 'office設計' }), P('x', { team: '不在線的人' }), P('y')])
   expect(ids(t.roots)).toEqual(['w', 'x', 'y'])

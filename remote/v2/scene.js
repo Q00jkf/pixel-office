@@ -1367,7 +1367,8 @@
   const tableOfSeat = s => (/^t(\d+)\./.exec(s || '') || [])[1]
   function relTree(people) {
     const boss = new Map()
-    for (const p of people) if (p.role === 'manager' && p.agent) boss.set(bareAgent(p.agent), [...(boss.get(bareAgent(p.agent)) || []), p])
+    // 0.64.10：team 寫名牌或名字也認（跟排座位的 teamsOf 一致），不然坐在主管那桌、關係圖卻在「沒掛主管」
+    for (const p of people) if (p.role === 'manager' && p.agent) for (const k of new Set([bareAgent(p.agent), p.plate, p.name].filter(Boolean))) boss.set(k, [...(boss.get(k) || []), p])
     const up = p => {
       const l = (p.team && boss.get(bareAgent(p.team)) || []).filter(b => b.id !== p.id), t = tableOfSeat(p.seat)
       return (t && l.find(b => tableOfSeat(b.seat) === t)) || l[0]
