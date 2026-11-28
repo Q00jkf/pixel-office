@@ -18,7 +18,7 @@
 - **代價**：主管暫時關視窗時，底下的人（含部門主管）不能用 office_profile 掛過去，要等主管上線；原本「先掛著、等主管回來」的用法沒了（排座位、信箱那邊的處理照舊，只是 office_profile 不再寫入這種 team）。部分名字對到一位就自動認，回覆的 team 會是完整的 ListAgents 名稱。
 - **commit**：見本版 commit
 - **issue**：無
-- **升級要做的**：重開辦公室伺服器（8767）。開著的 Claude 視窗 `/reload-plugins` 或重開、agy／Codex 視窗重開後才會檢查。
+- **升級要做的**：重開辦公室伺服器（8767）。Claude 視窗 `/reload-plugins` 或重開；Codex 視窗重開（Windows 的 codex-win 自動跑新版）；agy 要重裝外掛：關掉所有 agy 視窗，跑 `python <plugin>/agy/agy_office.py install`。
 
 ## 0.64.9 — 2026-11-28 — 手機清單頭像跟座位上的人同一張臉（共用一支 faceOf）
 
